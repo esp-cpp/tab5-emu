@@ -2,7 +2,7 @@ menu "Jedi Knight (OpenJKDF2)"
 
     config JK_ENGINE
         bool "Build the OpenJKDF2 engine"
-        default n
+        default y
         help
             Compile and link the OpenJKDF2 engine (components/jk/OpenJKDF2).
             When disabled the Jedi Knight cart shows an animated test pattern,

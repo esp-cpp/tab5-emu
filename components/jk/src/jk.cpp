@@ -147,6 +147,12 @@ void jk_esp_log(const char *fmt, ...) {
   logger.info("{}", buf);
 }
 
+void jk_esp_print_heap(void) {
+  logger.info("heap: internal free {} (largest {}), psram free {} (largest {})",
+              heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+              heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+}
+
 int jk_esp_internal_width(void) { return g_native_w; }
 int jk_esp_internal_height(void) { return g_native_h; }
 const char *jk_esp_game_dir(void) { return g_config.game_dir.c_str(); }

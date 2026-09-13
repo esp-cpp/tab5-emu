@@ -65,13 +65,21 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
 
 ## Phases
 
-0. **Scaffold** (this repo, done): HAL, launcher, pause menu, carts, CI,
-   PPA video path, test-pattern cart, OpenJKDF2 fork + submodule.
+0. **Scaffold** (done): HAL, launcher, pause menu, carts, CI, PPA video
+   path, test-pattern cart, OpenJKDF2 fork + submodule.
 1. **Engine compiles and links** for riscv32 as an ESP-IDF component
    (`CONFIG_JK_ENGINE=y`): Dreamcast-style flags (all float, single precision,
    `-fno-fast-math -ffp-contract=off`), `TARGET_RETRO_HOMEBREW` +
-   `RDRASTER_SOFTWARE_RENDERER`, platform layer stubs. Milestone: main menu
-   renders (2D path is 100% decompiled and pure software).
+   `RDRASTER_SOFTWARE_RENDERER`, platform layer in
+   `OpenJKDF2/src/Platform/ESP32`. **Done (2026-09-13): links, 2.6 MB app,
+   1.27 MB engine .bss moved to PSRAM (tools/bss_to_psram.py).** Next
+   milestone: main menu renders on hardware (2D path is 100% decompiled and
+   pure software). Open items for that: verify `Main_Startup` finds the
+   game data (paths are made absolute under the game dir in
+   `stdPlatform.c`), stack size of the cart task (engine uses big stack
+   buffers; run it on a task with a PSRAM stack), `std3D_DrawMenu` present
+   rate, `stdSound_ESP32_Pump()` still needs to be called from the frame
+   loop.
 2. **World renders** through `rdZRaster` at 320x240 (or 426x240 16:9);
    profile; move hot rasterizer loops to IRAM; tune PSRAM cache behavior.
    Milestone: first level playable at >= 20 fps with the 20 Hz physics tick.

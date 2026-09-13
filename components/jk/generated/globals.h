@@ -329,7 +329,7 @@ typedef struct embeddedResource_t
 #define std3D_dword_53D66C_ADDR (0x0053D66C)
 #define std3D_dword_53D670_ADDR (0x0053D670)
 #define std3D_dword_53D674_ADDR (0x0053D674)
-#define std3D_frameCount_ADDR (0c0053d678)
+#define std3D_frameCount_ADDR (0x0053d678)
 #define std3D_renderList_ADDR (0x0055C7D0)
 #define std3D_numCachedTextures_ADDR (0x0055C7F4)
 #define std3D_pFirstTexCache_ADDR (0x0055C7F8)

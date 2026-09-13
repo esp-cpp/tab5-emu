@@ -23,20 +23,17 @@ if(CONFIG_JK_ENGINE)
     ${JK_SRC}/Platform/Posix/*.c
     ${JK_SRC}/external/fcaseopen/*.c
     ${JK_SRC}/external/libsmacker/*.c
-    ${JK_SRC}/external/libsmusher/src/*.c
+    ${JK_SRC}/external/libsmusher/src/smush.c
+    ${JK_SRC}/external/libsmusher/src/codec47.c
+    ${JK_SRC}/external/libsmusher/src/codec48.c
   )
   file(GLOB ENGINE_EXCLUDE
     ${JK_SRC}/main.c
     ${JK_SRC}/hook.c
     ${JK_SRC}/Tests/*.c
     ${JK_SRC}/Dw/*.c
-    ${JK_SRC}/Platform/Common/stdUpdater.cpp
-    ${JK_SRC}/Platform/Common/stdHttp.c
-    ${JK_SRC}/Platform/Common/stdControl.c
-    # multiplayer menus (TARGET_NO_MULTIPLAYER_MENUS)
+    # multiplayer menus (TARGET_NO_MULTIPLAYER_MENUS), as upstream
     ${JK_SRC}/Gui/jkGUIMultiplayer.c
-    ${JK_SRC}/Gui/jkGUIMultiTally.c
-    ${JK_SRC}/Gui/jkGUINetHost.c
     ${JK_SRC}/Gui/jkGUIBuildMulti.c
   )
   if(ENGINE_EXCLUDE)
@@ -66,6 +63,9 @@ if(CONFIG_JK_ENGINE)
   target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PLAT_MISSING_WIN32
     PLATFORM_POSIX
+    NO_JK_MMAP
+    LINUX_TMP
+    PLATFORM_NOSOCKETS
     STDSOUND_ESP32
     TARGET_ESP32
     TARGET_RETRO_HOMEBREW
@@ -87,7 +87,8 @@ if(CONFIG_JK_ENGINE)
     OPENJKDF2_RELEASE_COMMIT_U=u"esp32"
     OPENJKDF2_RELEASE_COMMIT_SHORT_U=u"esp32"
   )
-  target_compile_options(${COMPONENT_LIB} PRIVATE
+  # Engine-only flags (the C++ glue in src/ keeps the project defaults)
+  set(ENGINE_COMMON_FLAGS
     -Wno-error
     -Wno-unused-variable
     -Wno-unused-function
@@ -104,14 +105,27 @@ if(CONFIG_JK_ENGINE)
     -fno-fast-math
     -fno-unsafe-math-optimizations
     -ffp-contract=off
+    -msmall-data-limit=0
     -O2
-    $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
-    $<$<COMPILE_LANGUAGE:C>:-Wno-incompatible-pointer-types>
-    $<$<COMPILE_LANGUAGE:C>:-Wno-discarded-qualifiers>
-    $<$<COMPILE_LANGUAGE:C>:-Wno-pointer-sign>
-    $<$<COMPILE_LANGUAGE:C>:-Wno-int-conversion>
-    $<$<COMPILE_LANGUAGE:C>:-Wno-implicit-function-declaration>
-    $<$<COMPILE_LANGUAGE:C>:-Wno-return-type>
-    $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>
   )
+  set(ENGINE_C_SRCS ${ENGINE_SRCS} ${PLATFORM_SRCS} ${CMAKE_CURRENT_LIST_DIR}/generated/globals.c)
+  list(FILTER ENGINE_C_SRCS EXCLUDE REGEX "\\.cpp$")
+  set(ENGINE_CXX_SRCS ${ENGINE_SRCS})
+  list(FILTER ENGINE_CXX_SRCS INCLUDE REGEX "\\.cpp$")
+  set_source_files_properties(${ENGINE_C_SRCS} PROPERTIES COMPILE_OPTIONS
+    "${ENGINE_COMMON_FLAGS};-std=gnu11;-Wno-incompatible-pointer-types;-Wno-discarded-qualifiers;-Wno-pointer-sign;-Wno-int-conversion;-Wno-implicit-function-declaration;-Wno-return-type")
+  if(ENGINE_CXX_SRCS)
+    set_source_files_properties(${ENGINE_CXX_SRCS} PROPERTIES COMPILE_OPTIONS
+      "${ENGINE_COMMON_FLAGS};-std=gnu++17")
+  endif()
+endif()
+
+if(CONFIG_JK_ENGINE)
+  # The engine has ~1.4 MB of static state; move it out of internal SRAM into
+  # PSRAM by renaming the archive's .bss sections (see tools/bss_to_psram.py).
+  add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+    COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/tools/bss_to_psram.py
+            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
+    COMMENT "Moving the engine's .bss to PSRAM"
+    VERBATIM)
 endif()

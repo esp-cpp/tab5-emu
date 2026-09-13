@@ -11,11 +11,11 @@ via [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2) (our fork:
 [esp-cpp/OpenJKDF2](https://github.com/esp-cpp/OpenJKDF2)). See
 [docs/PLAN.md](docs/PLAN.md) for the port plan and status.
 
-> Status: **scaffold / bring-up.** The launcher, pause menu, HAL and the
-> PPA-based video path build; the OpenJKDF2 engine is being brought up behind
-> `CONFIG_JK_ENGINE` (off by default until it links). With it off, the
-> "Jedi Knight" cart shows a test pattern so the video / input / audio paths
-> can be verified on hardware.
+> Status: **bring-up.** The launcher, pause menu, HAL, PPA video path and the
+> full OpenJKDF2 engine (software rasterizer, ESP32 platform layer) compile
+> and link for the ESP32-P4; nothing has run on hardware yet. Turn
+> `CONFIG_JK_ENGINE` off in menuconfig to make the "Jedi Knight" cart show a
+> test pattern instead, for checking the video / input / audio paths.
 
 ## Hardware
 
