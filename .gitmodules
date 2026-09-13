@@ -1,0 +1,3 @@
+[submodule "components/jk/OpenJKDF2"]
+	path = components/jk/OpenJKDF2
+	url = https://github.com/esp-cpp/OpenJKDF2.git

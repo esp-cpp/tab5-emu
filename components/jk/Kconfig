@@ -1,0 +1,37 @@
+menu "Jedi Knight (OpenJKDF2)"
+
+    config JK_ENGINE
+        bool "Build the OpenJKDF2 engine"
+        default n
+        help
+            Compile and link the OpenJKDF2 engine (components/jk/OpenJKDF2).
+            When disabled the Jedi Knight cart shows an animated test pattern,
+            which is useful to bring up the video / input / audio paths.
+
+    config JK_INTERNAL_WIDTH
+        int "Internal render width"
+        default 320
+        help
+            Width of the 8-bit frame the engine renders the world into. It is
+            scaled to the screen by the PPA.
+
+    config JK_INTERNAL_HEIGHT
+        int "Internal render height"
+        default 240
+
+    config JK_MENU_WIDTH
+        int "Menu buffer width"
+        default 640
+        help
+            The 2D GUI is laid out for 640x480; keep it unless the GUI code is
+            changed (JKGUI_SMOL_SCREEN halves it to 320x240 on the DSi).
+
+    config JK_MENU_HEIGHT
+        int "Menu buffer height"
+        default 480
+
+    config JK_AUDIO_SAMPLE_RATE
+        int "Audio mixer sample rate"
+        default 22050
+
+endmenu

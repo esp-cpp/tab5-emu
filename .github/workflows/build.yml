@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  APP_NAME: 'Tab5 Emu'
+  IDF_VERSION: 'v6.1'
+  IDF_COMPONENT_MANAGER: "1"
+  FLASH_TOTAL_OVERRIDE: '8388608' # 8MB flash app partition for main app
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Checkout the engine submodule (without its desktop-only nested submodules)
+      run: git submodule update --init components/jk/OpenJKDF2
+
+    - name: Build
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        target: esp32p4
+        path: '.'
+
+    - name: Zip up firmware binaries
+      run: |
+        zip -j -r firmware-binaries.zip build/tab5-emu.bin build/bootloader/bootloader.bin build/partition_table/partition-table.bin build/flash_args build/flasher_args.json
+
+    - name: Upload Build Outputs
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-binaries
+        path: firmware-binaries.zip
+
+    - name: Determine Size Delta
+      uses: esp-cpp/esp-idf-size-delta@v1
+      with:
+        app_name: ${{ env.APP_NAME }}
+        app_path: '.'
+        idf_target: esp32p4
+        idf_version: ${{ env.IDF_VERSION }}
+        idf_component_manager: ${{ env.IDF_COMPONENT_MANAGER }}
+        flash_total_override: ${{ env.FLASH_TOTAL_OVERRIDE }}
