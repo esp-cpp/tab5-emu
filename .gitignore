@@ -9,3 +9,4 @@ __pycache__/
 *.a
 *.out
 flash_data/
+components/tab5-emu/idf_component.yml

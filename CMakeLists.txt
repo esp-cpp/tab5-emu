@@ -4,6 +4,27 @@ cmake_minimum_required(VERSION 3.20)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
+# TEMPORARY: until espp ships the Tab5 SD-card fix (the SD IO rail must be
+# switched on through the P4's LDO channel 4; espp PR "fix(m5stack-tab5): power
+# the SD card IO rail"), use a local espp checkout for the Tab5 BSP when one
+# is present. Set ESPP_PATH to point elsewhere; CI has no local espp and keeps
+# using the component registry. Remove this block (and the .yml.in template)
+# once the released espp/m5stack-tab5 contains the fix.
+set(ESPP_PATH "$ENV{ESPP_PATH}")
+if(NOT ESPP_PATH)
+  set(ESPP_PATH "${CMAKE_CURRENT_LIST_DIR}/../espp")
+endif()
+set(TAB5_BSP_OVERRIDE "")
+if(EXISTS "${ESPP_PATH}/components/m5stack-tab5/src/sdcard.cpp")
+  file(READ "${ESPP_PATH}/components/m5stack-tab5/src/sdcard.cpp" _tab5_sdcard)
+  if(_tab5_sdcard MATCHES "sd_pwr_ctrl_new_on_chip_ldo")
+    message(STATUS "tab5-emu: using local espp m5stack-tab5 BSP from ${ESPP_PATH}")
+    set(TAB5_BSP_OVERRIDE "\n    override_path: '${ESPP_PATH}/components/m5stack-tab5'")
+  endif()
+endif()
+configure_file("${CMAKE_CURRENT_LIST_DIR}/components/tab5-emu/idf_component.yml.in"
+               "${CMAKE_CURRENT_LIST_DIR}/components/tab5-emu/idf_component.yml" @ONLY)
+
 set(EXTRA_COMPONENT_DIRS
   "components"
 )
