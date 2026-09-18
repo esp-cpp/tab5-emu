@@ -41,6 +41,9 @@ volatile int jk_esp_quit_requested = 0;
 namespace {
 jk::Config g_config;
 std::atomic<bool> g_paused{false};
+// true while the engine loop sits in its paused branch (no frame in flight),
+// so the cart may read the frame buffers (screenshots) and post requests
+std::atomic<bool> g_parked{false};
 // The engine runs on its own task: it keeps large buffers on the stack, far
 // more than the main task has, so it gets a big stack in PSRAM.
 TaskHandle_t g_engine_task = nullptr;
@@ -504,9 +507,11 @@ bool init(const Config &config) {
           while (!g_engine_stop && !jk_esp_quit_requested) {
             run_pending_request();
             if (g_paused) {
+              g_parked = true;
               vTaskDelay(pdMS_TO_TICKS(10));
               continue;
             }
+            g_parked = false;
             if (!jk_esp_engine_frame()) {
               logger.warn("engine frame returned 0");
               break;
@@ -584,7 +589,18 @@ bool run_frame() {
 #endif
 }
 
-void pause() { g_paused = true; }
+void pause() {
+  g_paused = true;
+#if CONFIG_JK_ENGINE
+  // wait for the frame in flight to finish so the engine's buffers are stable
+  for (int i = 0; i < 200 && g_engine_running && g_engine_started_ok && !g_parked; i++) {
+    std::this_thread::sleep_for(10ms);
+  }
+  if (g_engine_running && !g_parked) {
+    logger.warn("pause: engine did not park");
+  }
+#endif
+}
 void resume() { g_paused = false; }
 
 void reset() {
