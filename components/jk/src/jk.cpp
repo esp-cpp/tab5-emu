@@ -7,10 +7,13 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <vector>
 
 #include <esp_heap_caps.h>
+
+#include "task.hpp"
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -36,6 +39,11 @@ TaskHandle_t g_engine_task = nullptr;
 std::atomic<bool> g_engine_running{false};
 std::atomic<bool> g_engine_stop{false};
 std::atomic<bool> g_engine_started_ok{false};
+// software mixer: runs on its own task so audio keeps flowing through engine
+// frame-time jitter (level loads, long frames)
+std::mutex g_audio_mutex;
+std::unique_ptr<espp::Task> g_audio_task;
+extern "C" void stdSound_ESP32_Pump(void);
 constexpr size_t ENGINE_STACK_BYTES = 1024 * 1024;
 int g_native_w = CONFIG_JK_INTERNAL_WIDTH;
 int g_native_h = CONFIG_JK_INTERNAL_HEIGHT;
@@ -238,12 +246,17 @@ void jk_esp_read_input(jk_esp_input_t *out) {
 
 size_t jk_esp_audio_write(const int16_t *stereo_pcm, size_t num_frames) {
   auto &emu = Tab5Emu::get();
-  size_t bytes = num_frames * 2 * sizeof(int16_t);
-  emu.play_audio(reinterpret_cast<const uint8_t *>(stereo_pcm), bytes);
-  return bytes;
+  const size_t bytes = num_frames * 2 * sizeof(int16_t);
+  const size_t queued = emu.play_audio(reinterpret_cast<const uint8_t *>(stereo_pcm), bytes);
+  return queued / (2 * sizeof(int16_t));
 }
 
 void jk_esp_audio_set_rate(uint32_t sample_rate) { Tab5Emu::get().audio_sample_rate(sample_rate); }
+
+uint32_t jk_esp_audio_rate(void) { return Tab5Emu::get().audio_sample_rate(); }
+
+void jk_esp_audio_lock(void) { g_audio_mutex.lock(); }
+void jk_esp_audio_unlock(void) { g_audio_mutex.unlock(); }
 
 uint32_t jk_esp_time_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 uint64_t jk_esp_time_us(void) { return (uint64_t)esp_timer_get_time(); }
@@ -454,6 +467,21 @@ bool init(const Config &config) {
     g_engine_running = false;
     return false;
   }
+  // audio: top the HAL's output queue up every 10 ms (the mixer produces
+  // as much as the queue accepts, so this paces itself by back-pressure)
+  g_audio_task = espp::Task::make_unique({
+      .callback =
+          [](std::mutex &m, std::condition_variable &cv, bool &task_notified) {
+            if (!g_paused) {
+              stdSound_ESP32_Pump();
+            }
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait_for(lk, 10ms, [&] { return task_notified; });
+            return false;
+          },
+      .task_config = {.name = "jk_audio", .stack_size_bytes = 6 * 1024, .priority = 15, .core_id = 1},
+  });
+  g_audio_task->start();
   return true;
 #else
   pattern_init();
@@ -469,6 +497,7 @@ void deinit() {
     std::this_thread::sleep_for(10ms);
   }
   g_engine_task = nullptr;
+  g_audio_task.reset();
 #endif
   Tab5Emu::get().wait_frame();
   g_pattern.clear();

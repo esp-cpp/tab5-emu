@@ -37,10 +37,18 @@ void jk_esp_present_report(void);
 void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pitch);
 /// Read the current input state.
 void jk_esp_read_input(jk_esp_input_t *out);
-/// Queue interleaved 16-bit stereo PCM for playback; returns bytes accepted.
+/// Queue interleaved 16-bit stereo PCM for playback (non-blocking); returns
+/// the number of frames accepted (fewer than num_frames when the output
+/// queue is full).
 size_t jk_esp_audio_write(const int16_t *stereo_pcm, size_t num_frames);
 /// Configure the audio output sample rate.
 void jk_esp_audio_set_rate(uint32_t sample_rate);
+/// The audio output sample rate the mixer should produce.
+uint32_t jk_esp_audio_rate(void);
+/// Lock protecting the mixer's voice list: the glue's audio task mixes under
+/// it, the engine takes it when it starts/stops/frees buffers.
+void jk_esp_audio_lock(void);
+void jk_esp_audio_unlock(void);
 /// Milliseconds since boot.
 uint32_t jk_esp_time_ms(void);
 /// Microseconds since boot.

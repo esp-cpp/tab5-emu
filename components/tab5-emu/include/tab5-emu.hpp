@@ -90,8 +90,10 @@ public:
   void audio_sample_rate(uint32_t rate) { Bsp::get().audio_sample_rate(rate); }
   uint32_t audio_sample_rate() const { return Bsp::get().audio_sample_rate(); }
   size_t audio_buffer_size() const { return Bsp::get().audio_buffer_size(); }
-  void play_audio(const uint8_t *data, size_t size) { Bsp::get().play_audio(data, size); }
-  void play_audio(std::span<const uint8_t> data) { Bsp::get().play_audio(data); }
+  /// Queue 16-bit interleaved stereo PCM (non-blocking); returns the bytes
+  /// actually queued, which is less than size when the queue is full
+  size_t play_audio(const uint8_t *data, size_t size) { return Bsp::get().play_audio(data, size); }
+  size_t play_audio(std::span<const uint8_t> data) { return Bsp::get().play_audio(data); }
 
   /////////////////////////////////////////////////////////////////////////////
   // Display / brightness
