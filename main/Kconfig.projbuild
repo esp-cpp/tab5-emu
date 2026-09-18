@@ -1,0 +1,10 @@
+menu "tab5-emu"
+
+    config TAB5_EMU_AUTOSTART_DELAY_MS
+        int "Auto-start the first game after this many ms (0 = off)"
+        default 0
+        help
+            Bring-up aid: launch the first entry of metadata.csv automatically
+            a little after boot, as if Play had been pressed.
+
+endmenu

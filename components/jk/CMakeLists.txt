@@ -7,7 +7,7 @@
 set(JK_ROOT ${CMAKE_CURRENT_LIST_DIR}/OpenJKDF2)
 set(JK_SRC ${JK_ROOT}/src)
 
-set(JK_SRCS "src/jk.cpp")
+set(JK_SRCS "src/jk.cpp" "src/jk_prof.cpp")
 set(JK_INCLUDE_DIRS "include")
 set(JK_PRIV_INCLUDE_DIRS "src")
 
@@ -56,7 +56,7 @@ idf_component_register(
   INCLUDE_DIRS ${JK_INCLUDE_DIRS}
   PRIV_INCLUDE_DIRS ${JK_PRIV_INCLUDE_DIRS}
   REQUIRES tab5-emu statistics
-  PRIV_REQUIRES esp_timer
+  PRIV_REQUIRES esp_timer esp_system riscv
 )
 
 if(CONFIG_JK_ENGINE)
@@ -107,6 +107,8 @@ if(CONFIG_JK_ENGINE)
     -ffp-contract=off
     -msmall-data-limit=0
     -O2
+    # relative paths -> game directory (ESP-IDF has no cwd), see jk_esp_fs.h
+    -include ${JK_SRC}/Platform/ESP32/jk_esp_fs.h
   )
   set(ENGINE_C_SRCS ${ENGINE_SRCS} ${PLATFORM_SRCS} ${CMAKE_CURRENT_LIST_DIR}/generated/globals.c)
   list(FILTER ENGINE_C_SRCS EXCLUDE REGEX "\\.cpp$")
@@ -118,6 +120,10 @@ if(CONFIG_JK_ENGINE)
     set_source_files_properties(${ENGINE_CXX_SRCS} PROPERTIES COMPILE_OPTIONS
       "${ENGINE_COMMON_FLAGS};-std=gnu++17")
   endif()
+endif()
+
+if(CONFIG_JK_ENGINE AND CONFIG_JK_ESP_DEBUG)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE JK_ESP_FS_DEBUG)
 endif()
 
 if(CONFIG_JK_ENGINE)

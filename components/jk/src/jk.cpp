@@ -37,6 +37,7 @@ int g_last_w = 0, g_last_h = 0;
 // (which converts asynchronously) reads a stable buffer
 std::vector<uint8_t> g_frame8[2];
 int g_frame8_index = 0;
+const uint8_t *g_last_frame8 = nullptr;
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -44,8 +45,17 @@ int g_frame8_index = 0;
 // ---------------------------------------------------------------------------
 extern "C" {
 
+uint64_t jk_esp_us_input = 0, jk_esp_us_wait = 0, jk_esp_us_free = 0, jk_esp_us_realloc = 0, jk_esp_us_log = 0;
+uint32_t jk_esp_n_input = 0, jk_esp_n_wait = 0, jk_esp_n_free = 0, jk_esp_n_realloc = 0, jk_esp_n_log = 0;
+
+static uint32_t g_presents = 0;
+
 void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch, const uint8_t *pal24) {
   auto &emu = Tab5Emu::get();
+  g_presents++;
+  if (g_presents <= 10 || (g_presents % 100) == 0) {
+    logger.info("present #{} {}x{} pitch {}", g_presents, width, height, pitch);
+  }
   if (width != g_last_w || height != g_last_h) {
     emu.native_size(width, height, width);
     g_last_w = width;
@@ -59,7 +69,11 @@ void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch
     g_palette565[i] = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
   }
   // the previous frame is done (wait_frame), so its buffer can be reused
-  emu.wait_frame();
+  {
+    auto t0 = esp_timer_get_time();
+    emu.wait_frame();
+    jk_esp_us_wait += esp_timer_get_time() - t0; jk_esp_n_wait++;
+  }
   auto &dst = g_frame8[g_frame8_index];
   g_frame8_index ^= 1;
   if (pitch == width) {
@@ -69,11 +83,7 @@ void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch
       memcpy(dst.data() + (size_t)y * width, pixels + (size_t)y * pitch, width);
     }
   }
-  // keep an RGB565 copy for screenshots
-  uint16_t *shot = reinterpret_cast<uint16_t *>(g_last_rgb565.data());
-  for (size_t i = 0; i < (size_t)width * height; i++) {
-    shot[i] = g_palette565[dst[i]];
-  }
+  g_last_frame8 = dst.data();
   emu.palette(g_palette565, 256);
   emu.push_frame(dst.data());
 }
@@ -95,6 +105,8 @@ void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pi
 }
 
 void jk_esp_read_input(jk_esp_input_t *out) {
+  auto t0 = esp_timer_get_time();
+  struct Acc { int64_t t0; ~Acc() { jk_esp_us_input += esp_timer_get_time() - t0; jk_esp_n_input++; } } acc{t0};
   auto &emu = Tab5Emu::get();
   memset(out, 0, sizeof(*out));
   out->buttons = emu.gamepad_state().buttons;
@@ -125,15 +137,23 @@ void *jk_esp_malloc(size_t size) {
   return p;
 }
 void *jk_esp_realloc(void *ptr, size_t size) {
+  auto t0 = esp_timer_get_time();
+  struct Acc { int64_t t0; ~Acc() { jk_esp_us_realloc += esp_timer_get_time() - t0; jk_esp_n_realloc++; } } acc{t0};
   void *p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!p) {
     p = heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
   }
   return p;
 }
-void jk_esp_free(void *ptr) { heap_caps_free(ptr); }
+void jk_esp_free(void *ptr) {
+  auto t0 = esp_timer_get_time();
+  heap_caps_free(ptr);
+  jk_esp_us_free += esp_timer_get_time() - t0; jk_esp_n_free++;
+}
 
 void jk_esp_log(const char *fmt, ...) {
+  auto t0 = esp_timer_get_time();
+  struct Acc { int64_t t0; ~Acc() { jk_esp_us_log += esp_timer_get_time() - t0; jk_esp_n_log++; } } acc{t0};
   char buf[256];
   va_list args;
   va_start(args, fmt);
@@ -244,6 +264,44 @@ bool init(const Config &config) {
   g_native_h = CONFIG_JK_INTERNAL_HEIGHT;
   logger.info("init: game_dir='{}' internal {}x{}", config.game_dir, g_native_w, g_native_h);
 #if CONFIG_JK_ENGINE
+#if defined(JK_ESP_FS_DEBUG)
+  // bring-up benchmark: SD read throughput and float parsing speed
+  {
+    auto path = config.game_dir + "/resource/Res2.gob";
+    FILE *f = fopen(path.c_str(), "rb");
+    if (f) {
+      std::vector<uint8_t> buf(16 * 1024);
+      size_t total = 0;
+      auto t0 = esp_timer_get_time();
+      while (total < 8 * 1024 * 1024) {
+        size_t n = fread(buf.data(), 1, buf.size(), f);
+        if (!n) break;
+        total += n;
+      }
+      auto dt = esp_timer_get_time() - t0;
+      fclose(f);
+      logger.info("bench: read {} KB in {} ms = {:.1f} MB/s", total / 1024, dt / 1000, total / 1.048576 / (dt ? dt : 1));
+      // line reads
+      f = fopen(path.c_str(), "rb");
+      char line[256];
+      size_t lines = 0;
+      t0 = esp_timer_get_time();
+      while (lines < 50000 && fgets(line, sizeof(line), f)) lines++;
+      dt = esp_timer_get_time() - t0;
+      fclose(f);
+      logger.info("bench: {} fgets in {} ms", lines, dt / 1000);
+    }
+    auto t0 = esp_timer_get_time();
+    float acc = 0;
+    for (int i = 0; i < 20000; i++) {
+      float a, b, c;
+      sscanf("0.123456 -1.234567 12.345678", "%f %f %f", &a, &b, &c);
+      acc += a + b + c;
+    }
+    auto dt = esp_timer_get_time() - t0;
+    logger.info("bench: 20000 sscanf(3 floats) in {} ms (acc {})", dt / 1000, acc);
+  }
+#endif
   return jk_esp_engine_startup(config.game_dir.c_str()) != 0;
 #else
   pattern_init();
@@ -307,6 +365,15 @@ void load(const std::string &path, int slot) {
 
 std::pair<size_t, size_t> video_size() { return {(size_t)g_native_w, (size_t)g_native_h}; }
 
-std::span<uint8_t> video_buffer_rgb565() { return {g_last_rgb565.data(), g_last_rgb565.size()}; }
+std::span<uint8_t> video_buffer_rgb565() {
+  // convert the last presented 8-bit frame on demand (screenshots only)
+  if (g_last_frame8 && g_last_rgb565.size() == (size_t)g_last_w * g_last_h * 2) {
+    uint16_t *shot = reinterpret_cast<uint16_t *>(g_last_rgb565.data());
+    for (size_t i = 0; i < (size_t)g_last_w * g_last_h; i++) {
+      shot[i] = g_palette565[g_last_frame8[i]];
+    }
+  }
+  return {g_last_rgb565.data(), g_last_rgb565.size()};
+}
 
 } // namespace jk

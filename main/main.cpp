@@ -65,6 +65,15 @@ extern "C" void app_main(void) {
   while (true) {
     // reset gui ready to play
     gui.ready_to_play(false);
+#if CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS > 0
+    static bool autostarted = false;
+    if (!autostarted && gui.get_selected_rom().has_value()) {
+      autostarted = true;
+      logger.warn("Auto-starting the first game in {} ms", CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS);
+      std::this_thread::sleep_for(std::chrono::milliseconds(CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS));
+      gui.ready_to_play(true);
+    }
+#endif
     while (!gui.ready_to_play()) {
       std::this_thread::sleep_for(50ms);
     }
