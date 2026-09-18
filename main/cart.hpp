@@ -38,6 +38,10 @@ public:
     logger_.info("ctor");
     auto &emu = Tab5Emu::get();
     emu.clear_screen();
+    // drop a menu request left over from the GUI (e.g. a tap in the hot
+    // corner while choosing the game) so the cart doesn't open the pause menu
+    // before the game has started
+    (void)emu.menu_requested();
 
     if (config.copy_romdata) {
       logger_.info("Copying romdata...");
@@ -114,6 +118,9 @@ public:
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(100ms);
       }
+      // taps on the menu also reach the in-game touch handler (and its
+      // "menu" hot corner); drop any request they generated
+      (void)emu.menu_requested();
       emu.clear_screen();
       if (running_)
         post_menu();

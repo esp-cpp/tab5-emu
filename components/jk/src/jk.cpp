@@ -166,6 +166,12 @@ void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, i
                                  const uint8_t *overlay, int overlay_width, int overlay_height,
                                  int overlay_pitch, const uint8_t *pal24) {
   auto &emu = Tab5Emu::get();
+  if (g_paused) {
+    // the tab5-emu pause menu owns the screen; the engine only gets here
+    // while paused when a level load (one long "frame") is presenting its
+    // loading screen, which must not draw over the menu
+    return;
+  }
   if (!overlay || overlay_width <= 0 || overlay_height <= 0) {
     overlay = nullptr;
     overlay_width = overlay_height = 0;
@@ -502,6 +508,9 @@ bool init(const Config &config) {
   g_engine_running = true;
   auto ok = xTaskCreatePinnedToCoreWithCaps(
       [](void *) {
+        logger.info("heap before engine startup: internal {} (largest {}), psram {} (largest {})",
+                    heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                    heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         if (jk_esp_engine_startup(g_config.game_dir.c_str())) {
           g_engine_started_ok = true;
           while (!g_engine_stop && !jk_esp_quit_requested) {
@@ -519,6 +528,9 @@ bool init(const Config &config) {
           }
           logger.info("engine loop done (stop={} quit={})", g_engine_stop.load(), jk_esp_quit_requested);
           jk_esp_engine_shutdown();
+          logger.info("heap after engine shutdown: internal {} (largest {}), psram {} (largest {})",
+                      heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                      heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         } else {
           logger.error("engine startup failed");
         }
