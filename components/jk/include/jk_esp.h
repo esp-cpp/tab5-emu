@@ -59,6 +59,11 @@ void jk_esp_sleep_ms(uint32_t ms);
 void *jk_esp_malloc(size_t size);
 void *jk_esp_realloc(void *ptr, size_t size);
 void jk_esp_free(void *ptr);
+/// Same, tagged with the engine call site (debug builds track live
+/// allocations per site; jk_esp_alloc_dump() lists the biggest).
+void *jk_esp_malloc_site(size_t size, const void *site);
+void *jk_esp_realloc_site(void *ptr, size_t size, const void *site);
+void jk_esp_alloc_dump(int top);
 /// Log line
 void jk_esp_log(const char *fmt, ...);
 /// Set to 1 by the glue when the engine should quit at the next opportunity.

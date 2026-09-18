@@ -329,24 +329,136 @@ uint32_t jk_esp_time_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); 
 uint64_t jk_esp_time_us(void) { return (uint64_t)esp_timer_get_time(); }
 void jk_esp_sleep_ms(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
-void *jk_esp_malloc(size_t size) {
+// ---------------------------------------------------------------------------
+// Live-allocation tracker (debug): pointer -> (size, engine call site) in an
+// open-addressing table, so leaks across engine restarts can be attributed.
+// ---------------------------------------------------------------------------
+#if defined(JK_ESP_FS_DEBUG)
+namespace {
+struct AllocRec {
+  void *p;
+  uint32_t size;
+  uint32_t site;
+};
+constexpr size_t ALLOC_TABLE_CAP = 1u << 17; // 131072 entries, 1.5 MB in PSRAM
+AllocRec *g_alloc_table = nullptr;
+size_t g_alloc_live = 0, g_alloc_dropped = 0;
+uint64_t g_alloc_live_bytes = 0;
+portMUX_TYPE g_alloc_mux = portMUX_INITIALIZER_UNLOCKED;
+
+inline size_t alloc_hash(const void *p) {
+  return (static_cast<size_t>(reinterpret_cast<uintptr_t>(p) >> 3) * 2654435761u) & (ALLOC_TABLE_CAP - 1);
+}
+void alloc_track(void *p, size_t size, const void *site) {
+  if (!p) return;
+  portENTER_CRITICAL(&g_alloc_mux);
+  if (!g_alloc_table) {
+    g_alloc_table = static_cast<AllocRec *>(heap_caps_calloc(ALLOC_TABLE_CAP, sizeof(AllocRec), MALLOC_CAP_SPIRAM));
+  }
+  if (g_alloc_table && g_alloc_live < ALLOC_TABLE_CAP - 1) {
+    size_t i = alloc_hash(p);
+    while (g_alloc_table[i].p) i = (i + 1) & (ALLOC_TABLE_CAP - 1);
+    g_alloc_table[i] = {p, static_cast<uint32_t>(size), static_cast<uint32_t>(reinterpret_cast<uintptr_t>(site))};
+    g_alloc_live++;
+    g_alloc_live_bytes += size;
+  } else {
+    g_alloc_dropped++;
+  }
+  portEXIT_CRITICAL(&g_alloc_mux);
+}
+void alloc_untrack(void *p) {
+  if (!p || !g_alloc_table) return;
+  portENTER_CRITICAL(&g_alloc_mux);
+  size_t i = alloc_hash(p);
+  while (g_alloc_table[i].p && g_alloc_table[i].p != p) i = (i + 1) & (ALLOC_TABLE_CAP - 1);
+  if (g_alloc_table[i].p == p) {
+    g_alloc_live--;
+    g_alloc_live_bytes -= g_alloc_table[i].size;
+    // backward-shift deletion keeps the probe chains intact without tombstones
+    size_t j = i;
+    while (true) {
+      j = (j + 1) & (ALLOC_TABLE_CAP - 1);
+      if (!g_alloc_table[j].p) break;
+      size_t h = alloc_hash(g_alloc_table[j].p);
+      // can entry j move to slot i? only if its home is not in (i, j]
+      bool between = (i < j) ? (h > i && h <= j) : (h > i || h <= j);
+      if (!between) {
+        g_alloc_table[i] = g_alloc_table[j];
+        i = j;
+      }
+    }
+    g_alloc_table[i] = {nullptr, 0, 0};
+  }
+  portEXIT_CRITICAL(&g_alloc_mux);
+}
+} // namespace
+
+void jk_esp_alloc_dump(int top) {
+  if (!g_alloc_table) {
+    logger.info("alloc: nothing tracked");
+    return;
+  }
+  struct Site { uint32_t site; uint64_t bytes; uint32_t count; };
+  std::vector<Site> sites;
+  portENTER_CRITICAL(&g_alloc_mux);
+  const size_t live = g_alloc_live, dropped = g_alloc_dropped;
+  const uint64_t live_bytes = g_alloc_live_bytes;
+  portEXIT_CRITICAL(&g_alloc_mux);
+  // aggregate outside the critical section (the table only shrinks/grows on
+  // other threads while the engine is stopped, which is when this is called)
+  for (size_t i = 0; i < ALLOC_TABLE_CAP; i++) {
+    const auto &r = g_alloc_table[i];
+    if (!r.p) continue;
+    auto it = std::find_if(sites.begin(), sites.end(), [&](const Site &s) { return s.site == r.site; });
+    if (it == sites.end()) {
+      sites.push_back({r.site, r.size, 1});
+    } else {
+      it->bytes += r.size;
+      it->count++;
+    }
+  }
+  std::sort(sites.begin(), sites.end(), [](const Site &a, const Site &b) { return a.bytes > b.bytes; });
+  logger.info("alloc: {} live allocations, {} bytes, {} sites ({} untracked)", live, live_bytes, sites.size(), dropped);
+  for (size_t i = 0; i < sites.size() && i < static_cast<size_t>(top); i++) {
+    logger.info("alloc: site 0x{:08x} {} bytes in {} allocations", sites[i].site, sites[i].bytes, sites[i].count);
+  }
+}
+#else
+void jk_esp_alloc_dump(int) {}
+#endif
+
+void *jk_esp_malloc_site(size_t size, const void *site) {
   void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!p) {
     p = heap_caps_malloc(size, MALLOC_CAP_8BIT);
   }
+#if defined(JK_ESP_FS_DEBUG)
+  alloc_track(p, size, site);
+#endif
   return p;
 }
-void *jk_esp_realloc(void *ptr, size_t size) {
+void *jk_esp_malloc(size_t size) { return jk_esp_malloc_site(size, __builtin_return_address(0)); }
+void *jk_esp_realloc_site(void *ptr, size_t size, const void *site) {
   auto t0 = esp_timer_get_time();
   struct Acc { int64_t t0; ~Acc() { jk_esp_us_realloc += esp_timer_get_time() - t0; jk_esp_n_realloc++; } } acc{t0};
+#if defined(JK_ESP_FS_DEBUG)
+  alloc_untrack(ptr);
+#endif
   void *p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!p) {
     p = heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
   }
+#if defined(JK_ESP_FS_DEBUG)
+  alloc_track(p, size, site);
+#endif
   return p;
 }
+void *jk_esp_realloc(void *ptr, size_t size) { return jk_esp_realloc_site(ptr, size, __builtin_return_address(0)); }
 void jk_esp_free(void *ptr) {
   auto t0 = esp_timer_get_time();
+#if defined(JK_ESP_FS_DEBUG)
+  alloc_untrack(ptr);
+#endif
   heap_caps_free(ptr);
   jk_esp_us_free += esp_timer_get_time() - t0; jk_esp_n_free++;
 }
@@ -531,6 +643,7 @@ bool init(const Config &config) {
           logger.info("heap after engine shutdown: internal {} (largest {}), psram {} (largest {})",
                       heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+          jk_esp_alloc_dump(25);
         } else {
           logger.error("engine startup failed");
         }
