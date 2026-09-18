@@ -3,6 +3,7 @@
 #include "jk_esp.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -23,6 +24,13 @@
 
 using namespace std::chrono_literals;
 
+// engine-thread entry points (src/Platform/ESP32/jk_esp_save.c)
+extern "C" {
+int jk_esp_engine_save(const char *path, const char *label);
+int jk_esp_engine_load(const char *path);
+int jk_esp_engine_reset(void);
+}
+
 static espp::Logger logger({.tag = "jk", .level = espp::Logger::Verbosity::INFO});
 
 // ---------------------------------------------------------------------------
@@ -42,6 +50,56 @@ std::atomic<bool> g_engine_started_ok{false};
 // software mixer: runs on its own task so audio keeps flowing through engine
 // frame-time jitter (level loads, long frames)
 std::mutex g_audio_mutex;
+// pause-menu requests (save / load / reset) run on the engine thread between
+// frames; the caller blocks until the engine has handled them
+enum class Request { NONE, SAVE, LOAD, RESET };
+std::atomic<Request> g_request{Request::NONE};
+std::string g_request_path;
+std::string g_request_label;
+std::atomic<int> g_request_result{0};
+
+void run_pending_request() {
+  const auto req = g_request.load();
+  if (req == Request::NONE) {
+    return;
+  }
+  int result = 0;
+  switch (req) {
+  case Request::SAVE:
+    result = jk_esp_engine_save(g_request_path.c_str(), g_request_label.c_str());
+    break;
+  case Request::LOAD:
+    result = jk_esp_engine_load(g_request_path.c_str());
+    break;
+  case Request::RESET:
+    result = jk_esp_engine_reset();
+    break;
+  default:
+    break;
+  }
+  g_request_result = result;
+  g_request = Request::NONE;
+}
+
+// post a request and wait for the engine thread to handle it
+bool request(Request req, const std::string &path = {}, const std::string &label = {}) {
+  if (!g_engine_running || !g_engine_started_ok) {
+    return false;
+  }
+  g_request_path = path;
+  g_request_label = label;
+  g_request_result = 0;
+  g_request = req;
+  for (int i = 0; i < 1000 && g_request != Request::NONE; i++) {
+    std::this_thread::sleep_for(10ms);
+  }
+  if (g_request != Request::NONE) {
+    logger.error("engine did not handle the request");
+    g_request = Request::NONE;
+    return false;
+  }
+  return g_request_result != 0;
+}
 std::unique_ptr<espp::Task> g_audio_task;
 extern "C" void stdSound_ESP32_Pump(void);
 constexpr size_t ENGINE_STACK_BYTES = 1024 * 1024;
@@ -444,6 +502,7 @@ bool init(const Config &config) {
         if (jk_esp_engine_startup(g_config.game_dir.c_str())) {
           g_engine_started_ok = true;
           while (!g_engine_stop && !jk_esp_quit_requested) {
+            run_pending_request();
             if (g_paused) {
               vTaskDelay(pdMS_TO_TICKS(10));
               continue;
@@ -529,25 +588,48 @@ void pause() { g_paused = true; }
 void resume() { g_paused = false; }
 
 void reset() {
-  logger.info("reset");
+  logger.info("reset (restart level)");
 #if CONFIG_JK_ENGINE
-  // TODO: restart the engine task
+  if (!request(Request::RESET)) {
+    logger.warn("reset: nothing to restart");
+  }
 #else
   g_pattern_frame = 0;
 #endif
 }
 
-void save(const std::string &path, int slot) {
-  // TODO(phase 5): route to the engine's jkSaveLoad with a slot-derived name
+bool save(const std::string &path, int slot) {
   logger.info("save slot {} -> {}", slot, path);
+#if CONFIG_JK_ENGINE
+  if (path.empty()) {
+    return false;
+  }
+  return request(Request::SAVE, path, fmt::format("Slot {}", slot));
+#else
+  return false;
+#endif
 }
 
-void load(const std::string &path, int slot) {
-  // TODO(phase 5): route to the engine's jkSaveLoad
+bool load(const std::string &path, int slot) {
   logger.info("load slot {} <- {}", slot, path);
+#if CONFIG_JK_ENGINE
+  if (path.empty()) {
+    return false;
+  }
+  return request(Request::LOAD, path);
+#else
+  return false;
+#endif
 }
 
-std::pair<size_t, size_t> video_size() { return {(size_t)g_native_w, (size_t)g_native_h}; }
+std::pair<size_t, size_t> video_size() {
+  // the size of the frame most recently presented (menus 640x480, the
+  // internal resolution in-game)
+  if (g_last_w > 0 && g_last_h > 0) {
+    return {(size_t)g_last_w, (size_t)g_last_h};
+  }
+  return {(size_t)g_native_w, (size_t)g_native_h};
+}
 
 void apply_video_setting() {
   if (g_last_w > 0 && g_last_h > 0) {

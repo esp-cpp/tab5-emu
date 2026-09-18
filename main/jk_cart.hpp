@@ -29,16 +29,23 @@ public:
   }
 
   void load() override {
-    Cart::load();
 #if defined(ENABLE_JK)
-    jk::load(get_save_path(), get_selected_save_slot());
+    // only touch the pause image when the engine took the save
+    if (jk::load(get_save_path(), get_selected_save_slot())) {
+      Cart::load();
+    }
+#else
+    Cart::load();
 #endif
   }
 
   void save() override {
-    Cart::save();
 #if defined(ENABLE_JK)
-    jk::save(get_save_path(true), get_selected_save_slot());
+    if (jk::save(get_save_path(true), get_selected_save_slot())) {
+      Cart::save();
+    }
+#else
+    Cart::save();
 #endif
   }
 

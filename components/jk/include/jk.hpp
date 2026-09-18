@@ -23,12 +23,15 @@ bool run_frame();
 /// Pause / resume (called around the tab5-emu pause menu).
 void pause();
 void resume();
-/// Restart the engine (back to the main menu).
+/// Restart the current level.
 void reset();
-/// Save / load through the engine's own save files, tagged with the slot.
-void save(const std::string &path, int slot);
-void load(const std::string &path, int slot);
-/// Native (internal) frame size.
+/// Save / load the running game as an engine save file at `path` (absolute).
+/// Loading a save from another level switches to that level first. Both run
+/// on the engine thread and block until it has taken the request; false when
+/// the engine refused (no level running, player dead, unreadable file).
+bool save(const std::string &path, int slot);
+bool load(const std::string &path, int slot);
+/// Size of the frame most recently presented (for screenshots).
 std::pair<size_t, size_t> video_size();
 /// Recompute the on-screen size from the HAL's video setting and the frame
 /// size currently presented (original = integer scale, fit, fill).
