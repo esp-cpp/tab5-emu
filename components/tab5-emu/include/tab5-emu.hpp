@@ -110,8 +110,12 @@ public:
   bool initialize_input();
   /// Current gamepad state (merged from all input sources)
   GamepadState gamepad_state();
-  /// Latest touch data (in logical / landscape coordinates)
-  TouchpadData touchpad_data() const { return Bsp::get().touchpad_data(); }
+  /// Latest touch data (in logical / landscape coordinates); a finger is
+  /// down when num_touch_points > 0 (btn_state is the GT911's home button)
+  TouchpadData touchpad_data() const {
+    std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
+    return touch_gamepad_.last;
+  }
   /// True once if the user asked for the in-game menu (BOOT button, or the
   /// touch hot-corner). Reading it clears the request.
   bool menu_requested() { return menu_requested_.exchange(false); }
@@ -168,7 +172,7 @@ protected:
 
   // touch virtual gamepad
   struct TouchGamepad {
-    std::mutex mutex;
+    mutable std::mutex mutex;
     TouchpadData last{};
     GamepadState state{};
   } touch_gamepad_;

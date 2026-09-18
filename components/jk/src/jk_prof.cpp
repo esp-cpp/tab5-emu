@@ -82,7 +82,7 @@ void jk_prof_start(void) {
   memset(s_task_h, 0, sizeof(s_task_h));
   memset(s_task_n, 0, sizeof(s_task_n));
   memset(s_chains, 0, sizeof(s_chains));
-  s_main = xTaskGetHandle("main");
+  s_main = xTaskGetHandle("jk_engine");
   s_idle0 = xTaskGetIdleTaskHandleForCore(0);
   s_total = 0; s_dropped = 0;
   if (!registered) {

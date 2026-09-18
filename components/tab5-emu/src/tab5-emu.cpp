@@ -191,7 +191,7 @@ void Tab5Emu::on_touch(const TouchpadData &raw) {
   //     Y (upper-left); a touch in the bottom strip of the middle third is
   //     START (right half) / SELECT (left half)
   GamepadState state{};
-  if (data.btn_state && data.num_touch_points > 0) {
+  if (data.num_touch_points > 0) {
     const int w = lcd_width(), h = lcd_height();
     const int x = data.x, y = data.y;
     if (x >= w - 100 && y < 100) {

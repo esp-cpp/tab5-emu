@@ -10,6 +10,8 @@
 
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "logger.hpp"
 #include "tab5-emu.hpp"
@@ -25,7 +27,14 @@ volatile int jk_esp_quit_requested = 0;
 
 namespace {
 jk::Config g_config;
-bool g_paused = false;
+std::atomic<bool> g_paused{false};
+// The engine runs on its own task: it keeps large buffers on the stack, far
+// more than the main task has, so it gets a big stack in PSRAM.
+TaskHandle_t g_engine_task = nullptr;
+std::atomic<bool> g_engine_running{false};
+std::atomic<bool> g_engine_stop{false};
+std::atomic<bool> g_engine_started_ok{false};
+constexpr size_t ENGINE_STACK_BYTES = 1024 * 1024;
 int g_native_w = CONFIG_JK_INTERNAL_WIDTH;
 int g_native_h = CONFIG_JK_INTERNAL_HEIGHT;
 // the frame most recently handed to the display, converted to RGB565 (for
@@ -111,9 +120,14 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   memset(out, 0, sizeof(*out));
   out->buttons = emu.gamepad_state().buttons;
   auto touch = emu.touchpad_data();
-  out->touch_down = touch.btn_state && touch.num_touch_points > 0;
+  out->touch_down = touch.num_touch_points > 0;
   out->touch_x = out->touch_down ? touch.x : -1;
   out->touch_y = out->touch_down ? touch.y : -1;
+  static bool last_down = false;
+  if (out->touch_down != last_down) {
+    logger.info("touch {} at {},{}", out->touch_down ? "down" : "up", touch.x, touch.y);
+    last_down = out->touch_down;
+  }
 }
 
 size_t jk_esp_audio_write(const int16_t *stereo_pcm, size_t num_frames) {
@@ -302,7 +316,38 @@ bool init(const Config &config) {
     logger.info("bench: 20000 sscanf(3 floats) in {} ms (acc {})", dt / 1000, acc);
   }
 #endif
-  return jk_esp_engine_startup(config.game_dir.c_str()) != 0;
+  g_engine_stop = false;
+  g_engine_started_ok = false;
+  g_engine_running = true;
+  auto ok = xTaskCreatePinnedToCoreWithCaps(
+      [](void *) {
+        if (jk_esp_engine_startup(g_config.game_dir.c_str())) {
+          g_engine_started_ok = true;
+          while (!g_engine_stop && !jk_esp_quit_requested) {
+            if (g_paused) {
+              vTaskDelay(pdMS_TO_TICKS(10));
+              continue;
+            }
+            if (!jk_esp_engine_frame()) {
+              logger.warn("engine frame returned 0");
+              break;
+            }
+          }
+          logger.info("engine loop done (stop={} quit={})", g_engine_stop.load(), jk_esp_quit_requested);
+          jk_esp_engine_shutdown();
+        } else {
+          logger.error("engine startup failed");
+        }
+        g_engine_running = false;
+        vTaskDelete(nullptr);
+      },
+      "jk_engine", ENGINE_STACK_BYTES, nullptr, 10, &g_engine_task, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (ok != pdPASS) {
+    logger.error("could not create the engine task");
+    g_engine_running = false;
+    return false;
+  }
+  return true;
 #else
   pattern_init();
   return true;
@@ -311,7 +356,12 @@ bool init(const Config &config) {
 
 void deinit() {
 #if CONFIG_JK_ENGINE
-  jk_esp_engine_shutdown();
+  g_engine_stop = true;
+  jk_esp_quit_requested = 1;
+  while (g_engine_running) {
+    std::this_thread::sleep_for(10ms);
+  }
+  g_engine_task = nullptr;
 #endif
   Tab5Emu::get().wait_frame();
   g_pattern.clear();
@@ -319,16 +369,15 @@ void deinit() {
 }
 
 bool run_frame() {
+#if CONFIG_JK_ENGINE
+  // the engine task does the work; this just paces the cart loop
+  std::this_thread::sleep_for(20ms);
+  return g_engine_running;
+#else
   if (g_paused) {
     std::this_thread::sleep_for(10ms);
     return true;
   }
-#if CONFIG_JK_ENGINE
-  if (jk_esp_quit_requested) {
-    return false;
-  }
-  return jk_esp_engine_frame() != 0;
-#else
   auto t0 = esp_timer_get_time();
   pattern_frame();
   // pace the test pattern at ~60 fps
@@ -346,8 +395,7 @@ void resume() { g_paused = false; }
 void reset() {
   logger.info("reset");
 #if CONFIG_JK_ENGINE
-  jk_esp_engine_shutdown();
-  jk_esp_engine_startup(g_config.game_dir.c_str());
+  // TODO: restart the engine task
 #else
   g_pattern_frame = 0;
 #endif
