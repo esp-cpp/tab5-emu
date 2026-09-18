@@ -89,8 +89,11 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
    (video task ~26 ms/frame on core 1, ~18 fps). Remaining: profile the
    rasterizer, IRAM for hot loops, PSRAM cache tuning, cut the engine-side
    frame/HUD copy (~4 ms/frame).
-3. **Audio**: software mixer (port of the DSi `stdSound.c`) at 22050 Hz into
-   the HAL audio path; music from `MUSIC/*.ogg` deferred (needs a decoder).
+3. **Audio**: software mixer (port of the DSi `stdSound.c`) into the HAL audio
+   path. **Done (2026-09-18):** mixes at the codec's 48 kHz on a 10 ms glue
+   task (`jk_audio`, core 1) with back-pressure pacing and a mutex around the
+   voice list; confirmed working on hardware. Music from `MUSIC/*.ogg`
+   deferred (needs a decoder).
 4. **Input**: USB HID host on the Tab5's USB-A port (keyboard + mouse, or a
    gamepad) via `usb_host_hid`; IMU aim as a stretch. Touch remains for menus.
 5. **Save / load** through the engine's native `.jks` saves under
