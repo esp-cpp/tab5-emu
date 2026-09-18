@@ -82,8 +82,13 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
    loop.
 2. **World renders** through `rdZRaster` at 426x240 (16:9), 2D layer at
    640x480, PPA scales to the panel. **Done (2026-09-18): level 1 playable,
-   ~19 fps.** Remaining: profile the rasterizer, IRAM for hot loops, PSRAM
-   cache tuning; HUD is composited 4:3-centered into the wide world buffer.
+   ~19 fps.** The HUD stays at its native 640x480: the engine hands it to the
+   HAL as a keyed overlay, the video task builds an 852x480 staging image
+   (world 2x nearest + HUD 1:1, 4:3-centered) in 64 KB internal-RAM strips
+   and the PPA scales each strip 1.5x into the rotated panel buffer
+   (video task ~26 ms/frame on core 1, ~18 fps). Remaining: profile the
+   rasterizer, IRAM for hot loops, PSRAM cache tuning, cut the engine-side
+   frame/HUD copy (~4 ms/frame).
 3. **Audio**: software mixer (port of the DSi `stdSound.c`) at 22050 Hz into
    the HAL audio path; music from `MUSIC/*.ogg` deferred (needs a decoder).
 4. **Input**: USB HID host on the Tab5's USB-A port (keyboard + mouse, or a

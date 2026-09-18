@@ -1,5 +1,7 @@
 #include "tab5-emu.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 
@@ -272,6 +274,7 @@ bool Tab5Emu::initialize_video() {
     logger_.error("Could not register a PPA client: {}", esp_err_to_name(err));
     return false;
   }
+  ensure_tile_buffer();
   video_queue_ = xQueueCreate(1, sizeof(VideoFrame));
   frame_done_ = xSemaphoreCreateBinary();
   using namespace std::placeholders;
@@ -326,14 +329,23 @@ void Tab5Emu::clear_screen() {
   esp_cache_msync(fb, dpi_fb_bytes_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
 
-void Tab5Emu::push_frame(const void *frame, const void *overlay) {
+void Tab5Emu::push_frame(const void *frame, const void *overlay, size_t overlay_row_begin,
+                         size_t overlay_row_end) {
   if (!video_queue_) {
     return;
   }
   // overwrite: if the video task hasn't consumed the previous frame yet, the
   // game is running faster than the display and we drop the older one
-  VideoFrame vf{frame, overlay};
+  VideoFrame vf{frame, overlay, overlay_row_begin, overlay_row_end};
   xQueueOverwrite(video_queue_, &vf);
+}
+
+Tab5Emu::VideoStats Tab5Emu::video_stats(bool reset) {
+  auto stats = video_stats_;
+  if (reset) {
+    video_stats_ = {};
+  }
+  return stats;
 }
 
 void Tab5Emu::wait_frame() {
@@ -342,54 +354,43 @@ void Tab5Emu::wait_frame() {
   }
 }
 
-bool Tab5Emu::ensure_rgb_frame() {
-  const size_t needed = staging_width() * staging_height() * sizeof(uint16_t);
-  if (needed == 0) {
-    return false;
-  }
-  if (rgb_frame_ && rgb_frame_bytes_ >= needed) {
+bool Tab5Emu::ensure_tile_buffer() {
+  if (tile_buf_) {
     return true;
   }
-  logger_.info("staging frame: {}x{} ({} bytes)", staging_width(), staging_height(), needed);
-  if (rgb_frame_) {
-    heap_caps_free(rgb_frame_);
-    rgb_frame_ = nullptr;
-  }
   // 128-byte aligned so the PPA's cache sync covers exactly this buffer;
-  // prefer internal memory for the palette-conversion writes
-  rgb_frame_ = static_cast<uint16_t *>(heap_caps_aligned_alloc(128, needed, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-  if (!rgb_frame_) {
-    rgb_frame_ = static_cast<uint16_t *>(heap_caps_aligned_alloc(128, needed, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  // internal memory so the conversion writes and the PPA reads are fast
+  tile_buf_ = static_cast<uint16_t *>(heap_caps_aligned_alloc(128, TILE_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  if (!tile_buf_) {
+    logger_.warn("No internal RAM for the {} byte video tile; using PSRAM", TILE_BYTES);
+    tile_buf_ = static_cast<uint16_t *>(heap_caps_aligned_alloc(128, TILE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   }
-  if (!rgb_frame_) {
-    logger_.error("Could not allocate {} bytes for the RGB frame", needed);
+  if (!tile_buf_) {
+    logger_.error("Could not allocate {} bytes for the video tile", TILE_BYTES);
     return false;
   }
-  rgb_frame_bytes_ = needed;
+  tile_buf_bytes_ = TILE_BYTES;
   return true;
 }
 
-bool Tab5Emu::blit_rgb_frame() {
-  auto fb = dpi_frame_buffer();
-  if (!fb || !ppa_client_) {
-    return false;
-  }
+Tab5Emu::Layout Tab5Emu::layout() const {
+  Layout lo{};
   // the LVGL rotation the GUI configured; the BSP's flush uses the identical
   // LVGL->PPA mapping, so the game frames come out the same way up as the GUI
   auto rotation = lv_display_get_rotation(lv_display_get_default());
-  ppa_srm_rotation_angle_t angle = PPA_SRM_ROTATION_ANGLE_0;
-  bool swap = false;
+  lo.angle = PPA_SRM_ROTATION_ANGLE_0;
+  lo.swap = false;
   switch (rotation) {
   case LV_DISPLAY_ROTATION_90:
-    angle = PPA_SRM_ROTATION_ANGLE_90;
-    swap = true;
+    lo.angle = PPA_SRM_ROTATION_ANGLE_90;
+    lo.swap = true;
     break;
   case LV_DISPLAY_ROTATION_180:
-    angle = PPA_SRM_ROTATION_ANGLE_180;
+    lo.angle = PPA_SRM_ROTATION_ANGLE_180;
     break;
   case LV_DISPLAY_ROTATION_270:
-    angle = PPA_SRM_ROTATION_ANGLE_270;
-    swap = true;
+    lo.angle = PPA_SRM_ROTATION_ANGLE_270;
+    lo.swap = true;
     break;
   default:
     break;
@@ -397,45 +398,81 @@ bool Tab5Emu::blit_rgb_frame() {
   // panel (native) picture size
   const uint32_t pic_w = Bsp::display_width();  // 720
   const uint32_t pic_h = Bsp::display_height(); // 1280
-  // scaled block size in landscape (logical) space
   const uint32_t in_w = staging_width();
   const uint32_t in_h = staging_height();
-  const float scale_x = static_cast<float>(display_width_) / static_cast<float>(in_w);
-  const float scale_y = static_cast<float>(display_height_) / static_cast<float>(in_h);
-  const uint32_t out_w = static_cast<uint32_t>(in_w * scale_x);
-  const uint32_t out_h = static_cast<uint32_t>(in_h * scale_y);
+  // the PPA scales in 1/16 steps; use the ratio it will actually apply so the
+  // tiles line up exactly
+  auto quantize = [](float s) { return std::floor(s * 16.0f) / 16.0f; };
+  lo.scale_x = quantize(static_cast<float>(display_width_) / static_cast<float>(in_w));
+  lo.scale_y = quantize(static_cast<float>(display_height_) / static_cast<float>(in_h));
+  lo.out_w = static_cast<uint32_t>(in_w * lo.scale_x);
+  lo.out_h = static_cast<uint32_t>(in_h * lo.scale_y);
   // centered; a centered box has the same offsets whichever way it is rotated
-  const uint32_t off_x = swap ? (pic_w - out_h) / 2 : (pic_w - out_w) / 2;
-  const uint32_t off_y = swap ? (pic_h - out_w) / 2 : (pic_h - out_h) / 2;
+  lo.off_x = lo.swap ? (pic_w - lo.out_h) / 2 : (pic_w - lo.out_w) / 2;
+  lo.off_y = lo.swap ? (pic_h - lo.out_w) / 2 : (pic_h - lo.out_h) / 2;
+  return lo;
+}
 
+bool Tab5Emu::blit_tile(const Layout &lo, size_t x0, size_t y0, size_t tw, size_t th) {
+  auto fb = dpi_frame_buffer();
+  if (!fb || !ppa_client_) {
+    return false;
+  }
+  // the tile's scaled rect in landscape (logical) space; tile origins are
+  // multiples of 16 so these are exact for any 1/16-step scale
+  const uint32_t X0 = static_cast<uint32_t>(std::lround(x0 * lo.scale_x));
+  const uint32_t Y0 = static_cast<uint32_t>(std::lround(y0 * lo.scale_y));
+  const uint32_t X1 = static_cast<uint32_t>(std::lround((x0 + tw) * lo.scale_x));
+  const uint32_t Y1 = static_cast<uint32_t>(std::lround((y0 + th) * lo.scale_y));
+  // where that rect lands on the panel (same mapping as lv_display_rotate_area)
+  uint32_t bx = 0, by = 0;
+  switch (lo.angle) {
+  case PPA_SRM_ROTATION_ANGLE_90:
+    bx = Y0;
+    by = lo.out_w - X1;
+    break;
+  case PPA_SRM_ROTATION_ANGLE_180:
+    bx = lo.out_w - X1;
+    by = lo.out_h - Y1;
+    break;
+  case PPA_SRM_ROTATION_ANGLE_270:
+    bx = lo.out_h - Y1;
+    by = X0;
+    break;
+  default:
+    bx = X0;
+    by = Y0;
+    break;
+  }
   ppa_srm_oper_config_t srm = {};
-  srm.in.buffer = rgb_frame_;
-  srm.in.pic_w = in_w;
-  srm.in.pic_h = in_h;
-  srm.in.block_w = in_w;
-  srm.in.block_h = in_h;
+  srm.in.buffer = tile_buf_;
+  srm.in.pic_w = tw;
+  srm.in.pic_h = th;
+  srm.in.block_w = tw;
+  srm.in.block_h = th;
   srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
   srm.out.buffer = fb;
   srm.out.buffer_size = dpi_fb_bytes_;
-  srm.out.pic_w = pic_w;
-  srm.out.pic_h = pic_h;
-  srm.out.block_offset_x = off_x;
-  srm.out.block_offset_y = off_y;
+  srm.out.pic_w = Bsp::display_width();
+  srm.out.pic_h = Bsp::display_height();
+  srm.out.block_offset_x = lo.off_x + bx;
+  srm.out.block_offset_y = lo.off_y + by;
   srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  srm.rotation_angle = angle;
-  srm.scale_x = scale_x;
-  srm.scale_y = scale_y;
+  srm.rotation_angle = lo.angle;
+  srm.scale_x = lo.scale_x;
+  srm.scale_y = lo.scale_y;
   srm.mode = PPA_TRANS_MODE_BLOCKING;
   auto err = ppa_do_scale_rotate_mirror(ppa_client_, &srm);
   if (err != ESP_OK) {
-    logger_.error_rate_limited("PPA scale/rotate failed: {}", esp_err_to_name(err));
+    logger_.error_rate_limited("PPA scale/rotate failed: {} (tile {},{} {}x{} -> {},{})", esp_err_to_name(err), x0,
+                               y0, tw, th, lo.off_x + bx, lo.off_y + by);
     return false;
   }
   return true;
 }
 
 bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified) {
-  VideoFrame vf{nullptr, nullptr};
+  VideoFrame vf{nullptr, nullptr, 0, 0};
   if (xQueueReceive(video_queue_, &vf, portMAX_DELAY) != pdTRUE) {
     return false;
   }
@@ -444,110 +481,148 @@ bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bo
     xSemaphoreGive(frame_done_);
     return false;
   }
-  if (!ensure_rgb_frame()) {
+  if (!ensure_tile_buffer() || native_width_ == 0 || native_height_ == 0) {
     xSemaphoreGive(frame_done_);
     return false;
   }
   const auto t0 = esp_timer_get_time();
-  convert_frame(vf.frame, vf.overlay);
-  blit_rgb_frame();
+  const auto lo = layout();
+  const size_t sw = staging_width();
+  const size_t sh = staging_height();
+  const size_t tile_pixels = tile_buf_bytes_ / sizeof(uint16_t);
+  // Tile along the axis that maps to panel rows: the PPA driver cache-syncs
+  // every panel row a block touches, so a tile should cover few panel rows.
+  // Tile origins are multiples of 16 pixels so they scale to exact positions.
+  size_t tw = sw, th = sh;
+  if (sw * sh > tile_pixels) {
+    if (lo.swap) {
+      tw = std::max<size_t>(16, (tile_pixels / sh) & ~size_t(15));
+    } else {
+      th = std::max<size_t>(16, (tile_pixels / sw) & ~size_t(15));
+    }
+  }
+  uint64_t convert_us = 0, blit_us = 0;
+  uint32_t tiles = 0;
+  for (size_t y0 = 0; y0 < sh; y0 += th) {
+    const size_t h = std::min(th, sh - y0);
+    for (size_t x0 = 0; x0 < sw; x0 += tw) {
+      const size_t w = std::min(tw, sw - x0);
+      const auto t1 = esp_timer_get_time();
+      convert_tile(vf.frame, vf.overlay, vf.overlay_row_begin, vf.overlay_row_end, x0, y0, w, h);
+      const auto t2 = esp_timer_get_time();
+      blit_tile(lo, x0, y0, w, h);
+      const auto t3 = esp_timer_get_time();
+      convert_us += t2 - t1;
+      blit_us += t3 - t2;
+      tiles++;
+    }
+  }
+  video_stats_.convert_us += convert_us;
+  video_stats_.blit_us += blit_us;
+  video_stats_.frames++;
+  video_stats_.tiles += tiles;
   update_frame_time(esp_timer_get_time() - t0);
   xSemaphoreGive(frame_done_);
   return false;
 }
 
-// Convert the native frame into the RGB565 staging buffer. With an overlay the
-// staging buffer is the native frame upscaled by staging_scale() (nearest
-// neighbour) with the overlay drawn 1:1 on top, centered, palette index 0
-// transparent.
-void Tab5Emu::convert_frame(const void *frame, const void *overlay) {
+// Convert the staging rect [x0,x0+tw)x[y0,y0+th) into the tile buffer (pitch
+// tw). The staging frame is the native frame upscaled by staging_scale()
+// (nearest neighbour) with the overlay drawn 1:1 on top, centered, palette
+// index 0 transparent.
+void Tab5Emu::convert_tile(const void *frame, const void *overlay, size_t ov_r0, size_t ov_r1, size_t x0, size_t y0,
+                           size_t tw, size_t th) {
   const size_t k = staging_scale();
   const size_t sw = staging_width();
   const size_t sh = staging_height();
+  uint16_t *tile = tile_buf_;
   if (!has_palette()) {
-    // RGB565 native frames: no overlay support, plain copy
+    // RGB565 native frames: no overlay support (k == 1), plain copy
     const uint16_t *src = static_cast<const uint16_t *>(frame);
-    if (native_pitch_ == native_width_) {
-      memcpy(rgb_frame_, src, native_width_ * native_height_ * sizeof(uint16_t));
-    } else {
-      for (size_t y = 0; y < native_height_; y++) {
-        memcpy(rgb_frame_ + y * native_width_, src + y * native_pitch_, native_width_ * sizeof(uint16_t));
-      }
+    for (size_t r = 0; r < th; r++) {
+      memcpy(tile + r * tw, src + (y0 + r) * native_pitch_ + x0, tw * sizeof(uint16_t));
     }
     return;
   }
   const uint8_t *src = static_cast<const uint8_t *>(frame);
   const uint16_t *pal = palette_;
-  if (k == 1) {
-    for (size_t y = 0; y < native_height_; y++) {
-      const uint8_t *row = src + y * native_pitch_;
-      uint16_t *dst = rgb_frame_ + y * native_width_;
+  for (size_t r = 0; r < th; r++) {
+    const size_t Y = y0 + r;
+    uint16_t *dst = tile + r * tw;
+    if (k > 1 && (Y % k) != 0 && r > 0) {
+      // same native row as the previous staging row
+      memcpy(dst, dst - tw, tw * sizeof(uint16_t));
+      continue;
+    }
+    const uint8_t *row = src + (Y / k) * native_pitch_;
+    if (k == 1) {
+      const uint8_t *s = row + x0;
       size_t x = 0;
-      for (; x + 4 <= native_width_; x += 4) {
-        dst[x + 0] = pal[row[x + 0]];
-        dst[x + 1] = pal[row[x + 1]];
-        dst[x + 2] = pal[row[x + 2]];
-        dst[x + 3] = pal[row[x + 3]];
+      for (; x + 4 <= tw; x += 4) {
+        dst[x + 0] = pal[s[x + 0]];
+        dst[x + 1] = pal[s[x + 1]];
+        dst[x + 2] = pal[s[x + 2]];
+        dst[x + 3] = pal[s[x + 3]];
       }
-      for (; x < native_width_; x++) {
-        dst[x] = pal[row[x]];
+      for (; x < tw; x++) {
+        dst[x] = pal[s[x]];
       }
-    }
-  } else if (k == 2) {
-    // the common case (e.g. 426x240 world under a 640x480 HUD): write pixel
-    // pairs as 32-bit words, then duplicate the row
-    for (size_t y = 0; y < native_height_; y++) {
-      const uint8_t *row = src + y * native_pitch_;
-      uint32_t *dst = reinterpret_cast<uint32_t *>(rgb_frame_ + (2 * y) * sw);
-      for (size_t x = 0; x < native_width_; x++) {
-        const uint32_t p = pal[row[x]];
-        dst[x] = p | (p << 16);
+    } else if (k == 2 && (x0 % 2) == 0 && (tw % 2) == 0) {
+      // write pixel pairs as 32-bit words
+      const uint8_t *s = row + x0 / 2;
+      uint32_t *d32 = reinterpret_cast<uint32_t *>(dst);
+      const size_t n = tw / 2;
+      for (size_t i = 0; i < n; i++) {
+        const uint32_t p = pal[s[i]];
+        d32[i] = p | (p << 16);
       }
-      memcpy(dst + sw / 2, dst, sw * sizeof(uint16_t));
-    }
-  } else {
-    for (size_t y = 0; y < native_height_; y++) {
-      const uint8_t *row = src + y * native_pitch_;
-      uint16_t *dst = rgb_frame_ + (k * y) * sw;
-      for (size_t x = 0; x < native_width_; x++) {
-        const uint16_t p = pal[row[x]];
-        for (size_t i = 0; i < k; i++) {
-          dst[k * x + i] = p;
-        }
-      }
-      for (size_t i = 1; i < k; i++) {
-        memcpy(dst + i * sw, dst, sw * sizeof(uint16_t));
+    } else {
+      for (size_t x = 0; x < tw; x++) {
+        dst[x] = pal[row[(x0 + x) / k]];
       }
     }
   }
   if (!overlay || overlay_width_ == 0 || overlay_height_ == 0) {
     return;
   }
-  // keyed overlay, 1:1, centered in the staging frame. Rows / 4-pixel groups
-  // that are entirely transparent (index 0) are skipped cheaply, so a mostly
-  // empty HUD layer costs little.
+  // keyed overlay, 1:1, centered in the staging frame; only the overlay rows
+  // in [ov_r0, ov_r1) can hold visible pixels. 4-pixel groups that are all
+  // transparent are skipped cheaply.
   const size_t ow = std::min(overlay_width_, sw);
   const size_t oh = std::min(overlay_height_, sh);
   const size_t ox = (sw - ow) / 2;
   const size_t oy = (sh - oh) / 2;
+  // overlay row / column ranges (in overlay pixels) intersecting this tile
+  const size_t sy0 = std::max(oy, y0), sy1 = std::min(oy + oh, y0 + th);
+  const size_t sx0 = std::max(ox, x0), sx1 = std::min(ox + ow, x0 + tw);
+  if (sy1 <= sy0 || sx1 <= sx0) {
+    return;
+  }
+  const size_t r0 = std::max(ov_r0, sy0 - oy);
+  const size_t r1 = std::min(ov_r1, sy1 - oy);
+  const size_t c0 = sx0 - ox;
+  const size_t c1 = sx1 - ox;
+  if (r1 <= r0) {
+    return;
+  }
   const uint8_t *ov = static_cast<const uint8_t *>(overlay);
-  for (size_t y = 0; y < oh; y++) {
-    const uint8_t *row = ov + y * overlay_pitch_;
-    uint16_t *dst = rgb_frame_ + (oy + y) * sw + ox;
-    size_t x = 0;
-    for (; x + 4 <= ow; x += 4) {
+  for (size_t r = r0; r < r1; r++) {
+    const uint8_t *row = ov + r * overlay_pitch_;
+    uint16_t *dst = tile + (oy + r - y0) * tw + (ox - x0);
+    size_t c = c0;
+    for (; c + 4 <= c1; c += 4) {
       uint32_t word;
-      memcpy(&word, row + x, sizeof(word));
+      memcpy(&word, row + c, sizeof(word));
       if (word == 0) {
         continue;
       }
-      if (row[x + 0]) dst[x + 0] = pal[row[x + 0]];
-      if (row[x + 1]) dst[x + 1] = pal[row[x + 1]];
-      if (row[x + 2]) dst[x + 2] = pal[row[x + 2]];
-      if (row[x + 3]) dst[x + 3] = pal[row[x + 3]];
+      if (row[c + 0]) dst[c + 0] = pal[row[c + 0]];
+      if (row[c + 1]) dst[c + 1] = pal[row[c + 1]];
+      if (row[c + 2]) dst[c + 2] = pal[row[c + 2]];
+      if (row[c + 3]) dst[c + 3] = pal[row[c + 3]];
     }
-    for (; x < ow; x++) {
-      if (row[x]) dst[x] = pal[row[x]];
+    for (; c < c1; c++) {
+      if (row[c]) dst[c] = pal[row[c]];
     }
   }
 }

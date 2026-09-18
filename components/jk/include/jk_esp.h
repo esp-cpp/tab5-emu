@@ -30,6 +30,9 @@ void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch
 void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, int pitch,
                                  const uint8_t *overlay, int overlay_width, int overlay_height,
                                  int overlay_pitch, const uint8_t *pal24);
+/// Log presentation statistics (presents, video task time, wait time) since
+/// the previous call; used by the engine's periodic frame report.
+void jk_esp_present_report(void);
 /// Present an RGB565 frame.
 void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pitch);
 /// Read the current input state.

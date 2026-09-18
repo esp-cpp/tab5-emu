@@ -1,6 +1,8 @@
 #include "jk.hpp"
+#include "statistics.hpp"
 #include "jk_esp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -57,6 +59,7 @@ int g_overlay_w = 0, g_overlay_h = 0;
 // ---------------------------------------------------------------------------
 extern "C" {
 
+uint64_t jk_esp_us_copy = 0;
 uint64_t jk_esp_us_input = 0, jk_esp_us_wait = 0, jk_esp_us_free = 0, jk_esp_us_realloc = 0, jk_esp_us_log = 0;
 uint32_t jk_esp_n_input = 0, jk_esp_n_wait = 0, jk_esp_n_free = 0, jk_esp_n_realloc = 0, jk_esp_n_log = 0;
 
@@ -128,6 +131,7 @@ void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, i
     emu.wait_frame();
     jk_esp_us_wait += esp_timer_get_time() - t0; jk_esp_n_wait++;
   }
+  const auto t_copy = esp_timer_get_time();
   auto &dst = g_frame8[g_frame8_index];
   g_frame8_index ^= 1;
   if (pitch == width) {
@@ -139,20 +143,64 @@ void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, i
   }
   g_last_frame8 = dst.data();
   const uint8_t *ov = nullptr;
+  size_t ov_r0 = 0, ov_r1 = 0;
   if (overlay) {
-    // the overlay index follows the frame index (both were flipped above)
+    // the overlay index follows the frame index (both were flipped above).
+    // Only rows with any visible (non-zero) pixel are copied; the HUD leaves
+    // most of the 640x480 layer transparent.
     auto &odst = g_overlay8[g_frame8_index ^ 1];
-    if (overlay_pitch == overlay_width) {
-      memcpy(odst.data(), overlay, (size_t)overlay_width * overlay_height);
-    } else {
-      for (int y = 0; y < overlay_height; y++) {
-        memcpy(odst.data() + (size_t)y * overlay_width, overlay + (size_t)y * overlay_pitch, overlay_width);
+    ov_r0 = SIZE_MAX;
+    for (int y = 0; y < overlay_height; y++) {
+      const uint8_t *row = overlay + (size_t)y * overlay_pitch;
+      bool visible = false;
+      int x = 0;
+      for (; x + 4 <= overlay_width; x += 4) {
+        uint32_t word;
+        memcpy(&word, row + x, sizeof(word));
+        if (word) {
+          visible = true;
+          break;
+        }
+      }
+      for (; !visible && x < overlay_width; x++) {
+        visible = row[x] != 0;
+      }
+      if (visible) {
+        memcpy(odst.data() + (size_t)y * overlay_width, row, overlay_width);
+        ov_r0 = std::min<size_t>(ov_r0, y);
+        ov_r1 = y + 1;
       }
     }
-    ov = odst.data();
+    if (ov_r1 > ov_r0) {
+      ov = odst.data();
+    } else {
+      ov_r0 = ov_r1 = 0;
+    }
   }
+  jk_esp_us_copy += esp_timer_get_time() - t_copy;
   emu.palette(g_palette565, 256);
-  emu.push_frame(dst.data(), ov);
+  emu.push_frame(dst.data(), ov, ov_r0, ov_r1);
+}
+
+void jk_esp_present_report(void) {
+  static uint32_t last_presents = 0;
+  static uint64_t last_wait = 0, last_copy = 0, last_us = 0;
+  const uint64_t now = esp_timer_get_time();
+  const uint32_t n = g_presents - last_presents;
+  const float secs = (now - last_us) / 1e6f;
+  const auto vs = Tab5Emu::get().video_stats();
+  const float vf = vs.frames ? static_cast<float>(vs.frames) : 1.0f;
+  logger.info("present: {} frames in {:.1f}s = {:.1f} fps; engine wait {:.1f} ms/frame, copy {:.1f} ms/frame; "
+              "video task avg {:.1f} ms max {:.1f} ms (convert {:.1f} ms, blit {:.1f} ms, {} tiles/frame)",
+              n, secs, secs > 0 ? n / secs : 0.0f, n ? (jk_esp_us_wait - last_wait) / 1000.0f / n : 0.0f,
+              n ? (jk_esp_us_copy - last_copy) / 1000.0f / n : 0.0f, get_frame_time_avg() / 1000.0f,
+              get_frame_time_max() / 1000.0f, vs.convert_us / 1000.0f / vf, vs.blit_us / 1000.0f / vf,
+              vs.frames ? vs.tiles / vs.frames : 0);
+  reset_frame_time();
+  last_presents = g_presents;
+  last_wait = jk_esp_us_wait;
+  last_copy = jk_esp_us_copy;
+  last_us = now;
 }
 
 void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pitch) {

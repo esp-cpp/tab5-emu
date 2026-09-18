@@ -161,7 +161,18 @@ public:
   /// Queue a frame for display. The frame (and overlay, if any) must stay valid
   /// until the next push_frame() call. Non-blocking; drops the frame if the
   /// previous one is still being processed.
-  void push_frame(const void *frame, const void *overlay = nullptr);
+  /// overlay_row_begin/end limit the overlay rows that may contain visible
+  /// pixels (rows outside are skipped without being read).
+  void push_frame(const void *frame, const void *overlay = nullptr, size_t overlay_row_begin = 0,
+                  size_t overlay_row_end = SIZE_MAX);
+  /// Video task timing since the last call (accumulated over frames).
+  struct VideoStats {
+    uint64_t convert_us{0}; ///< palette conversion / upscale / overlay
+    uint64_t blit_us{0};    ///< PPA scale + rotate into the panel buffer
+    uint32_t frames{0};
+    uint32_t tiles{0};
+  };
+  VideoStats video_stats(bool reset = true);
   /// Block until the previously pushed frame has been presented
   void wait_frame();
   VideoSetting video_setting() const { return video_setting_; }
@@ -174,9 +185,20 @@ protected:
 
   bool has_palette() const { return palette_ != nullptr; }
   bool video_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
-  bool ensure_rgb_frame();
-  bool blit_rgb_frame();
-  void convert_frame(const void *frame, const void *overlay);
+  bool ensure_tile_buffer();
+  struct Layout {
+    ppa_srm_rotation_angle_t angle;
+    bool swap; ///< 90/270: landscape x maps to panel y and vice versa
+    float scale_x, scale_y;
+    uint32_t out_w, out_h; ///< scaled size in landscape (logical) pixels
+    uint32_t off_x, off_y; ///< panel (native) offset of the centered picture
+  };
+  Layout layout() const;
+  /// Convert staging rect [x0,x0+tw)x[y0,y0+th) into the tile buffer
+  void convert_tile(const void *frame, const void *overlay, size_t ov_r0, size_t ov_r1, size_t x0, size_t y0,
+                    size_t tw, size_t th);
+  /// PPA the tile buffer (tw x th) to its place on the panel
+  bool blit_tile(const Layout &lo, size_t x0, size_t y0, size_t tw, size_t th);
   /// integer factor the native frame is upscaled by in the staging buffer
   size_t staging_scale() const;
   size_t staging_width() const { return native_width_ * staging_scale(); }
@@ -185,6 +207,8 @@ protected:
   struct VideoFrame {
     const void *frame;
     const void *overlay;
+    size_t overlay_row_begin;
+    size_t overlay_row_end;
   };
   void *dpi_frame_buffer();
   void on_touch(const TouchpadData &data);
@@ -215,8 +239,12 @@ protected:
   ppa_client_handle_t ppa_client_{nullptr};
   void *dpi_fb_{nullptr};
   size_t dpi_fb_bytes_{0};
-  uint16_t *rgb_frame_{nullptr};
-  size_t rgb_frame_bytes_{0};
+  // conversion tile: the staging frame is converted and blitted in tiles
+  // small enough to live in internal RAM
+  static constexpr size_t TILE_BYTES = 64 * 1024;
+  uint16_t *tile_buf_{nullptr};
+  size_t tile_buf_bytes_{0};
+  VideoStats video_stats_{};
   size_t native_width_{0};
   size_t native_height_{0};
   size_t native_pitch_{0};
