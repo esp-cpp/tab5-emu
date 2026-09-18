@@ -190,6 +190,7 @@ void jk_esp_print_heap(void) {
 int jk_esp_internal_width(void) { return g_native_w; }
 int jk_esp_internal_height(void) { return g_native_h; }
 const char *jk_esp_game_dir(void) { return g_config.game_dir.c_str(); }
+const char *jk_esp_engine_args(void) { return CONFIG_JK_ENGINE_ARGS; }
 
 } // extern "C"
 

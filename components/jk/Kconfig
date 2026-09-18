@@ -38,6 +38,14 @@ menu "Jedi Knight (OpenJKDF2)"
             sampling profiler (results on the console, symbolize with
             addr2line). Costs some console output and a little CPU.
 
+    config JK_ENGINE_ARGS
+        string "Engine command line"
+        default ""
+        help
+            Passed to the engine as its command line, e.g.
+            "-autostart -sp -episode JK1 -map 01narshadda" to jump straight
+            into a level (bring-up aid).
+
     config JK_AUDIO_SAMPLE_RATE
         int "Audio mixer sample rate"
         default 22050

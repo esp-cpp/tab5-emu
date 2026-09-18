@@ -49,6 +49,8 @@ int jk_esp_internal_width(void);
 int jk_esp_internal_height(void);
 /// The game data directory (engine working directory), e.g. /sdcard/jk
 const char *jk_esp_game_dir(void);
+/// Command line for the engine (CONFIG_JK_ENGINE_ARGS)
+const char *jk_esp_engine_args(void);
 
 #ifdef __cplusplus
 }
