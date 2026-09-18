@@ -22,6 +22,14 @@ typedef struct {
 
 /// Present an 8-bit paletted frame (pal is 256 RGB triplets).
 void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch, const uint8_t *pal24);
+/// Present an 8-bit paletted frame with a separate 8-bit overlay (HUD) that
+/// shares its palette. The overlay is drawn 1:1 (index 0 transparent), centered,
+/// over the frame after the frame has been integer-upscaled to at least the
+/// overlay's height, so a HUD drawn at a higher resolution than the world stays
+/// sharp. overlay may be NULL.
+void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, int pitch,
+                                 const uint8_t *overlay, int overlay_width, int overlay_height,
+                                 int overlay_pitch, const uint8_t *pal24);
 /// Present an RGB565 frame.
 void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pitch);
 /// Read the current input state.

@@ -47,6 +47,9 @@ int g_last_w = 0, g_last_h = 0;
 std::vector<uint8_t> g_frame8[2];
 int g_frame8_index = 0;
 const uint8_t *g_last_frame8 = nullptr;
+// same for the (optional) HUD overlay presented on top of the world frame
+std::vector<uint8_t> g_overlay8[2];
+int g_overlay_w = 0, g_overlay_h = 0;
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -84,20 +87,36 @@ static void apply_video_setting_for(int w, int h) {
 }
 
 void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch, const uint8_t *pal24) {
+  jk_esp_present_8bpp_overlay(pixels, width, height, pitch, nullptr, 0, 0, 0, pal24);
+}
+
+void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, int pitch,
+                                 const uint8_t *overlay, int overlay_width, int overlay_height,
+                                 int overlay_pitch, const uint8_t *pal24) {
   auto &emu = Tab5Emu::get();
+  if (!overlay || overlay_width <= 0 || overlay_height <= 0) {
+    overlay = nullptr;
+    overlay_width = overlay_height = 0;
+  }
   g_presents++;
   if (g_presents <= 10 || (g_presents % 100) == 0) {
     logger.info("present #{} {}x{} pitch {}", g_presents, width, height, pitch);
   }
-  if (width != g_last_w || height != g_last_h) {
+  if (width != g_last_w || height != g_last_h || overlay_width != g_overlay_w || overlay_height != g_overlay_h) {
     emu.wait_frame();
     emu.native_size(width, height, width);
+    emu.overlay_size(overlay_width, overlay_height, overlay_width);
     apply_video_setting_for(width, height);
     g_last_w = width;
     g_last_h = height;
+    g_overlay_w = overlay_width;
+    g_overlay_h = overlay_height;
     g_last_rgb565.assign((size_t)width * height * 2, 0);
     g_frame8[0].assign((size_t)width * height, 0);
     g_frame8[1].assign((size_t)width * height, 0);
+    g_overlay8[0].assign((size_t)overlay_width * overlay_height, 0);
+    g_overlay8[1].assign((size_t)overlay_width * overlay_height, 0);
+    logger.info("present {}x{} overlay {}x{}", width, height, overlay_width, overlay_height);
   }
   for (int i = 0; i < 256; i++) {
     uint8_t r = pal24[i * 3 + 0], g = pal24[i * 3 + 1], b = pal24[i * 3 + 2];
@@ -119,8 +138,21 @@ void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch
     }
   }
   g_last_frame8 = dst.data();
+  const uint8_t *ov = nullptr;
+  if (overlay) {
+    // the overlay index follows the frame index (both were flipped above)
+    auto &odst = g_overlay8[g_frame8_index ^ 1];
+    if (overlay_pitch == overlay_width) {
+      memcpy(odst.data(), overlay, (size_t)overlay_width * overlay_height);
+    } else {
+      for (int y = 0; y < overlay_height; y++) {
+        memcpy(odst.data() + (size_t)y * overlay_width, overlay + (size_t)y * overlay_pitch, overlay_width);
+      }
+    }
+    ov = odst.data();
+  }
   emu.palette(g_palette565, 256);
-  emu.push_frame(dst.data());
+  emu.push_frame(dst.data(), ov);
 }
 
 void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pitch) {

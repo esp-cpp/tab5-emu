@@ -149,10 +149,19 @@ public:
   /// Set the palette (RGB565) used to convert 8bpp frames; nullptr for RGB565
   /// native frames
   void palette(const uint16_t *palette, size_t size = 256);
-  /// Queue a frame for display. The frame must stay valid until the next
-  /// push_frame() call. Non-blocking; drops the frame if the previous one is
-  /// still being processed.
-  void push_frame(const void *frame);
+  /// Set the size of the optional 8bpp overlay (HUD) that can accompany a
+  /// paletted frame; pitch is in pixels (defaults to width). Width/height 0
+  /// disables the overlay. The overlay is drawn 1:1 (palette index 0 =
+  /// transparent), centered, on top of the native frame after the native frame
+  /// has been upscaled by the smallest integer factor that makes it at least as
+  /// tall as the overlay; the result is what the PPA then scales to the screen.
+  /// This keeps a HUD that is drawn at a higher resolution than the game's
+  /// world sharp instead of downsampling it into the world frame.
+  void overlay_size(size_t width, size_t height, int pitch = -1);
+  /// Queue a frame for display. The frame (and overlay, if any) must stay valid
+  /// until the next push_frame() call. Non-blocking; drops the frame if the
+  /// previous one is still being processed.
+  void push_frame(const void *frame, const void *overlay = nullptr);
   /// Block until the previously pushed frame has been presented
   void wait_frame();
   VideoSetting video_setting() const { return video_setting_; }
@@ -167,6 +176,16 @@ protected:
   bool video_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
   bool ensure_rgb_frame();
   bool blit_rgb_frame();
+  void convert_frame(const void *frame, const void *overlay);
+  /// integer factor the native frame is upscaled by in the staging buffer
+  size_t staging_scale() const;
+  size_t staging_width() const { return native_width_ * staging_scale(); }
+  size_t staging_height() const { return native_height_ * staging_scale(); }
+
+  struct VideoFrame {
+    const void *frame;
+    const void *overlay;
+  };
   void *dpi_frame_buffer();
   void on_touch(const TouchpadData &data);
 
@@ -201,6 +220,9 @@ protected:
   size_t native_width_{0};
   size_t native_height_{0};
   size_t native_pitch_{0};
+  size_t overlay_width_{0};
+  size_t overlay_height_{0};
+  size_t overlay_pitch_{0};
   size_t display_width_{lcd_width()};
   size_t display_height_{lcd_height()};
   const uint16_t *palette_{nullptr};
