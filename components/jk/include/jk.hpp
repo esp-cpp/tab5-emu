@@ -30,6 +30,9 @@ void save(const std::string &path, int slot);
 void load(const std::string &path, int slot);
 /// Native (internal) frame size.
 std::pair<size_t, size_t> video_size();
+/// Recompute the on-screen size from the HAL's video setting and the frame
+/// size currently presented (original = integer scale, fit, fill).
+void apply_video_setting();
 /// The last presented frame converted to RGB565, for screenshots.
 std::span<uint8_t> video_buffer_rgb565();
 

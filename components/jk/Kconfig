@@ -10,7 +10,7 @@ menu "Jedi Knight (OpenJKDF2)"
 
     config JK_INTERNAL_WIDTH
         int "Internal render width"
-        default 320
+        default 426
         help
             Width of the 8-bit frame the engine renders the world into. It is
             scaled to the screen by the PPA.

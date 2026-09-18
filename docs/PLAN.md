@@ -80,9 +80,10 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
    buffers; run it on a task with a PSRAM stack), `std3D_DrawMenu` present
    rate, `stdSound_ESP32_Pump()` still needs to be called from the frame
    loop.
-2. **World renders** through `rdZRaster` at 320x240 (or 426x240 16:9);
-   profile; move hot rasterizer loops to IRAM; tune PSRAM cache behavior.
-   Milestone: first level playable at >= 20 fps with the 20 Hz physics tick.
+2. **World renders** through `rdZRaster` at 426x240 (16:9), 2D layer at
+   640x480, PPA scales to the panel. **Done (2026-09-18): level 1 playable,
+   ~19 fps.** Remaining: profile the rasterizer, IRAM for hot loops, PSRAM
+   cache tuning; HUD is composited 4:3-centered into the wide world buffer.
 3. **Audio**: software mixer (port of the DSi `stdSound.c`) at 22050 Hz into
    the HAL audio path; music from `MUSIC/*.ogg` deferred (needs a decoder).
 4. **Input**: USB HID host on the Tab5's USB-A port (keyboard + mouse, or a

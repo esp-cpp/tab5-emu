@@ -97,25 +97,22 @@ protected:
 #endif
   }
 
+  // The engine presents frames of varying size (640x480 menus, the internal
+  // resolution in-game); the jk component applies the setting to whatever
+  // it is currently presenting.
   void set_original_video_setting() override {
 #if defined(ENABLE_JK)
-    auto [w, h] = jk::video_size();
-    // "original" is a 2x integer scale of the internal resolution, centered
-    Tab5Emu::get().display_size(w * 2, h * 2);
+    jk::apply_video_setting();
 #endif
   }
-
   void set_fit_video_setting() override {
 #if defined(ENABLE_JK)
-    auto [w, h] = jk::video_size();
-    float scale = static_cast<float>(SCREEN_HEIGHT) / static_cast<float>(h);
-    Tab5Emu::get().display_size(static_cast<size_t>(w * scale), SCREEN_HEIGHT);
+    jk::apply_video_setting();
 #endif
   }
-
   void set_fill_video_setting() override {
 #if defined(ENABLE_JK)
-    Tab5Emu::get().display_size(SCREEN_WIDTH, SCREEN_HEIGHT);
+    jk::apply_video_setting();
 #endif
   }
 

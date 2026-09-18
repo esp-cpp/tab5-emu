@@ -59,6 +59,30 @@ uint32_t jk_esp_n_input = 0, jk_esp_n_wait = 0, jk_esp_n_free = 0, jk_esp_n_real
 
 static uint32_t g_presents = 0;
 
+static void apply_video_setting_for(int w, int h) {
+  auto &emu = Tab5Emu::get();
+  const float sw = static_cast<float>(Tab5Emu::lcd_width()), sh = static_cast<float>(Tab5Emu::lcd_height());
+  switch (emu.video_setting()) {
+  case VideoSetting::ORIGINAL: {
+    // largest integer scale that fits
+    int s = std::max(1, (int)std::min(sw / w, sh / h));
+    emu.display_size(w * s, h * s);
+    break;
+  }
+  case VideoSetting::FILL:
+    emu.display_size(Tab5Emu::lcd_width(), Tab5Emu::lcd_height());
+    break;
+  case VideoSetting::FIT:
+  default: {
+    // the PPA scales in 1/16 steps; round down so the picture stays on screen
+    float s = std::min(sw / w, sh / h);
+    s = std::floor(s * 16.0f) / 16.0f;
+    emu.display_size(static_cast<size_t>(w * s), static_cast<size_t>(h * s));
+    break;
+  }
+  }
+}
+
 void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch, const uint8_t *pal24) {
   auto &emu = Tab5Emu::get();
   g_presents++;
@@ -66,7 +90,9 @@ void jk_esp_present_8bpp(const uint8_t *pixels, int width, int height, int pitch
     logger.info("present #{} {}x{} pitch {}", g_presents, width, height, pitch);
   }
   if (width != g_last_w || height != g_last_h) {
+    emu.wait_frame();
     emu.native_size(width, height, width);
+    apply_video_setting_for(width, height);
     g_last_w = width;
     g_last_h = height;
     g_last_rgb565.assign((size_t)width * height * 2, 0);
@@ -413,6 +439,12 @@ void load(const std::string &path, int slot) {
 }
 
 std::pair<size_t, size_t> video_size() { return {(size_t)g_native_w, (size_t)g_native_h}; }
+
+void apply_video_setting() {
+  if (g_last_w > 0 && g_last_h > 0) {
+    apply_video_setting_for(g_last_w, g_last_h);
+  }
+}
 
 std::span<uint8_t> video_buffer_rgb565() {
   // convert the last presented 8-bit frame on demand (screenshots only)
