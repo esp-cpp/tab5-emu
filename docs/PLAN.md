@@ -99,8 +99,11 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
 3. **Audio**: software mixer (port of the DSi `stdSound.c`) into the HAL audio
    path. **Done (2026-09-18):** mixes at the codec's 48 kHz on a 10 ms glue
    task (`jk_audio`, core 1) with back-pressure pacing and a mutex around the
-   voice list; confirmed working on hardware. Music from `MUSIC/*.ogg`
-   deferred (needs a decoder).
+   voice list; confirmed working on hardware. **Music (2026-09-18):** the
+   soundtrack streams from `MUSIC/Track*.wav` (IMA ADPCM, made once with
+   `tools/convert_music.py`; ~5% of a core incl. SD reads) through a
+   core-1 decode task and a PCM ring the mixer resamples from; `.ogg` also
+   plays via stb_vorbis but costs ~75% of a core, so it is only a fallback.
 4. **Input**: USB HID host on the Tab5's USB-A port. **Done (2026-09-18):
    keyboard + mouse** through the USB host library (hubs enabled, USB DMA
    memory in PSRAM) and Espressif's HID class driver; HID usages feed the
