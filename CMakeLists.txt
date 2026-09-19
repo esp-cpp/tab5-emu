@@ -19,6 +19,8 @@ idf_build_set_property(COMPILE_OPTIONS "-Wno-error=missing-field-initializers" A
 set(JK_COMPONENTS "jk")
 ### GENESIS (gwenesis, shared with esp-box-emu) ###
 set(GENESIS_COMPONENTS genesis shared_memory)
+### SNES (snes9x2005) ###
+set(SNES_COMPONENTS snes)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
@@ -29,6 +31,9 @@ endif()
 if(GENESIS_COMPONENTS)
   add_compile_definitions(ENABLE_GENESIS)
 endif()
+if(SNES_COMPONENTS)
+  add_compile_definitions(ENABLE_SNES)
+endif()
 
 if(DARK_FORCES_COMPONENTS)
   add_compile_definitions(ENABLE_DARK_FORCES)
@@ -37,6 +42,7 @@ endif()
 set(GAME_COMPONENTS
   ${JK_COMPONENTS}
   ${GENESIS_COMPONENTS}
+  ${SNES_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
   )
 
