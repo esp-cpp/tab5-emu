@@ -139,6 +139,10 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
   video tile and frame buffers are now PSRAM / per-cart, main stack 16 KB;
   ~150 KB free before a cart starts. Remaining levers if a core needs more:
   the engine's ~60 KB of GUI menu tables in .data, L2 cache 256 -> 128 KB.
-- **SNES**: esp-box-emu's component is an unbuilt stub (teensysnes tree); plan
-  is snes9x2005. **GBA**: no core yet; plan is gpSP's interpreter with
-  frameskip. Both unproven on a 360 MHz in-order RISC-V.
+- **SNES (snes9x2005)** and **GBA (gpSP interpreter)** are in (2026-09-19):
+  `components/snes` drives the core through a port of its libretro front end
+  (`snes_glue.c`); `components/gba` compiles gpSP's own libretro front end
+  and hosts it with a minimal libretro environment (`gba.cpp`). Both cores'
+  static state is moved to PSRAM with `tools/bss_to_psram.py`. Adaptive
+  frameskip in both (skip after an over-budget frame). Performance on the
+  360 MHz P4 not yet measured; untested on hardware at the time of writing.

@@ -61,11 +61,19 @@ docs/PLAN.md        the plan
   saves/                      # tab5-emu save-slot screenshots
 ```
 
-Example `metadata.csv`:
+Example `metadata.csv` (one line per game: rom path, boxart, name; the
+platform comes from the extension: `.md`/`.gen` Genesis, `.sfc`/`.smc` SNES,
+`.gba` Game Boy Advance, `jk.cd` Jedi Knight):
 
 ```
 jk/jk.cd, boxart/jk.jpg, Star Wars: Jedi Knight - Dark Forces II
+genesis/sonic.md, boxart/sonic.jpg, Sonic the Hedgehog
+snes/smw.sfc, boxart/smw.jpg, Super Mario World
+gba/mk.gba, boxart/mk.jpg, Mario Kart: Super Circuit
 ```
+
+A real `gba_bios.bin` next to a GBA ROM is used when present; otherwise the
+open-source BIOS built into gpSP is used.
 
 ## Build
 
