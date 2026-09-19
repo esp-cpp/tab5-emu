@@ -129,3 +129,16 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
 - ESP-IDF newlib vs the engine's POSIX expectations (`fopen` case-insensitive
   paths are handled by `fcaseopen`; long file names need `CONFIG_FATFS_LFN`).
 - Touch-only input is not a good way to play JK; USB HID is the real target.
+
+## Emulator cores (2026-09-19)
+
+- **Genesis / Mega Drive (gwenesis)**: shared with esp-box-emu (components
+  `genesis` + `shared_memory`, `box-emu.hpp` aliases BoxEmu to Tab5Emu). Runs
+  full speed: Sonic 1 at ~11 ms emulation per 60 Hz frame (88 fps capability).
+  Internal RAM was the blocker (22 KB free at cart start): profiler tables,
+  video tile and frame buffers are now PSRAM / per-cart, main stack 16 KB;
+  ~150 KB free before a cart starts. Remaining levers if a core needs more:
+  the engine's ~60 KB of GUI menu tables in .data, L2 cache 256 -> 128 KB.
+- **SNES**: esp-box-emu's component is an unbuilt stub (teensysnes tree); plan
+  is snes9x2005. **GBA**: no core yet; plan is gpSP's interpreter with
+  frameskip. Both unproven on a 360 MHz in-order RISC-V.
