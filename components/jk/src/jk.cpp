@@ -698,6 +698,20 @@ void deinit() {
   g_audio_task.reset();
 #endif
   Tab5Emu::get().wait_frame();
+  // the presentation buffers belong to this engine run
+  for (auto &b : g_frame8) {
+    b.clear();
+    b.shrink_to_fit();
+  }
+  for (auto &b : g_overlay8) {
+    b.clear();
+    b.shrink_to_fit();
+  }
+  g_last_rgb565.clear();
+  g_last_rgb565.shrink_to_fit();
+  g_last_frame8 = nullptr;
+  g_last_w = g_last_h = 0;
+  g_overlay_w = g_overlay_h = 0;
   g_pattern.clear();
   g_pattern.shrink_to_fit();
 }
