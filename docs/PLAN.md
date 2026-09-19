@@ -101,8 +101,13 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
    task (`jk_audio`, core 1) with back-pressure pacing and a mutex around the
    voice list; confirmed working on hardware. Music from `MUSIC/*.ogg`
    deferred (needs a decoder).
-4. **Input**: USB HID host on the Tab5's USB-A port (keyboard + mouse, or a
-   gamepad) via `usb_host_hid`; IMU aim as a stretch. Touch remains for menus.
+4. **Input**: USB HID host on the Tab5's USB-A port. **Done (2026-09-18):
+   keyboard + mouse** through the USB host library (hubs enabled, USB DMA
+   memory in PSRAM) and Espressif's HID class driver; HID usages feed the
+   engine's SDL-scancode table, mouse motion is look input in game and the
+   cursor in menus. Not yet: gamepads (generic HID needs per-device report
+   parsing), hub verified on hardware, in-game touch layout. IMU aim as a
+   stretch. Touch remains for menus.
 5. **Save / load** through the engine's native `.jks` saves under
    `/sdcard/jk/player`, wired to the pause menu slots.
 6. **Cutscenes** (`.SMK` via libsmacker) if memory allows; else skip.
