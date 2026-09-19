@@ -22,43 +22,57 @@ extern "C" void app_main(void) {
   logger.info("Bootup");
 
   // initialize the hardware abstraction layer
+  auto internal_free_log = [&](const char *stage) {
+    logger.info("internal RAM after {}: free {} (largest {}), dma-capable {}", stage,
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+  };
+  internal_free_log("boot");
   Tab5Emu &emu = Tab5Emu::get();
 
   if (!emu.initialize_tab5()) {
     logger.error("Failed to initialize the Tab5!");
     return;
   }
+  internal_free_log("initialize_tab5");
 
   if (!emu.initialize_sdcard()) {
     logger.warn("Failed to initialize SD card!");
     logger.warn("This may happen if the SD card is not inserted.");
   }
+  internal_free_log("initialize_sdcard");
 
   if (!emu.initialize_audio()) {
     logger.warn("Failed to initialize audio!");
   }
+  internal_free_log("initialize_audio");
 
   if (!emu.initialize_battery()) {
     logger.warn("Failed to initialize battery monitoring!");
   }
+  internal_free_log("initialize_battery");
 
   if (!emu.initialize_input()) {
     logger.warn("Failed to initialize input!");
   }
+  internal_free_log("initialize_input");
   if (!emu.initialize_usb_host()) {
     // not fatal: touch controls keep working without a keyboard / mouse
     logger.warn("USB host not available (no keyboard / mouse support)");
   }
+  internal_free_log("initialize_usb_host");
 
   if (!emu.initialize_video()) {
     logger.error("Failed to initialize video!");
     return;
   }
+  internal_free_log("initialize_video");
 
   logger.info("initializing gui...");
 
   // initialize the gui
   Gui gui({.log_level = espp::Logger::Verbosity::WARN});
+  internal_free_log("gui");
 
   print_heap_state();
 

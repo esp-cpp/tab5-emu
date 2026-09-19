@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <esp_attr.h>
+#include <esp_heap_caps.h>
 #include <esp_freertos_hooks.h>
 #include <riscv/csr.h>
 #include <freertos/FreeRTOS.h>
@@ -20,24 +21,35 @@ extern "C" {
 
 #define JK_PROF_SLOTS 4096
 struct jk_prof_slot { uint32_t pc; uint32_t count; };
-static DRAM_ATTR jk_prof_slot s_slots[JK_PROF_SLOTS];
+// the tables live in PSRAM (allocated on the first start): ~36 KB that would
+// otherwise sit in internal RAM even when the profiler is never used
+static DRAM_ATTR jk_prof_slot *s_slots = nullptr;
 static DRAM_ATTR volatile uint32_t s_total = 0, s_dropped = 0;
 static DRAM_ATTR volatile int s_enabled = 0;
 // where the main task is parked while idle runs: saved-context frame-pointer walks
 #define JK_PROF_CHAINS 48
 #define JK_PROF_DEPTH 16
 struct jk_prof_chain { uint32_t pc[JK_PROF_DEPTH]; uint32_t count; };
-static DRAM_ATTR jk_prof_chain s_chains[JK_PROF_CHAINS];
+static DRAM_ATTR jk_prof_chain *s_chains = nullptr;
 static DRAM_ATTR TaskHandle_t s_main = nullptr;
 static DRAM_ATTR TaskHandle_t s_idle0 = nullptr;
 static inline bool IRAM_ATTR jk_prof_ptr_ok(uint32_t a) {
   return (a >= 0x4FF00000u && a < 0x4FF80000u) || (a >= 0x48000000u && a < 0x4C000000u);
 }
 #define JK_PROF_TASKS 16
-static DRAM_ATTR TaskHandle_t s_task_h[JK_PROF_TASKS];
-static DRAM_ATTR uint32_t s_task_n[JK_PROF_TASKS];
+static DRAM_ATTR TaskHandle_t *s_task_h = nullptr;
+static DRAM_ATTR uint32_t *s_task_n = nullptr;
+static bool jk_prof_alloc() {
+  if (s_slots) return true;
+  s_slots = static_cast<jk_prof_slot *>(heap_caps_calloc(JK_PROF_SLOTS, sizeof(jk_prof_slot), MALLOC_CAP_SPIRAM));
+  s_chains = static_cast<jk_prof_chain *>(heap_caps_calloc(JK_PROF_CHAINS, sizeof(jk_prof_chain), MALLOC_CAP_SPIRAM));
+  s_task_h = static_cast<TaskHandle_t *>(heap_caps_calloc(JK_PROF_TASKS, sizeof(TaskHandle_t), MALLOC_CAP_SPIRAM));
+  s_task_n = static_cast<uint32_t *>(heap_caps_calloc(JK_PROF_TASKS, sizeof(uint32_t), MALLOC_CAP_SPIRAM));
+  return s_slots && s_chains && s_task_h && s_task_n;
+}
 
 static void IRAM_ATTR jk_prof_tick(void) {
+  if (!s_slots) return;
   if (!s_enabled) return;
   uint32_t pc = RV_READ_CSR(mepc);
   s_total = s_total + 1;
@@ -78,10 +90,13 @@ static void IRAM_ATTR jk_prof_tick(void) {
 
 void jk_prof_start(void) {
   static bool registered = false;
-  memset(s_slots, 0, sizeof(s_slots));
-  memset(s_task_h, 0, sizeof(s_task_h));
-  memset(s_task_n, 0, sizeof(s_task_n));
-  memset(s_chains, 0, sizeof(s_chains));
+  if (!jk_prof_alloc()) {
+    return;
+  }
+  memset(s_slots, 0, JK_PROF_SLOTS * sizeof(jk_prof_slot));
+  memset(s_task_h, 0, JK_PROF_TASKS * sizeof(TaskHandle_t));
+  memset(s_task_n, 0, JK_PROF_TASKS * sizeof(uint32_t));
+  memset(s_chains, 0, JK_PROF_CHAINS * sizeof(jk_prof_chain));
   s_main = xTaskGetHandle("jk_engine");
   s_idle0 = xTaskGetIdleTaskHandleForCore(0);
   s_total = 0; s_dropped = 0;
@@ -96,8 +111,9 @@ void jk_prof_stop(void) { s_enabled = 0; }
 
 void jk_prof_dump(int top) {
   s_enabled = 0;
+  if (!s_slots) return;
   std::vector<jk_prof_slot> v;
-  for (auto &s : s_slots) if (s.pc) v.push_back(s);
+  for (size_t i = 0; i < JK_PROF_SLOTS; i++) if (s_slots[i].pc) v.push_back(s_slots[i]);
   std::sort(v.begin(), v.end(), [](const jk_prof_slot &a, const jk_prof_slot &b) { return a.count > b.count; });
   espp::Logger logger({.tag = "prof", .level = espp::Logger::Verbosity::INFO});
   logger.info("samples {} dropped {} distinct {}", s_total, s_dropped, v.size());

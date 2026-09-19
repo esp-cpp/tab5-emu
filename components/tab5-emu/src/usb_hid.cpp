@@ -13,6 +13,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <esp_heap_caps.h>
 #include <usb/hid_host.h>
 #include <usb/hid_usage_keyboard.h>
 #include <usb/hid_usage_mouse.h>
@@ -150,14 +151,17 @@ bool Tab5Emu::initialize_usb_host() {
     delete hid;
     return false;
   }
-  if (xTaskCreatePinnedToCore(&UsbHid::usb_lib_task, "usb_events", 4096, hid, 6, &hid->usb_task, 1) != pdPASS) {
+  // both tasks live forever; PSRAM stacks keep internal RAM for DMA users
+  if (xTaskCreatePinnedToCoreWithCaps(&UsbHid::usb_lib_task, "usb_events", 4096, hid, 6, &hid->usb_task, 1,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
     logger_.error("could not create the USB event task");
     usb_host_uninstall();
     delete hid;
     return false;
   }
   hid->connect_queue = xQueueCreate(8, sizeof(hid_host_device_handle_t));
-  if (xTaskCreatePinnedToCore(&UsbHid::open_worker, "usb_hid", 4096, hid, 5, &hid->open_task, 1) != pdPASS) {
+  if (xTaskCreatePinnedToCoreWithCaps(&UsbHid::open_worker, "usb_hid", 4096, hid, 5, &hid->open_task, 1,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
     logger_.error("could not create the HID worker task");
     return false;
   }

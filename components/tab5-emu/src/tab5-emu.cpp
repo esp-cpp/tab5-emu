@@ -310,7 +310,9 @@ bool Tab5Emu::initialize_video() {
     logger_.error("Could not register a PPA client: {}", esp_err_to_name(err));
     return false;
   }
-  ensure_tile_buffer();
+  // the conversion tile (internal RAM) is allocated by the video task at the
+  // first frame and released with release_video_buffers() when a cart ends,
+  // so emulator cores get first pick of internal RAM for their own hot data
   video_queue_ = xQueueCreate(1, sizeof(VideoFrame));
   frame_done_ = xSemaphoreCreateBinary();
   using namespace std::placeholders;
@@ -354,6 +356,25 @@ size_t Tab5Emu::staging_scale() const {
 void Tab5Emu::palette(const uint16_t *palette, size_t size) {
   palette_ = palette;
   palette_size_ = size;
+}
+
+void Tab5Emu::release_video_buffers() {
+  wait_frame();
+  // nothing is queued now (wait_frame returned), the video task is idle
+  if (tile_buf_) {
+    heap_caps_free(tile_buf_);
+    tile_buf_ = nullptr;
+    tile_buf_bytes_ = 0;
+  }
+  for (auto &fb : frame_buffers_) {
+    if (fb) {
+      heap_caps_free(fb);
+      fb = nullptr;
+    }
+  }
+  native_width_ = native_height_ = native_pitch_ = 0;
+  overlay_width_ = overlay_height_ = overlay_pitch_ = 0;
+  palette_ = nullptr;
 }
 
 void Tab5Emu::clear_screen() {

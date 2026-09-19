@@ -168,6 +168,9 @@ public:
   bool initialize_video();
   /// Fill the whole panel with black
   void clear_screen();
+  /// Free the per-cart video buffers (conversion tile, frame_buffer0/1);
+  /// called when a cart ends. They are re-created on the next frame.
+  void release_video_buffers();
   /// Set the on-screen size (in logical landscape pixels) the native frame is
   /// scaled to. It is centered on the screen.
   void display_size(size_t width, size_t height);

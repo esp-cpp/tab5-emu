@@ -61,7 +61,10 @@ public:
     }
   }
 
-  virtual ~Cart() { logger_.info("Base dtor"); }
+  virtual ~Cart() {
+    logger_.info("Base dtor");
+    Tab5Emu::get().release_video_buffers();
+  }
 
   std::string get_rom_filename() const { return info_.rom_path; }
 

@@ -46,7 +46,7 @@ static void *allocate_shared_prefer_internal(size_t size, const char *name, shar
 
 void genesis_init_shared_memory(void) {
     // allocate m68k cpu state in shared memory
-    m68k = (m68ki_cpu_core*)allocate_shared(sizeof(m68ki_cpu_core), SHARED_MEM_INTERNAL);
+    m68k = (m68ki_cpu_core*)allocate_shared_prefer_internal(sizeof(m68ki_cpu_core), "m68k");
 
     // VRAM is large (64kB) and competes with M68K_RAM for the single big internal
     // block. M68K_RAM is allocated first (in genesis.cpp init()) and is hotter, so
@@ -54,19 +54,19 @@ void genesis_init_shared_memory(void) {
     VRAM = (uint8_t*)allocate_shared_prefer_internal(VRAM_MAX_SIZE, "VRAM", SHARED_MEM_CACHE_LINE); // 0x10000 (64kB) for VRAM
     ZRAM = (uint8_t*)allocate_shared_prefer_internal(MAX_Z80_RAM_SIZE, "ZRAM"); // 0x2000 (8kB) for Z80 RAM
 
-    ym2612 = (YM2612*)allocate_shared(sizeof(YM2612), SHARED_MEM_INTERNAL);
-    OPNREGS = (uint8_t*)allocate_shared(512, SHARED_MEM_INTERNAL);
+    ym2612 = (YM2612*)allocate_shared_prefer_internal(sizeof(YM2612), "ym2612");
+    OPNREGS = (uint8_t*)allocate_shared_prefer_internal(512, "OPNREGS");
     sin_tab = (unsigned int*)allocate_shared_prefer_internal(SIN_LEN * sizeof(unsigned int), "sin_tab");
 
-    render_buffer = (uint8_t*)allocate_shared(SCREEN_WIDTH + PIX_OVERFLOW*2, SHARED_MEM_INTERNAL, SHARED_MEM_CACHE_LINE);
-    sprite_buffer = (uint8_t*)allocate_shared(SCREEN_WIDTH + PIX_OVERFLOW*2, SHARED_MEM_INTERNAL, SHARED_MEM_CACHE_LINE);
+    render_buffer = (uint8_t*)allocate_shared_prefer_internal(SCREEN_WIDTH + PIX_OVERFLOW*2, "render_buffer", SHARED_MEM_CACHE_LINE);
+    sprite_buffer = (uint8_t*)allocate_shared_prefer_internal(SCREEN_WIDTH + PIX_OVERFLOW*2, "sprite_buffer", SHARED_MEM_CACHE_LINE);
 
-    CRAM = (uint16_t*)allocate_shared(CRAM_MAX_SIZE * sizeof(uint16_t), SHARED_MEM_INTERNAL);
-    SAT_CACHE = (uint8_t*)allocate_shared(SAT_CACHE_MAX_SIZE, SHARED_MEM_INTERNAL, SHARED_MEM_CACHE_LINE);
-    gwenesis_vdp_regs = (uint8_t*)allocate_shared(REG_SIZE, SHARED_MEM_INTERNAL);
-    fifo = (uint16_t*)allocate_shared(FIFO_SIZE * sizeof(uint16_t), SHARED_MEM_INTERNAL);
-    CRAM565 = (uint16_t*)allocate_shared(CRAM_MAX_SIZE * 4 * sizeof(uint16_t), SHARED_MEM_INTERNAL);
-    VSRAM = (uint16_t*)allocate_shared(VSRAM_MAX_SIZE * sizeof(uint16_t), SHARED_MEM_INTERNAL);
+    CRAM = (uint16_t*)allocate_shared_prefer_internal(CRAM_MAX_SIZE * sizeof(uint16_t), "CRAM");
+    SAT_CACHE = (uint8_t*)allocate_shared_prefer_internal(SAT_CACHE_MAX_SIZE, "SAT_CACHE", SHARED_MEM_CACHE_LINE);
+    gwenesis_vdp_regs = (uint8_t*)allocate_shared_prefer_internal(REG_SIZE, "gwenesis_vdp_regs");
+    fifo = (uint16_t*)allocate_shared_prefer_internal(FIFO_SIZE * sizeof(uint16_t), "fifo");
+    CRAM565 = (uint16_t*)allocate_shared_prefer_internal(CRAM_MAX_SIZE * 4 * sizeof(uint16_t), "CRAM565");
+    VSRAM = (uint16_t*)allocate_shared_prefer_internal(VSRAM_MAX_SIZE * sizeof(uint16_t), "VSRAM");
 
     tl_tab = (signed int*)allocate_shared_prefer_internal(13*2*256 * sizeof(signed int), "tl_tab");
 }
