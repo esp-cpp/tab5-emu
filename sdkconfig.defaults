@@ -94,3 +94,6 @@ CONFIG_LV_ASSERT_HANDLER_INCLUDE=""
 
 # USB host on the USB-A port: keyboard / mouse (HID), through hubs too
 CONFIG_USB_HOST_HUBS_SUPPORTED=y
+# the P4's USB DMA can read PSRAM; internal RAM is too scarce for the
+# 512-byte-aligned transfer descriptor lists once the game is running
+CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM=y
