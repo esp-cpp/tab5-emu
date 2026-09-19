@@ -21,6 +21,8 @@ set(JK_COMPONENTS "jk")
 set(GENESIS_COMPONENTS genesis shared_memory)
 ### SNES (snes9x2005) ###
 set(SNES_COMPONENTS snes)
+### GBA (gpSP) ###
+set(GBA_COMPONENTS gba)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
@@ -34,6 +36,9 @@ endif()
 if(SNES_COMPONENTS)
   add_compile_definitions(ENABLE_SNES)
 endif()
+if(GBA_COMPONENTS)
+  add_compile_definitions(ENABLE_GBA)
+endif()
 
 if(DARK_FORCES_COMPONENTS)
   add_compile_definitions(ENABLE_DARK_FORCES)
@@ -43,6 +48,7 @@ set(GAME_COMPONENTS
   ${JK_COMPONENTS}
   ${GENESIS_COMPONENTS}
   ${SNES_COMPONENTS}
+  ${GBA_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
   )
 
