@@ -60,6 +60,19 @@ uint32_t jk_esp_audio_rate(void);
 /// it, the engine takes it when it starts/stops/frees buffers.
 void jk_esp_audio_lock(void);
 void jk_esp_audio_unlock(void);
+/// Music (CD soundtrack) streaming: Ogg Vorbis files decoded on a background
+/// task and mixed into the software mixer's output.
+/// Open `path` (relative to the game dir or absolute) and start streaming;
+/// returns 1 on success. Replaces whatever was playing.
+int jk_esp_music_open(const char *path);
+void jk_esp_music_stop(void);
+/// 1 while the current file still has audio to play
+int jk_esp_music_playing(void);
+/// Music volume 0..1
+void jk_esp_music_volume(float volume);
+/// Mix the pending music into `frames` stereo frames at `rate` (called by the
+/// software mixer under the audio lock)
+void jk_esp_music_mix(int16_t *stereo, size_t frames, uint32_t rate);
 /// Milliseconds since boot.
 uint32_t jk_esp_time_ms(void);
 /// Microseconds since boot.

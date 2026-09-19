@@ -7,9 +7,9 @@
 set(JK_ROOT ${CMAKE_CURRENT_LIST_DIR}/OpenJKDF2)
 set(JK_SRC ${JK_ROOT}/src)
 
-set(JK_SRCS "src/jk.cpp" "src/jk_prof.cpp")
+set(JK_SRCS "src/jk.cpp" "src/jk_prof.cpp" "src/jk_music.cpp" "third_party/stb_vorbis.c")
 set(JK_INCLUDE_DIRS "include")
-set(JK_PRIV_INCLUDE_DIRS "src")
+set(JK_PRIV_INCLUDE_DIRS "src" "third_party")
 
 if(CONFIG_JK_ENGINE)
   # --- engine sources (mirrors OpenJKDF2/CMakeLists.txt + plat_dreamcast) ---
@@ -135,3 +135,9 @@ if(CONFIG_JK_ENGINE)
     COMMENT "Moving the engine's .bss to PSRAM"
     VERBATIM)
 endif()
+
+# vendored Ogg Vorbis decoder (public domain): not our warning set
+set_source_files_properties(third_party/stb_vorbis.c PROPERTIES COMPILE_OPTIONS
+  "-w;-O2;-DSTB_VORBIS_NO_PUSHDATA_API;-DSTB_VORBIS_MAX_CHANNELS=2")
+set_source_files_properties(src/jk_music.cpp PROPERTIES COMPILE_OPTIONS
+  "-DSTB_VORBIS_NO_PUSHDATA_API;-DSTB_VORBIS_MAX_CHANNELS=2")
