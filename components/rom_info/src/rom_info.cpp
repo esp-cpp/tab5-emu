@@ -55,6 +55,22 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 #if defined(ENABLE_DARK_FORCES)
       platform = Emulator::DARK_FORCES;
 #endif
+    } else if (endsWith(lp, ".gen")) { // sega genesis
+#if defined(ENABLE_GENESIS)
+      platform = Emulator::SEGA_GENESIS;
+#endif
+    } else if (endsWith(lp, ".md")) { // sega mega drive
+#if defined(ENABLE_GENESIS)
+      platform = Emulator::SEGA_MEGA_DRIVE;
+#endif
+    } else if (endsWith(lp, ".sfc") || endsWith(lp, ".smc")) { // snes
+#if defined(ENABLE_SNES)
+      platform = Emulator::SNES;
+#endif
+    } else if (endsWith(lp, ".gba")) { // game boy advance
+#if defined(ENABLE_GBA)
+      platform = Emulator::GBA;
+#endif
     }
     if (platform != Emulator::UNKNOWN) {
       infos.emplace_back(name, fs_prefix + boxart_path, fs_prefix + rom_path, platform);

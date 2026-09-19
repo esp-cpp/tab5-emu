@@ -232,8 +232,44 @@ void Tab5Emu::on_touch(const TouchpadData &raw) {
 }
 
 GamepadState Tab5Emu::gamepad_state() {
-  std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
-  return touch_gamepad_.state;
+  GamepadState state;
+  {
+    std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
+    state = touch_gamepad_.state;
+  }
+  // USB keyboard as a gamepad: arrows = d-pad, Z/X/A/S = A/B/X/Y (also
+  // Ctrl/Alt), Enter = start, Shift / Backspace = select
+  if (usb_keyboard_present()) {
+    const auto kb = keyboard_state();
+    auto key = [&](int usage) { return (kb.keys[usage >> 3] >> (usage & 7)) & 1; };
+    state.up |= key(82);
+    state.down |= key(81);
+    state.left |= key(80);
+    state.right |= key(79);
+    state.a |= key(29) | key(0xE0);    // z, left ctrl
+    state.b |= key(27) | key(0xE2);    // x, left alt
+    state.x |= key(4);                 // a
+    state.y |= key(22);                // s
+    state.start |= key(40) | key(88);  // enter, keypad enter
+    state.select |= key(0xE1) | key(42) | key(0xE5); // shift, backspace
+  }
+  return state;
+}
+
+uint8_t *Tab5Emu::frame_buffer0() {
+  if (!frame_buffers_[0]) {
+    frame_buffers_[0] = static_cast<uint8_t *>(
+        heap_caps_aligned_calloc(64, 1, FRAME_BUFFER_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
+  return frame_buffers_[0];
+}
+
+uint8_t *Tab5Emu::frame_buffer1() {
+  if (!frame_buffers_[1]) {
+    frame_buffers_[1] = static_cast<uint8_t *>(
+        heap_caps_aligned_calloc(64, 1, FRAME_BUFFER_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
+  return frame_buffers_[1];
 }
 
 /////////////////////////////////////////////////////////////////////////////

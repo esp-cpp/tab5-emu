@@ -17,12 +17,17 @@ idf_build_set_property(COMPILE_OPTIONS "-Wno-error=missing-field-initializers" A
 
 ### Jedi Knight: Dark Forces II (OpenJKDF2) ###
 set(JK_COMPONENTS "jk")
+### GENESIS (gwenesis, shared with esp-box-emu) ###
+set(GENESIS_COMPONENTS genesis shared_memory)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
 
 if(JK_COMPONENTS)
   add_compile_definitions(ENABLE_JK)
+endif()
+if(GENESIS_COMPONENTS)
+  add_compile_definitions(ENABLE_GENESIS)
 endif()
 
 if(DARK_FORCES_COMPONENTS)
@@ -31,14 +36,17 @@ endif()
 
 set(GAME_COMPONENTS
   ${JK_COMPONENTS}
+  ${GENESIS_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
   )
 
 set(
   COMPONENTS
-  "main esptool_py esp_lcd esp_psram task format display display_drivers monitor timer ${GAME_COMPONENTS} tab5-emu gui menu rom_info statistics"
+  main esptool_py esp_lcd esp_psram task format display display_drivers monitor timer
+  ${GAME_COMPONENTS} tab5-emu gui menu rom_info statistics
   CACHE STRING
   "List of components to include"
+  FORCE
   )
 
 project(tab5-emu)

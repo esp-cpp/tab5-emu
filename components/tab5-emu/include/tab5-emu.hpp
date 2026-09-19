@@ -207,6 +207,12 @@ public:
   void video_setting(VideoSetting setting) { video_setting_ = setting; }
   /// Native frame size currently configured
   std::pair<size_t, size_t> native_size() const { return {native_width_, native_height_}; }
+  /// Two RGB565 frame buffers emulator cores can render into and hand to
+  /// push_frame() alternately (esp-box-emu convention). Sized for the largest
+  /// native emulator frame (FRAME_BUFFER_PIXELS), allocated on first use.
+  static constexpr size_t FRAME_BUFFER_PIXELS = 320 * 240;
+  uint8_t *frame_buffer0();
+  uint8_t *frame_buffer1();
 
 protected:
   Tab5Emu();
@@ -283,6 +289,7 @@ protected:
   static constexpr size_t TILE_BYTES = 64 * 1024;
   uint16_t *tile_buf_{nullptr};
   size_t tile_buf_bytes_{0};
+  uint8_t *frame_buffers_[2]{nullptr, nullptr};
   VideoStats video_stats_{};
   size_t native_width_{0};
   size_t native_height_{0};
