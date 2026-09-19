@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -186,6 +187,20 @@ protected:
   virtual void set_original_video_setting() = 0;
   virtual void set_fit_video_setting() = 0;
   virtual void set_fill_video_setting() = 0;
+
+  /// Helpers for the video settings of a fixed native size (emulator cores):
+  /// original = largest integer scale that fits, fit = largest scale that
+  /// keeps the aspect ratio (in the PPA's 1/16 steps), fill = whole screen.
+  void display_original(size_t w, size_t h) {
+    const size_t s = std::max<size_t>(1, std::min(SCREEN_WIDTH / w, SCREEN_HEIGHT / h));
+    Tab5Emu::get().display_size(w * s, h * s);
+  }
+  void display_fit(size_t w, size_t h) {
+    float s = std::min(static_cast<float>(SCREEN_WIDTH) / w, static_cast<float>(SCREEN_HEIGHT) / h);
+    s = std::floor(s * 16.0f) / 16.0f;
+    Tab5Emu::get().display_size(static_cast<size_t>(w * s), static_cast<size_t>(h * s));
+  }
+  void display_fill() { Tab5Emu::get().display_size(SCREEN_WIDTH, SCREEN_HEIGHT); }
 
   virtual void handle_video_setting() {
     switch (Tab5Emu::get().video_setting()) {

@@ -65,6 +65,8 @@ protected:
   lv_obj_t *screen_{nullptr};
   lv_obj_t *rom_list_{nullptr};
   lv_obj_t *boxart_{nullptr};
+  lv_draw_buf_t *boxart_buf_{nullptr}; ///< decoded boxart the image widget shows
+  void load_boxart(const std::string &path);
   lv_obj_t *title_label_{nullptr};
   lv_obj_t *play_button_{nullptr};
   lv_obj_t *volume_slider_{nullptr};

@@ -1,5 +1,8 @@
 #include "gui.hpp"
 
+#include "lvgl_private.h"
+
+
 using namespace std::chrono_literals;
 
 Gui::Gui(const Config &config)
@@ -206,11 +209,71 @@ void Gui::select_rom(int index) {
   }
   const auto &rom = rom_infos_[index];
   lv_label_set_text(title_label_, rom.name.c_str());
-  // LVGL's POSIX fs driver is registered as 'S:'; the boxart path is absolute
-  // on the SD card, so "S:/sdcard/boxart/foo.jpg"
-  static std::string src;
-  src = "S:" + rom.boxart_path;
-  lv_image_set_src(boxart_, src.c_str());
+  load_boxart(rom.boxart_path);
+}
+
+// LVGL's JPEG decoder (TJPGD) only yields the image block by block, and LVGL
+// cannot scale a block-decoded image, so decode the boxart into a full RGB565
+// buffer here (once per selection) and show that. The POSIX fs driver is
+// registered as 'S:' and passes the rest of the path through unchanged.
+void Gui::load_boxart(const std::string &path) {
+  lv_image_set_src(boxart_, nullptr);
+  if (boxart_buf_) {
+    lv_draw_buf_destroy(boxart_buf_);
+    boxart_buf_ = nullptr;
+  }
+  if (path.empty()) {
+    return;
+  }
+  const std::string src = "S:" + path;
+  lv_image_decoder_dsc_t dsc{};
+  if (lv_image_decoder_open(&dsc, src.c_str(), nullptr) != LV_RESULT_OK) {
+    logger_.warn("boxart '{}': cannot decode", path);
+    return;
+  }
+  const uint32_t w = dsc.header.w, h = dsc.header.h;
+  if (dsc.decoded && dsc.decoded->data) {
+    // fully decoded formats: LVGL scales those itself, use the file directly
+    lv_image_decoder_close(&dsc);
+    static std::string file_src;
+    file_src = src;
+    lv_image_set_src(boxart_, file_src.c_str());
+    return;
+  }
+  auto *out = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+  if (!out) {
+    lv_image_decoder_close(&dsc);
+    return;
+  }
+  lv_area_t full = {0, 0, static_cast<int32_t>(w) - 1, static_cast<int32_t>(h) - 1};
+  lv_area_t area{};
+  area.y1 = LV_COORD_MIN;
+  while (lv_image_decoder_get_area(&dsc, &full, &area) == LV_RESULT_OK) {
+    if (area.y1 >= static_cast<int32_t>(h)) {
+      break;
+    }
+    const lv_draw_buf_t *blk = dsc.decoded;
+    if (!blk || !blk->data) {
+      break;
+    }
+    const int bw = lv_area_get_width(&area), bh = lv_area_get_height(&area);
+    for (int y = 0; y < bh; y++) {
+      const uint8_t *srow = blk->data + y * blk->header.stride; // RGB888
+      uint16_t *drow = reinterpret_cast<uint16_t *>(out->data + (area.y1 + y) * out->header.stride) + area.x1;
+      for (int x = 0; x < bw; x++) {
+        const uint8_t r = srow[3 * x + 2], g = srow[3 * x + 1], b = srow[3 * x + 0];
+        drow[x] = static_cast<uint16_t>(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+      }
+    }
+    // the last block of the image
+    if (area.y2 >= static_cast<int32_t>(h) - 1 && area.x2 >= static_cast<int32_t>(w) - 1) {
+      break;
+    }
+  }
+  lv_image_decoder_close(&dsc);
+  boxart_buf_ = out;
+  lv_image_set_src(boxart_, boxart_buf_);
+  logger_.info("boxart '{}': {}x{}", path, w, h);
 }
 
 void Gui::event_callback(lv_event_t *e) {
