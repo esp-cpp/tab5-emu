@@ -648,7 +648,9 @@ bool init(const Config &config) {
           logger.error("engine startup failed");
         }
         g_engine_running = false;
-        vTaskDelete(nullptr);
+        // a task created ...WithCaps must be deleted by another task for its
+        // (PSRAM) stack to be freed: park here, deinit() deletes us
+        vTaskSuspend(nullptr);
       },
       "jk_engine", ENGINE_STACK_BYTES, nullptr, 10, &g_engine_task, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (ok != pdPASS) {
@@ -684,6 +686,13 @@ void deinit() {
   jk_esp_quit_requested = 1;
   while (g_engine_running) {
     std::this_thread::sleep_for(10ms);
+  }
+  if (g_engine_task) {
+    // wait for the task to park itself, then free its TCB + PSRAM stack
+    while (eTaskGetState(g_engine_task) != eSuspended) {
+      std::this_thread::sleep_for(1ms);
+    }
+    vTaskDeleteWithCaps(g_engine_task);
   }
   g_engine_task = nullptr;
   g_audio_task.reset();
