@@ -53,8 +53,10 @@ docs/PLAN.md        the plan
     episode/JK1.gob JK1CTF.gob JK1MP.gob
     resource/Res1hi.gob Res2.gob jk_.cd
     resource/video/*.SMK      # optional, cutscenes
-    MUSIC/Track12.ogg ...     # optional, the soundtrack (GOG / Steam
-                              # MUSIC folder as-is; disc dumps: MUSIC/1/, MUSIC/2/)
+    MUSIC/Track12.wav ...     # optional, the soundtrack: run
+                              # tools/convert_music.py <game dir> on the GOG / Steam
+                              # MUSIC folder (IMA ADPCM; the .ogg originals also
+                              # play, but Vorbis decoding costs ~75% of a core)
     player/                   # saves / settings (created)
   saves/                      # tab5-emu save-slot screenshots
 ```
