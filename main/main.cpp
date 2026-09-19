@@ -45,6 +45,10 @@ extern "C" void app_main(void) {
   if (!emu.initialize_input()) {
     logger.warn("Failed to initialize input!");
   }
+  if (!emu.initialize_usb_host()) {
+    // not fatal: touch controls keep working without a keyboard / mouse
+    logger.warn("USB host not available (no keyboard / mouse support)");
+  }
 
   if (!emu.initialize_video()) {
     logger.error("Failed to initialize video!");

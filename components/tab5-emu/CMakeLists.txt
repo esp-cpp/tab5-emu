@@ -21,4 +21,6 @@ idf_component_register(
   "timer"
   "m5stack-tab5"
   "statistics"
+  "usb"
+  "usb_host_hid"
   )

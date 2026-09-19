@@ -121,6 +121,32 @@ public:
   /// True once if the user asked for the in-game menu (BOOT button, or the
   /// touch hot-corner). Reading it clears the request.
   bool menu_requested() { return menu_requested_.exchange(false); }
+
+  /////////////////////////////////////////////////////////////////////////////
+  // USB host: HID keyboard / mouse on the USB-A port (hubs supported)
+  /////////////////////////////////////////////////////////////////////////////
+
+  /// Start the USB host library and the HID class driver. Not fatal when it
+  /// fails (the touch controls keep working).
+  bool initialize_usb_host();
+  /// Keyboard state: bitmap over HID usage IDs (0..255, incl. the modifiers
+  /// at 0xE0..0xE7). Bit (usage & 7) of keys[usage >> 3].
+  struct KeyboardState {
+    uint8_t keys[32];
+  };
+  KeyboardState keyboard_state() const;
+  struct MouseState {
+    int dx{0};          ///< motion accumulated since the last take_mouse_motion()
+    int dy{0};
+    int wheel{0};
+    uint8_t buttons{0}; ///< bit0 left, bit1 right, bit2 middle
+  };
+  /// Current buttons and the pending (not yet taken) motion
+  MouseState mouse_state() const;
+  /// Return and clear the accumulated mouse motion
+  MouseState take_mouse_motion();
+  bool usb_keyboard_present() const { return usb_keyboards_ > 0; }
+  bool usb_mouse_present() const { return usb_mice_ > 0; }
   bool button_state() const { return Bsp::get().button_state(); }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -232,6 +258,17 @@ protected:
   // display
   std::shared_ptr<espp::Display<Pixel>> display_;
   std::atomic<bool> menu_requested_{false};
+
+  // usb hid (see usb_hid.cpp)
+  struct UsbHid;
+  UsbHid *usb_hid_{nullptr};
+  mutable std::mutex hid_mutex_;
+  KeyboardState keyboard_{};
+  MouseState mouse_{};
+  std::atomic<int> usb_keyboards_{0};
+  std::atomic<int> usb_mice_{0};
+  void on_hid_keyboard_report(const uint8_t *data, size_t len);
+  void on_hid_mouse_report(const uint8_t *data, size_t len);
 
   // video
   std::atomic<VideoSetting> video_setting_{VideoSetting::FIT};

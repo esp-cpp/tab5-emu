@@ -15,9 +15,15 @@ typedef struct {
   int16_t touch_x;    // logical (landscape) touch position, -1 if none
   int16_t touch_y;
   uint8_t touch_down;
-  int16_t mouse_dx;   // relative mouse motion since the last read (USB mouse later)
-  int16_t mouse_dy;
+  // USB HID keyboard: bitmap over HID usage IDs (== SDL scancodes), bit
+  // (usage & 7) of keys[usage >> 3]; modifiers at usages 0xE0..0xE7
+  uint8_t keys[32];
+  // USB HID mouse: buttons (bit0 left, bit1 right, bit2 middle) and the
+  // motion pending since it was last taken with jk_esp_mouse_take()
   uint8_t mouse_buttons;
+  int16_t mouse_dx;
+  int16_t mouse_dy;
+  int16_t mouse_wheel;
 } jk_esp_input_t;
 
 /// Present an 8-bit paletted frame (pal is 256 RGB triplets).
@@ -35,8 +41,13 @@ void jk_esp_present_8bpp_overlay(const uint8_t *pixels, int width, int height, i
 void jk_esp_present_report(void);
 /// Present an RGB565 frame.
 void jk_esp_present_rgb565(const uint16_t *pixels, int width, int height, int pitch);
-/// Read the current input state.
+/// Read the current input state (non-consuming).
 void jk_esp_read_input(jk_esp_input_t *out);
+/// Take (and clear) the mouse motion accumulated since the last take.
+void jk_esp_mouse_take(int *dx, int *dy, int *wheel);
+/// Whether a USB keyboard / mouse is attached
+int jk_esp_keyboard_present(void);
+int jk_esp_mouse_present(void);
 /// Queue interleaved 16-bit stereo PCM for playback (non-blocking); returns
 /// the number of frames accepted (fewer than num_frames when the output
 /// queue is full).

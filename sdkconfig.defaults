@@ -91,3 +91,6 @@ CONFIG_LV_USE_SNAPSHOT=y
 # no custom assert handler header (the old "assert.h" default is deprecated in
 # LVGL 9.6 and its #warning is an error under -Werror)
 CONFIG_LV_ASSERT_HANDLER_INCLUDE=""
+
+# USB host on the USB-A port: keyboard / mouse (HID), through hubs too
+CONFIG_USB_HOST_HUBS_SUPPORTED=y

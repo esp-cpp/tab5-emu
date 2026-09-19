@@ -309,7 +309,25 @@ void jk_esp_read_input(jk_esp_input_t *out) {
     logger.info("touch {} at {},{}", out->touch_down ? "down" : "up", touch.x, touch.y);
     last_down = out->touch_down;
   }
+  const auto kb = emu.keyboard_state();
+  static_assert(sizeof(kb.keys) == sizeof(out->keys));
+  memcpy(out->keys, kb.keys, sizeof(out->keys));
+  const auto ms = emu.mouse_state();
+  out->mouse_buttons = ms.buttons;
+  out->mouse_dx = static_cast<int16_t>(std::clamp(ms.dx, -32767, 32767));
+  out->mouse_dy = static_cast<int16_t>(std::clamp(ms.dy, -32767, 32767));
+  out->mouse_wheel = static_cast<int16_t>(std::clamp(ms.wheel, -32767, 32767));
 }
+
+void jk_esp_mouse_take(int *dx, int *dy, int *wheel) {
+  const auto ms = Tab5Emu::get().take_mouse_motion();
+  if (dx) *dx = ms.dx;
+  if (dy) *dy = ms.dy;
+  if (wheel) *wheel = ms.wheel;
+}
+
+int jk_esp_keyboard_present(void) { return Tab5Emu::get().usb_keyboard_present(); }
+int jk_esp_mouse_present(void) { return Tab5Emu::get().usb_mouse_present(); }
 
 size_t jk_esp_audio_write(const int16_t *stereo_pcm, size_t num_frames) {
   auto &emu = Tab5Emu::get();
