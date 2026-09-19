@@ -1,3 +1,4 @@
+#include <sdkconfig.h>
 #include "genesis_shared_memory.hpp"
 #include "shared_memory.h"
 #include "esp_log.h"
@@ -35,6 +36,11 @@ static void *allocate_shared(size_t size, shared_mem_storage_t storage, shared_m
 }
 
 static void *allocate_shared_prefer_internal(size_t size, const char *name, shared_mem_region_t region = SHARED_MEM_DEFAULT) {
+#if CONFIG_IDF_TARGET_ESP32P4
+    // internal RAM is scarce on the P4 and PSRAM is fast enough behind the L2 cache
+    (void)name;
+    return allocate_shared(size, SHARED_MEM_PSRAM, region);
+#endif
     void *ptr = allocate_shared(size, SHARED_MEM_INTERNAL, region);
     if (ptr != nullptr) {
         return ptr;

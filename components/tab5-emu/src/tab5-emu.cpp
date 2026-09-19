@@ -146,6 +146,91 @@ bool Tab5Emu::initialize_audio() {
   return true;
 }
 
+void Tab5Emu::audio_sample_rate(uint32_t rate) {
+  if (rate == 0) {
+    return;
+  }
+  if (rate != audio_source_rate_) {
+    logger_.info("audio source rate {} Hz (DAC {} Hz{})", rate, audio_hardware_rate(),
+                 rate == audio_hardware_rate() ? "" : ", resampling");
+  }
+  audio_source_rate_ = rate;
+  audio_phase_ = 0;
+  audio_last_[0] = audio_last_[1] = 0;
+}
+
+// Queue 16-bit stereo PCM at audio_sample_rate(): resampled to the DAC rate
+// when they differ, and paced (short waits for queue space) so a producer
+// that runs slightly ahead of the DAC is held back instead of dropping
+// audio. Returns the number of *source* bytes consumed.
+size_t Tab5Emu::play_audio(const uint8_t *data, size_t size) {
+  auto &bsp = Bsp::get();
+  const uint32_t hw = audio_hardware_rate();
+  const uint8_t *out = data;
+  size_t out_size = size;
+  if (audio_source_rate_ != hw && hw != 0) {
+    // linear resampler, 16.16 phase carried across calls
+    const size_t in_frames = size / 4;
+    const auto *in = reinterpret_cast<const int16_t *>(data);
+    const uint32_t step = static_cast<uint32_t>((static_cast<uint64_t>(audio_source_rate_) << 16) / hw);
+    const size_t max_out = (static_cast<uint64_t>(in_frames + 1) << 16) / step + 2;
+    audio_resample_buf_.resize(max_out * 4);
+    auto *o = reinterpret_cast<int16_t *>(audio_resample_buf_.data());
+    size_t n = 0;
+    uint32_t pos = audio_phase_; // position relative to audio_last_ (frame -1) at 0x10000 = in[0]
+    // source frames: index -1 = audio_last_, 0..in_frames-1 = in
+    auto src = [&](int idx, int ch) -> int32_t { return idx < 0 ? audio_last_[ch] : in[2 * idx + ch]; };
+    while (true) {
+      const int idx = static_cast<int>(pos >> 16) - 1; // frame a
+      if (idx + 1 >= static_cast<int>(in_frames)) {
+        break;
+      }
+      const int32_t frac = pos & 0xFFFF;
+      for (int ch = 0; ch < 2; ch++) {
+        const int32_t a = src(idx, ch), b = src(idx + 1, ch);
+        o[2 * n + ch] = static_cast<int16_t>((a * (0x10000 - frac) + b * frac) >> 16);
+      }
+      n++;
+      pos += step;
+    }
+    if (in_frames) {
+      audio_last_[0] = in[2 * (in_frames - 1)];
+      audio_last_[1] = in[2 * (in_frames - 1) + 1];
+    }
+    // keep the phase relative to the new "last" frame
+    audio_phase_ = pos - (static_cast<uint32_t>(in_frames) << 16);
+    out = audio_resample_buf_.data();
+    out_size = n * 4;
+  }
+  // paced send
+  size_t sent = 0;
+  const auto t0 = esp_timer_get_time();
+  while (sent < out_size) {
+    sent += bsp.play_audio(out + sent, out_size - sent);
+    if (sent >= out_size) {
+      break;
+    }
+    if (audio_max_wait_ms_ == 0 || (esp_timer_get_time() - t0) / 1000 >= audio_max_wait_ms_) {
+      break;
+    }
+    audio_waits_++;
+    vTaskDelay(1);
+  }
+  audio_bytes_sent_ += sent;
+  audio_bytes_dropped_ += out_size - sent;
+  const auto now = esp_timer_get_time();
+  if (now - audio_last_report_us_ > 30'000'000) {
+    if (audio_last_report_us_ != 0) {
+      logger_.info("audio: sent {} KB, dropped {} B, waited {} times ({} -> {} Hz)", audio_bytes_sent_ / 1024,
+                   audio_bytes_dropped_, audio_waits_, audio_source_rate_, hw);
+    }
+    audio_bytes_sent_ = audio_bytes_dropped_ = audio_waits_ = 0;
+    audio_last_report_us_ = now;
+  }
+  // report source bytes consumed: everything when nothing was dropped
+  return sent >= out_size ? size : (size * sent) / std::max<size_t>(1, out_size);
+}
+
 void Tab5Emu::mute(bool v) {
   Bsp::get().mute(v);
   espp::EventManager::get().publish(volume_changed_topic, {});

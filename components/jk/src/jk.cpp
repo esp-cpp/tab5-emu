@@ -331,6 +331,7 @@ int jk_esp_mouse_present(void) { return Tab5Emu::get().usb_mouse_present(); }
 
 size_t jk_esp_audio_write(const int16_t *stereo_pcm, size_t num_frames) {
   auto &emu = Tab5Emu::get();
+  emu.audio_max_wait_ms(0); // the mixer pump fills the queue and stops when refused
   const size_t bytes = num_frames * 2 * sizeof(int16_t);
   const size_t queued = emu.play_audio(reinterpret_cast<const uint8_t *>(stereo_pcm), bytes);
   return queued / (2 * sizeof(int16_t));

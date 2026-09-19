@@ -1,4 +1,5 @@
 #include "genesis.hpp"
+#include <sdkconfig.h>
 
 #pragma GCC optimize("Ofast")
 
@@ -316,8 +317,17 @@ static void reset_genesis_runtime_state() {
   }
 }
 
+#if CONFIG_IDF_TARGET_ESP32P4
+// The P4's L2 cache makes PSRAM fast enough for the emulator's working set,
+// and its internal RAM is scarce (DMA users, other cores): keep it free.
+#define GENESIS_HOT_MEMORY_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#define GENESIS_HOT_SHARED_STORAGE SHARED_MEM_PSRAM
+#else
+#define GENESIS_HOT_MEMORY_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#define GENESIS_HOT_SHARED_STORAGE SHARED_MEM_INTERNAL
+#endif
 static void *allocate_hot_memory(size_t size, const char *name = "hot") {
-  void *ptr = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  void *ptr = heap_caps_malloc(size, GENESIS_HOT_MEMORY_CAPS);
   const bool internal = (ptr != nullptr);
   if (!ptr) {
     ptr = heap_caps_malloc(size, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
@@ -330,7 +340,7 @@ static void *allocate_shared_hot_memory(size_t size, shared_mem_region_t region 
   shared_mem_request_t request = {
     .size = size,
     .region = region,
-    .storage = SHARED_MEM_INTERNAL,
+    .storage = GENESIS_HOT_SHARED_STORAGE,
   };
   return shared_mem_allocate(&request);
 }
@@ -628,7 +638,7 @@ static void init(uint8_t *romdata, size_t rom_data_size) {
   // both the VDP's per-line writes and the converter's reads hit fast internal
   // RAM. (Try internal; in the unlikely event it can't be had, fall back to PSRAM.)
   genesis_index_buffer = (uint8_t*)heap_caps_malloc(
-      GENESIS_SCREEN_WIDTH, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      GENESIS_SCREEN_WIDTH, GENESIS_HOT_MEMORY_CAPS);
   if (!genesis_index_buffer) {
     genesis_index_buffer = (uint8_t*)heap_caps_malloc(
         GENESIS_SCREEN_WIDTH, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);

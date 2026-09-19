@@ -49,6 +49,9 @@ public:
     case Emulator::SEGA_GENESIS:
     case Emulator::SEGA_MEGA_DRIVE:
       logger_.info("genesis::init()");
+      // the core produces one frame of audio per emulated frame; let the
+      // HAL pace it against the DAC instead of dropping when the queue is full
+      Tab5Emu::get().audio_max_wait_ms(30);
       init_genesis(romdata_, rom_size_bytes_);
       break;
     default:

@@ -87,13 +87,23 @@ public:
   void mute(bool v);
   void volume(float volume);
   float volume() const { return Bsp::get().volume(); }
-  void audio_sample_rate(uint32_t rate) { Bsp::get().audio_sample_rate(rate); }
-  uint32_t audio_sample_rate() const { return Bsp::get().audio_sample_rate(); }
+  /// Sample rate of the audio the game produces. The DAC stays at its fixed
+  /// rate (48 kHz); other rates are resampled in play_audio(). Changing the
+  /// I2S clock at runtime (the esp-box-emu approach) is avoided: the clock is
+  /// shared with the microphone channel and any mismatch between the game's
+  /// production rate and the DAC drifts the queue until it drops audio.
+  void audio_sample_rate(uint32_t rate);
+  uint32_t audio_sample_rate() const { return audio_source_rate_; }
+  uint32_t audio_hardware_rate() const { return Bsp::get().audio_sample_rate(); }
   size_t audio_buffer_size() const { return Bsp::get().audio_buffer_size(); }
   /// Queue 16-bit interleaved stereo PCM (non-blocking); returns the bytes
   /// actually queued, which is less than size when the queue is full
-  size_t play_audio(const uint8_t *data, size_t size) { return Bsp::get().play_audio(data, size); }
-  size_t play_audio(std::span<const uint8_t> data) { return Bsp::get().play_audio(data); }
+  size_t play_audio(const uint8_t *data, size_t size);
+  size_t play_audio(std::span<const uint8_t> data) { return play_audio(data.data(), data.size()); }
+  /// How long play_audio() may wait for queue space before giving up (0 =
+  /// never wait, drop instead). Waiting paces a game that produces audio
+  /// slightly faster than the DAC consumes it.
+  void audio_max_wait_ms(uint32_t ms) { audio_max_wait_ms_ = ms; }
 
   /////////////////////////////////////////////////////////////////////////////
   // Display / brightness
@@ -267,6 +277,15 @@ protected:
   // display
   std::shared_ptr<espp::Display<Pixel>> display_;
   std::atomic<bool> menu_requested_{false};
+
+  // audio
+  uint32_t audio_source_rate_{48000};
+  uint32_t audio_max_wait_ms_{30};
+  uint32_t audio_phase_{0}; ///< resampler phase (16.16)
+  int16_t audio_last_[2]{0, 0}; ///< last source frame (resampler continuity)
+  std::vector<uint8_t> audio_resample_buf_;
+  uint64_t audio_bytes_sent_{0}, audio_bytes_dropped_{0}, audio_waits_{0};
+  int64_t audio_last_report_us_{0};
 
   // usb hid (see usb_hid.cpp)
   struct UsbHid;
