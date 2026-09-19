@@ -86,7 +86,14 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
    HAL as a keyed overlay, the video task builds an 852x480 staging image
    (world 2x nearest + HUD 1:1, 4:3-centered) in 64 KB internal-RAM strips
    and the PPA scales each strip 1.5x into the rotated panel buffer
-   (video task ~26 ms/frame on core 1, ~18 fps). Remaining: profile the
+   (video task ~26 ms/frame on core 1, ~18 fps). Pause menu save / load /
+   reset go through the engine's own save files (absolute slot paths on the
+   SD card; reset = level-start autosave). Quit + relaunch in-process works
+   (2026-09-18): the platform shutdown runs jkMain_GameplayLeave, the engine
+   clears jkGui_GdiMode and the COG parser pool on shutdown, the engine task's
+   PSRAM stack is freed with vTaskDeleteWithCaps; per-cycle PSRAM leak is now
+   ~2 KB (debug allocation tracker: `alloc:` / `files:` lines after
+   shutdown). Remaining: profile the
    rasterizer, IRAM for hot loops, PSRAM cache tuning, cut the engine-side
    frame/HUD copy (~4 ms/frame).
 3. **Audio**: software mixer (port of the DSi `stdSound.c`) into the HAL audio
