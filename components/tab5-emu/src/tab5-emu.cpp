@@ -148,17 +148,22 @@ bool Tab5Emu::initialize_audio() {
   return true;
 }
 
-void Tab5Emu::audio_sample_rate(uint32_t rate) {
+void Tab5Emu::audio_sample_rate(uint32_t rate, bool log) {
   if (rate == 0) {
     return;
   }
-  if (rate != audio_source_rate_) {
+  if (rate != audio_source_rate_ && log) {
     logger_.info("audio source rate {} Hz (DAC {} Hz{})", rate, audio_hardware_rate(),
                  rate == audio_hardware_rate() ? "" : ", resampling");
   }
+  // a small trim keeps the resampler's phase (no click); a new source resets it
+  const bool big_change = audio_source_rate_ == 0 || rate > audio_source_rate_ + audio_source_rate_ / 4 ||
+                          rate + audio_source_rate_ / 4 < audio_source_rate_;
   audio_source_rate_ = rate;
-  audio_phase_ = 0;
-  audio_last_[0] = audio_last_[1] = 0;
+  if (big_change) {
+    audio_phase_ = 0;
+    audio_last_[0] = audio_last_[1] = 0;
+  }
 }
 
 // Queue 16-bit stereo PCM at audio_sample_rate(): resampled to the DAC rate
@@ -347,8 +352,24 @@ GamepadState Tab5Emu::gamepad_state() {
     state.y |= key(22);                // s
     state.start |= key(40) | key(88);  // enter, keypad enter
     state.select |= key(0xE1) | key(42) | key(0xE5); // shift, backspace
+    state.l |= key(20);                // q
+    state.r |= key(26);                // w
+  }
+  if (usb_gamepad_present()) {
+    std::lock_guard<std::mutex> lk(hid_mutex_);
+    state.buttons |= usb_gamepad_.buttons;
   }
   return state;
+}
+
+void Tab5Emu::on_hid_gamepad_state(const GamepadState &state, bool menu) {
+  {
+    std::lock_guard<std::mutex> lk(hid_mutex_);
+    usb_gamepad_ = state;
+  }
+  if (menu) {
+    menu_requested_ = true;
+  }
 }
 
 uint8_t *Tab5Emu::frame_buffer0() {

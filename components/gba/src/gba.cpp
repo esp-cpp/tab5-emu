@@ -15,6 +15,7 @@
 #include "box-emu.hpp"
 #include "statistics.hpp"
 
+#include <algorithm>
 #include <sdkconfig.h>
 #if CONFIG_JK_ESP_DEBUG
 // the JK component's sampling profiler (tick hook on core 0); weak so this
@@ -31,6 +32,7 @@ bool g_initialized = false;
 uint64_t g_rendered_frames = 0, g_rendered_us = 0, g_skipped_frames = 0, g_skipped_us = 0;
 bool g_frame_rendered = false;
 uint64_t g_next_due = 0; // cumulative frame deadline (esp_timer us)
+uint32_t g_audio_rate = 32768;
 int g_frame_index = 0;
 uint8_t *g_last_frame = nullptr;
 retro_audio_buffer_status_callback_t g_audio_status_cb = nullptr;
@@ -151,13 +153,8 @@ void input_poll_cb() {}
 int16_t input_state_cb(unsigned port, unsigned device, unsigned index, unsigned id) {
   if (port != 0 || device != RETRO_DEVICE_JOYPAD) return 0;
   const auto st = BoxEmu::get().gamepad_state();
-  bool l = st.x, r = st.y; // the touch pad's X / Y stand in for the shoulders
-  if (BoxEmu::get().usb_keyboard_present()) {
-    const auto kb = BoxEmu::get().keyboard_state();
-    auto key = [&](int usage) { return (kb.keys[usage >> 3] >> (usage & 7)) & 1; };
-    l |= key(20); // q
-    r |= key(26); // w
-  }
+  // shoulders: the gamepad's / keyboard's L and R, or the touch pad's X / Y
+  const bool l = st.l || st.x, r = st.r || st.y;
   int16_t mask = 0;
   if (st.b) mask |= 1 << RETRO_DEVICE_ID_JOYPAD_B;
   if (st.a) mask |= 1 << RETRO_DEVICE_ID_JOYPAD_A;
@@ -194,7 +191,8 @@ void init_gba(const std::string &rom_path) {
   g_fps = av.timing.fps;
   auto &emu = BoxEmu::get();
   emu.palette(nullptr);
-  emu.audio_sample_rate(static_cast<uint32_t>(av.timing.sample_rate));
+  g_audio_rate = static_cast<uint32_t>(av.timing.sample_rate);
+  emu.audio_sample_rate(g_audio_rate);
   emu.audio_max_wait_ms(30);
   emu.native_size(GBA_W, GBA_H, GBA_W);
   g_frame_index = 0;
@@ -251,6 +249,9 @@ void run_gba_rom() {
     g_skipped_us += elapsed;
   }
   g_next_due += frame_us;
+  // (no dynamic audio rate control: stretching the audio to the emulation
+  // speed fills the DAC queue, the audio call then blocks the emulator and
+  // the loop runs away; the occasional gap when a scene is slow is better)
   if (end < g_next_due) {
     std::this_thread::sleep_for(std::chrono::microseconds(g_next_due - end));
   } else {

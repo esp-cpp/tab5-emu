@@ -40,13 +40,8 @@ extern "C" uint32_t snes_host_read_joypad(int port) {
   if (st.down) j |= SNES_DOWN_MASK;
   if (st.left) j |= SNES_LEFT_MASK;
   if (st.right) j |= SNES_RIGHT_MASK;
-  // shoulder buttons: keyboard Q / W when a USB keyboard is attached
-  if (BoxEmu::get().usb_keyboard_present()) {
-    const auto kb = BoxEmu::get().keyboard_state();
-    auto key = [&](int usage) { return (kb.keys[usage >> 3] >> (usage & 7)) & 1; };
-    if (key(20)) j |= SNES_TL_MASK; // q
-    if (key(26)) j |= SNES_TR_MASK; // w
-  }
+  if (st.l) j |= SNES_TL_MASK; // gamepad L / keyboard Q
+  if (st.r) j |= SNES_TR_MASK; // gamepad R / keyboard W
   return j;
 }
 

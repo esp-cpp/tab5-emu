@@ -104,7 +104,9 @@ public:
   /// I2S clock at runtime (the esp-box-emu approach) is avoided: the clock is
   /// shared with the microphone channel and any mismatch between the game's
   /// production rate and the DAC drifts the queue until it drops audio.
-  void audio_sample_rate(uint32_t rate);
+  /// `log` = false for the small trims of a dynamic rate control (the
+  /// resampler keeps its phase; only a big change resets it).
+  void audio_sample_rate(uint32_t rate, bool log = true);
   uint32_t audio_sample_rate() const { return audio_source_rate_; }
   uint32_t audio_hardware_rate() const { return Bsp::get().audio_sample_rate(); }
   size_t audio_buffer_size() const { return Bsp::get().audio_buffer_size(); }
@@ -169,6 +171,9 @@ public:
   MouseState take_mouse_motion();
   bool usb_keyboard_present() const { return usb_keyboards_ > 0; }
   bool usb_mouse_present() const { return usb_mice_ > 0; }
+  /// Generic HID gamepads (report-descriptor driven, see hid_gamepad.hpp)
+  /// are merged into gamepad_state(); select+start opens the pause menu.
+  bool usb_gamepad_present() const { return usb_gamepads_ > 0; }
   /// Stop the USB host library (keyboard / mouse stop working). The USB
   /// controller is shared with device mode (see initialize_usb_msc()).
   void deinitialize_usb_host();
@@ -335,8 +340,11 @@ protected:
   MouseState mouse_{};
   std::atomic<int> usb_keyboards_{0};
   std::atomic<int> usb_mice_{0};
+  std::atomic<int> usb_gamepads_{0};
+  GamepadState usb_gamepad_{};
   void on_hid_keyboard_report(const uint8_t *data, size_t len);
   void on_hid_mouse_report(const uint8_t *data, size_t len);
+  void on_hid_gamepad_state(const GamepadState &state, bool menu);
 
   // video
   std::atomic<VideoSetting> video_setting_{VideoSetting::FIT};

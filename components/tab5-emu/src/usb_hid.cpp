@@ -8,6 +8,10 @@
 // bitmap and a mouse accumulator that the game glue polls.
 #include "tab5-emu.hpp"
 
+#include <map>
+
+#include "hid_gamepad.hpp"
+
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -31,6 +35,9 @@ struct Tab5Emu::UsbHid {
   std::atomic<bool> all_free{false};
   std::mutex open_mutex;
   std::vector<hid_host_device_handle_t> open_devices; // for teardown
+  std::map<hid_host_device_handle_t, HidGamepadMap> gamepads; // generic HID devices with a gamepad-like descriptor
+  HidGamepadMap::Raw last_raw{};
+  std::string last_unknown;
   espp::Logger logger{{.tag = "UsbHid", .level = espp::Logger::Verbosity::INFO}};
 
   static void usb_lib_task(void *arg) {
@@ -77,25 +84,67 @@ struct Tab5Emu::UsbHid {
       if (hid_host_device_get_raw_input_report_data(dev, data, sizeof(data), &len) != ESP_OK) {
         break;
       }
-      if (params.sub_class == HID_SUBCLASS_BOOT_INTERFACE) {
-        if (params.proto == HID_PROTOCOL_KEYBOARD) {
-          self->emu->on_hid_keyboard_report(data, len);
-        } else if (params.proto == HID_PROTOCOL_MOUSE) {
-          self->emu->on_hid_mouse_report(data, len);
+      if (params.sub_class == HID_SUBCLASS_BOOT_INTERFACE && params.proto == HID_PROTOCOL_KEYBOARD) {
+        self->emu->on_hid_keyboard_report(data, len);
+      } else if (params.sub_class == HID_SUBCLASS_BOOT_INTERFACE && params.proto == HID_PROTOCOL_MOUSE) {
+        self->emu->on_hid_mouse_report(data, len);
+      } else {
+        const HidGamepadMap *map = nullptr;
+        {
+          std::lock_guard<std::mutex> lk(self->open_mutex);
+          auto it = self->gamepads.find(dev);
+          if (it != self->gamepads.end()) map = &it->second;
+        }
+        GamepadState state;
+        bool menu = false;
+        HidGamepadMap::Raw raw;
+        if (map && map->decode(data, len, state, menu, &raw)) {
+          self->emu->on_hid_gamepad_state(state, menu);
+          // mapping diagnostics: log the raw report whenever the pressed
+          // buttons / d-pad / consumer controls change (not the sticks)
+          if (raw.buttons != self->last_raw.buttons || raw.dpad != self->last_raw.dpad || raw.hat != self->last_raw.hat ||
+              memcmp(raw.consumer, self->last_raw.consumer, sizeof(raw.consumer)) != 0) {
+            self->last_raw = raw;
+            std::string btns, cons;
+            for (int n = 1; n < 32; n++) {
+              if (raw.buttons & (1u << n)) btns += fmt::format("{} ", n);
+            }
+            for (auto u : raw.consumer) {
+              if (u) cons += fmt::format("{:#x} ", u);
+            }
+            self->logger.info("gamepad: report {} buttons [{}] dpad {:#x} hat {} axes {} {} {} {} {} {} consumer [{}] -> {:#x}",
+                              raw.report_id, btns, raw.dpad, raw.hat, raw.axes[0], raw.axes[1], raw.axes[2],
+                              raw.axes[3], raw.axes[4], raw.axes[5], cons, state.buttons);
+          }
+        } else if (map) {
+          // a report this map knows nothing about: dump it once per content
+          std::string hex;
+          for (size_t i = 0; i < len && i < 16; i++) hex += fmt::format("{:02x} ", data[i]);
+          if (hex != self->last_unknown) {
+            self->last_unknown = hex;
+            self->logger.info("gamepad: unmapped report [{}]", hex);
+          }
         }
       }
       break;
     }
     case HID_HOST_INTERFACE_EVENT_DISCONNECTED: {
-      std::lock_guard<std::mutex> lk(self->open_mutex);
-      std::erase(self->open_devices, dev);
-    }
+      bool gamepad = false;
+      {
+        std::lock_guard<std::mutex> lk(self->open_mutex);
+        std::erase(self->open_devices, dev);
+        gamepad = self->gamepads.erase(dev) > 0;
+      }
       self->logger.info("HID {} disconnected (addr {} iface {})",
                         params.proto == HID_PROTOCOL_KEYBOARD ? "keyboard"
                         : params.proto == HID_PROTOCOL_MOUSE  ? "mouse"
+                        : gamepad                             ? "gamepad"
                                                               : "device",
                         params.addr, params.iface_num);
-      if (params.proto == HID_PROTOCOL_KEYBOARD) {
+      if (gamepad) {
+        self->emu->usb_gamepads_--;
+        self->emu->on_hid_gamepad_state(GamepadState{}, false);
+      } else if (params.proto == HID_PROTOCOL_KEYBOARD) {
         self->emu->usb_keyboards_--;
         std::lock_guard<std::mutex> lk(self->emu->hid_mutex_);
         memset(self->emu->keyboard_.keys, 0, sizeof(self->emu->keyboard_.keys));
@@ -105,7 +154,7 @@ struct Tab5Emu::UsbHid {
         self->emu->mouse_.buttons = 0;
       }
       hid_host_device_close(dev);
-      break;
+    } break;
     case HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR:
       self->logger.warn("HID transfer error (addr {} iface {})", params.addr, params.iface_num);
       break;
@@ -125,17 +174,38 @@ struct Tab5Emu::UsbHid {
       hid_host_device_get_params(dev, &params);
       const bool keyboard = params.proto == HID_PROTOCOL_KEYBOARD;
       const bool mouse = params.proto == HID_PROTOCOL_MOUSE;
-      self->logger.info("HID {} connected (addr {} iface {} subclass {})",
+      self->logger.info("HID {} connected (addr {} iface {} subclass {} proto {})",
                         keyboard ? "keyboard" : mouse ? "mouse" : "device", params.addr, params.iface_num,
-                        params.sub_class);
-      if (!keyboard && !mouse) {
-        // generic HID (gamepads etc.): not handled yet
-        continue;
-      }
+                        params.sub_class, params.proto);
       const hid_host_device_config_t cfg = {.callback = &UsbHid::on_interface_event, .callback_arg = self};
       if (auto err = hid_host_device_open(dev, &cfg); err != ESP_OK) {
         self->logger.error("open failed: {}", esp_err_to_name(err));
         continue;
+      }
+      HidGamepadMap map;
+      if (!keyboard && !mouse) {
+        // generic HID: gamepads (and anything else) come with a report
+        // descriptor; keep the interface only if it looks like a gamepad
+        size_t desc_len = 0;
+        const uint8_t *desc = hid_host_get_report_descriptor(dev, &desc_len);
+        if (desc && desc_len) {
+          map = HidGamepadMap::parse(desc, desc_len);
+        }
+        if (map.buttons.empty() || (map.hats.empty() && map.axes.empty() && map.dpad.empty())) {
+          self->logger.info("HID device (addr {} iface {}) is not a gamepad ({} buttons, {} axes, {} hats); ignored",
+                            params.addr, params.iface_num, map.buttons.size(), map.axes.size(), map.hats.size());
+          hid_host_device_close(dev);
+          continue;
+        }
+        hid_host_dev_info_t info{};
+        if (hid_host_get_device_info(dev, &info) == ESP_OK) {
+          map.apply_quirks(info.VID, info.PID);
+        }
+        self->logger.info("HID gamepad {:04x}:{:04x}: {} buttons, {} axes, {} hat(s), {} d-pad usages, {} consumer, "
+                          "report ids {}, {} layout",
+                          info.VID, info.PID, map.buttons.size(), map.axes.size(), map.hats.size(), map.dpad.size(),
+                          map.consumer.size(), map.uses_report_ids ? "yes" : "no",
+                          map.layout == HidGamepadMap::Layout::Xbox ? "xbox-style" : "directinput");
       }
       if (params.sub_class == HID_SUBCLASS_BOOT_INTERFACE) {
         hid_class_request_set_protocol(dev, HID_REPORT_PROTOCOL_BOOT);
@@ -150,11 +220,16 @@ struct Tab5Emu::UsbHid {
       }
       if (keyboard) {
         self->emu->usb_keyboards_++;
-      } else {
+      } else if (mouse) {
         self->emu->usb_mice_++;
+      } else {
+        self->emu->usb_gamepads_++;
       }
       std::lock_guard<std::mutex> lk(self->open_mutex);
       self->open_devices.push_back(dev);
+      if (!keyboard && !mouse) {
+        self->gamepads[dev] = std::move(map);
+      }
     }
   }
 };
@@ -275,6 +350,8 @@ void Tab5Emu::deinitialize_usb_host() {
     hid->open_devices.clear();
   }
   usb_keyboards_ = 0;
+  usb_gamepads_ = 0;
+  usb_gamepad_ = GamepadState{};
   usb_mice_ = 0;
   {
     std::lock_guard<std::mutex> lk(hid_mutex_);

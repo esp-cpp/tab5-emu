@@ -14,7 +14,9 @@ struct GamepadState {
     UP = 6,
     DOWN = 7,
     LEFT = 8,
-    RIGHT = 9
+    RIGHT = 9,
+    L = 10,
+    R = 11
   };
 
   union {
@@ -29,6 +31,8 @@ struct GamepadState {
       int down : 1;
       int left : 1;
       int right : 1;
+      int l : 1; ///< left shoulder (SNES L, GBA L)
+      int r : 1; ///< right shoulder
     };
     uint16_t buttons{0};
   };
@@ -46,6 +50,8 @@ struct GamepadState {
       case Button::DOWN: return down;
       case Button::LEFT: return left;
       case Button::RIGHT: return right;
+      case Button::L: return l;
+      case Button::R: return r;
       default: return false;
     }
   }
