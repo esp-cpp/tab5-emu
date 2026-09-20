@@ -2,6 +2,7 @@
 // buffers, audio pull, save states) without libretro.
 #include "snes_glue.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -99,7 +100,9 @@ static void deinit_display(void) {
   GFX.SubZBuffer = GFX.SubZBuffer_buffer = NULL;
 }
 
-// blargg APU: pull everything it has produced this frame
+// blargg APU: pull everything it has produced. Registered as the APU's
+// samples-available callback (S9xAPUExecute calls it unconditionally, so it
+// must exist) and also run at the end of each frame.
 static void audio_pull(void) {
   S9xFinalizeSamples();
   const size_t samples = S9xGetSampleCount(); // interleaved stereo samples
@@ -120,16 +123,22 @@ static void audio_pull(void) {
 bool snes_glue_init(uint8_t *rom, size_t rom_size) {
   init_settings();
   CPU.Flags = 0;
-  if (!S9xInitMemory()) return false;
-  if (!S9xInitAPU()) return false;
-  if (!init_display()) return false;
-  if (!S9xInitGFX()) return false;
+  if (!rom || rom_size < 0x8000) {
+    printf("snes: no ROM data (%u bytes)\n", (unsigned)rom_size);
+    return false;
+  }
+  if (!S9xInitMemory()) { printf("snes: S9xInitMemory failed\n"); return false; }
+  if (!S9xInitAPU()) { printf("snes: S9xInitAPU failed\n"); return false; }
+  if (!init_display()) { printf("snes: display buffers failed\n"); return false; }
+  if (!S9xInitGFX()) { printf("snes: S9xInitGFX failed\n"); return false; }
   S9xInitSound(0, 0);
+  S9xSetSamplesAvailableCallback(audio_pull);
+  S9xSetSoundMute(false);
   CPU.SaveStateVersion = 0;
   struct retro_game_info game = {0};
   game.data = rom;
   game.size = rom_size;
-  if (!LoadROM(&game)) return false;
+  if (!LoadROM(&game)) { printf("snes: LoadROM failed (%u bytes)\n", (unsigned)rom_size); return false; }
   Settings.FrameTime = Settings.PAL ? Settings.FrameTimePAL : Settings.FrameTimeNTSC;
   screen_index = 0;
   return true;

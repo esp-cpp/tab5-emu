@@ -85,7 +85,7 @@ enum
 
 enum
 {
-   MAX_ROM_SIZE = 0x800000
+   MAX_ROM_SIZE = 0x400000 /* tab5-emu: 4 MB (was 8 MB); only the two 48 Mbit games need more, and the buffer must be one contiguous PSRAM block */
 };
 
 enum

@@ -13,6 +13,10 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#ifdef SNES_HOST_ROM_ALLOC
+void* snes_host_rom_alloc(size_t size);
+void snes_host_rom_free(void* p);
+#endif
 #include "cpuexec.h"
 #include "ppu.h"
 #include "display.h"
@@ -267,6 +271,10 @@ bool S9xInitMemory(void)
    /* Don't bother initializing ROM, we will load a game anyway. */
 #ifdef DS2_DMA
    Memory.ROM   = (uint8_t*) AlignedMalloc(MAX_ROM_SIZE + 0x200 + 0x8000, 32, &PtrAdj.ROM);
+#elif defined(SNES_HOST_ROM_ALLOC)
+   /* tab5-emu: the host owns a permanent arena for this (8 MB contiguous
+      allocations do not survive heap fragmentation) */
+   Memory.ROM   = (uint8_t*) snes_host_rom_alloc(MAX_ROM_SIZE + 0x200 + 0x8000);
 #else
    Memory.ROM   = (uint8_t*) malloc(MAX_ROM_SIZE + 0x200 + 0x8000);
 #endif
@@ -326,6 +334,8 @@ void S9xDeinitMemory(void)
       Memory.ROM -= 0x8000;
 #ifdef DS2_RAM
       AlignedFree(ROM, PtrAdj.ROM);
+#elif defined(SNES_HOST_ROM_ALLOC)
+      snes_host_rom_free(Memory.ROM);
 #else
       free(Memory.ROM);
 #endif

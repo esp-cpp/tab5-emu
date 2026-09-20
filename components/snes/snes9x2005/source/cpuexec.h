@@ -46,11 +46,11 @@ void S9xDoHBlankProcessing_NoSFX(void);
 void S9xClearIRQ(uint32_t source);
 void S9xSetIRQ(uint32_t source);
 
-extern SOpcodes S9xOpcodesE1   [256];
-extern SOpcodes S9xOpcodesM1X1 [256];
-extern SOpcodes S9xOpcodesM1X0 [256];
-extern SOpcodes S9xOpcodesM0X1 [256];
-extern SOpcodes S9xOpcodesM0X0 [256];
+extern const SOpcodes S9xOpcodesE1   [256];
+extern const SOpcodes S9xOpcodesM1X1 [256];
+extern const SOpcodes S9xOpcodesM1X0 [256];
+extern const SOpcodes S9xOpcodesM0X1 [256];
+extern const SOpcodes S9xOpcodesM0X0 [256];
 
 extern SICPU ICPU;
 

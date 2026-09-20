@@ -15,7 +15,7 @@
 #include "fxinst.h"
 
 extern FxInit_s SuperFX;
-extern uint8_t mul_brightness [16][32];
+extern const uint8_t mul_brightness [16][32];
 
 uint32_t justifiers = 0xffff00aa;
 uint8_t in_bit = 0;

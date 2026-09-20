@@ -79,11 +79,11 @@ void S9xSA1SetPCBase(uint32_t);
 uint8_t S9xGetSA1(uint32_t);
 void S9xSetSA1(uint8_t, uint32_t);
 
-extern SOpcodes S9xSA1OpcodesE1   [256];
-extern SOpcodes S9xSA1OpcodesM1X1 [256];
-extern SOpcodes S9xSA1OpcodesM1X0 [256];
-extern SOpcodes S9xSA1OpcodesM0X1 [256];
-extern SOpcodes S9xSA1OpcodesM0X0 [256];
+extern const SOpcodes S9xSA1OpcodesE1   [256];
+extern const SOpcodes S9xSA1OpcodesM1X1 [256];
+extern const SOpcodes S9xSA1OpcodesM1X0 [256];
+extern const SOpcodes S9xSA1OpcodesM0X1 [256];
+extern const SOpcodes S9xSA1OpcodesM0X0 [256];
 extern SSA1 SA1;
 
 void S9xSA1MainLoop(void);

@@ -688,7 +688,7 @@ void S9xSetupOBJ(void)
    {
       int32_t j, Y;
       /* First, find out which sprites are on which lines */
-      uint8_t OBJOnLine[SNES_HEIGHT_EXTENDED][128];
+      static uint8_t OBJOnLine[SNES_HEIGHT_EXTENDED][128]; /* tab5-emu: 30 KB, off the 16 KB task stack */
       /* We only initialise this per line, as needed. [Neb]
        * Bonus: We can quickly avoid looping if a line has no OBJs. */
       bool AnyOBJOnLine[SNES_HEIGHT_EXTENDED];

@@ -10,7 +10,7 @@ idf_component_register(
   PRIV_INCLUDE_DIRS "${SNES_CORE}" "snes9x2005/libretro-common/include" "src"
   REQUIRES tab5-emu statistics
 )
-target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_BLARGG_APU LOAD_FROM_MEMORY LAGFIX __LIBRETRO__)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_BLARGG_APU LOAD_FROM_MEMORY LAGFIX __LIBRETRO__ SNES_HOST_ROM_ALLOC)
 # the core's ~700 KB of static state lives in PSRAM (its .bss is renamed to the
 # PSRAM section after the archive is built); no gp-relative small data then
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fno-strict-aliasing -msmall-data-limit=0

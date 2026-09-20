@@ -11,6 +11,9 @@ extern "C" {
 // host callbacks the C++ side provides
 uint32_t snes_host_read_joypad(int port); // SNES_*_MASK bits
 void snes_host_audio(const int16_t *stereo, size_t frames);
+// the core's ROM buffer (MAX_ROM_SIZE + slack, one contiguous block)
+void *snes_host_rom_alloc(size_t size);
+void snes_host_rom_free(void *p);
 
 bool snes_glue_init(uint8_t *rom, size_t rom_size);
 void snes_glue_deinit(void);

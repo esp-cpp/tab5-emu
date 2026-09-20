@@ -52,7 +52,8 @@ extern "C" {
  * - Will be used as a fallback for any missing entries in
  *   frontend language definition */
 
-struct retro_core_option_definition option_defs_us[] = {
+/* tab5-emu: const so the 15 KB table stays out of internal RAM (only the 3DS build writes it) */
+const struct retro_core_option_definition option_defs_us[] = {
    {
       "gpsp_bios",
       "BIOS",

@@ -50,6 +50,23 @@ extern "C" uint32_t snes_host_read_joypad(int port) {
   return j;
 }
 
+static void *g_rom_heap_buffer = nullptr; // when the arena was not available
+extern "C" void *snes_host_rom_alloc(size_t size) {
+  auto *p = BoxEmu::get().rom_arena(size);
+  if (!p) {
+    fmt::print("snes: no ROM arena ({} bytes needed, {} reserved); trying the heap\n", size, BoxEmu::get().rom_arena_size());
+    g_rom_heap_buffer = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    p = static_cast<uint8_t *>(g_rom_heap_buffer);
+  }
+  return p;
+}
+extern "C" void snes_host_rom_free(void *p) {
+  if (p && p == g_rom_heap_buffer) {
+    heap_caps_free(g_rom_heap_buffer);
+    g_rom_heap_buffer = nullptr;
+  } // else: the arena is permanent
+}
+
 extern "C" void snes_host_audio(const int16_t *stereo, size_t frames) {
   if (BoxEmu::get().is_muted()) return;
   BoxEmu::get().play_audio(reinterpret_cast<const uint8_t *>(stereo), frames * 2 * sizeof(int16_t));
@@ -58,7 +75,9 @@ extern "C" void snes_host_audio(const int16_t *stereo, size_t frames) {
 void init_snes(uint8_t *romdata, size_t rom_data_size) {
   g_initialized = false;
   if (!snes_glue_init(romdata, rom_data_size)) {
-    fmt::print("snes: init failed\n");
+    fmt::print("snes: init failed (psram free {} largest {}, internal free {} largest {})\n",
+               heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+               heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     snes_glue_deinit();
     return;
   }
