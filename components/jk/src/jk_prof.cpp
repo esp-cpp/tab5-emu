@@ -98,6 +98,7 @@ void jk_prof_start(void) {
   memset(s_task_n, 0, JK_PROF_TASKS * sizeof(uint32_t));
   memset(s_chains, 0, JK_PROF_CHAINS * sizeof(jk_prof_chain));
   s_main = xTaskGetHandle("jk_engine");
+  if (!s_main) s_main = xTaskGetHandle("main"); // the emulator cores run on the main task
   s_idle0 = xTaskGetIdleTaskHandleForCore(0);
   s_total = 0; s_dropped = 0;
   if (!registered) {

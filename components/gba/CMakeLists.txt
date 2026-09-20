@@ -18,15 +18,19 @@ idf_component_register(
   PRIV_INCLUDE_DIRS "${GPSP}" "${GPSP}/libretro" "${GPSP_COMMON}/include" "src"
   REQUIRES tab5-emu statistics
 )
-# ROM cache: 1 MB blocks in PSRAM (larger ROMs page in from the SD card)
-target_compile_definitions(${COMPONENT_LIB} PRIVATE __LIBRETRO__ ROM_BUFFER_SIZE=12)
+# ROM cache: 1 MB blocks in PSRAM, enough for a 16 MB ROM (larger ones page
+# in from the SD card, which stalls the emulation)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE __LIBRETRO__ ROM_BUFFER_SIZE=16)
 # the core's static state (backup RAM, VRAM, ...) lives in PSRAM (see the
-# post-build step); no gp-relative small data then
-target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fno-strict-aliasing -msmall-data-limit=0 -include ${CMAKE_CURRENT_LIST_DIR}/gpsp/retro_inline.h
+# post-build step; the CPU registers, IO registers, OAM and palette stay
+# internal: ~5 KB the interpreter touches constantly); no gp-relative small
+# data then
+target_compile_options(${COMPONENT_LIB} PRIVATE -O3 -fno-strict-aliasing -msmall-data-limit=0 -include ${CMAKE_CURRENT_LIST_DIR}/gpsp/retro_inline.h
   -Wno-error -w -Wno-error=incompatible-pointer-types -Wno-error=int-conversion
   -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers)
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
           ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
+          --keep reg,reg_mode,spsr,cpu_ticks,io_registers,oam_ram,palette_ram,palette_ram_converted,oam_update_count
   COMMENT "Moving the GBA core's .bss to PSRAM"
   VERBATIM)

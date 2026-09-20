@@ -15,10 +15,22 @@
 #include "box-emu.hpp"
 #include "statistics.hpp"
 
+#include <sdkconfig.h>
+#if CONFIG_JK_ESP_DEBUG
+// the JK component's sampling profiler (tick hook on core 0); weak so this
+// component does not depend on it
+extern "C" void jk_prof_start(void) __attribute__((weak));
+extern "C" void jk_prof_dump(int top) __attribute__((weak));
+#endif
+
 #include <libretro.h>
 
 namespace {
 bool g_initialized = false;
+// rendered vs skipped frames (the frame-time statistics blend both)
+uint64_t g_rendered_frames = 0, g_rendered_us = 0, g_skipped_frames = 0, g_skipped_us = 0;
+bool g_frame_rendered = false;
+uint64_t g_next_due = 0; // cumulative frame deadline (esp_timer us)
 int g_frame_index = 0;
 uint8_t *g_last_frame = nullptr;
 retro_audio_buffer_status_callback_t g_audio_status_cb = nullptr;
@@ -110,6 +122,7 @@ bool environ_cb(unsigned cmd, void *data) {
 
 void video_cb(const void *data, unsigned width, unsigned height, size_t pitch) {
   if (!data) return; // skipped frame
+  g_frame_rendered = true;
   auto &emu = BoxEmu::get();
   uint8_t *dst = g_frame_index ? emu.frame_buffer1() : emu.frame_buffer0();
   if (!dst) return;
@@ -188,6 +201,13 @@ void init_gba(const std::string &rom_path) {
   g_last_elapsed = 0;
   g_skip_run = 0;
   reset_frame_time();
+  g_rendered_frames = g_rendered_us = g_skipped_frames = g_skipped_us = 0;
+  g_next_due = 0;
+#if CONFIG_JK_ESP_DEBUG
+  if (jk_prof_start) {
+    jk_prof_start(); // PC histogram of core 0 (this task), dumped at deinit
+  }
+#endif
   g_initialized = true;
   fmt::print("gba: '{}' loaded, {:.2f} fps, audio {} Hz, state {} bytes\n", rom_path, g_fps,
              static_cast<unsigned>(av.timing.sample_rate), retro_serialize_size());
@@ -201,18 +221,38 @@ void run_gba_rom() {
   if (!g_initialized) return;
   const auto start = esp_timer_get_time();
   const uint64_t frame_us = static_cast<uint64_t>(1e6 / g_fps);
-  // the core's "auto" frameskip skips a frame when the host reports an
-  // audio underrun: report one whenever the previous frame ran over budget
-  if (g_audio_status_cb) {
-    const bool behind = g_last_elapsed > frame_us;
-    g_audio_status_cb(true, behind ? 0 : 100, behind);
+  // cumulative pacing: frames are due at g_next_due, one frame apart; a
+  // fast frame does not sleep the difference away when we are behind, it
+  // pays back a slow one. Far behind (> 2 frames) -> resynchronize.
+  if (g_next_due == 0 || start > g_next_due + 2 * frame_us) {
+    g_next_due = start;
   }
+  const bool behind = start > g_next_due;
+  // the core's "auto" frameskip skips a frame when the host reports an
+  // audio underrun (up to 30 in a row). Rendering is a small part of a
+  // frame here, so skipping barely catches up but makes the output choppy:
+  // report an underrun only when behind AND the previous frame was
+  // rendered, i.e. never skip two frames in a row.
+  if (g_audio_status_cb) {
+    const bool skip = behind && g_frame_rendered;
+    g_audio_status_cb(true, skip ? 0 : 100, skip);
+  }
+  g_frame_rendered = false;
   retro_run();
-  const uint64_t elapsed = esp_timer_get_time() - start;
+  const auto end = esp_timer_get_time();
+  const uint64_t elapsed = end - start;
   g_last_elapsed = elapsed;
   update_frame_time(elapsed);
-  if (elapsed < frame_us) {
-    std::this_thread::sleep_for(std::chrono::microseconds(frame_us - elapsed));
+  if (g_frame_rendered) {
+    g_rendered_frames++;
+    g_rendered_us += elapsed;
+  } else {
+    g_skipped_frames++;
+    g_skipped_us += elapsed;
+  }
+  g_next_due += frame_us;
+  if (end < g_next_due) {
+    std::this_thread::sleep_for(std::chrono::microseconds(g_next_due - end));
   } else {
     std::this_thread::yield();
   }
@@ -244,6 +284,14 @@ std::span<uint8_t> get_gba_video_buffer() {
 void deinit_gba() {
   if (!g_initialized) return;
   g_initialized = false;
+#if CONFIG_JK_ESP_DEBUG
+  if (jk_prof_dump) {
+    jk_prof_dump(200);
+  }
+#endif
+  fmt::print("gba: {} rendered frames at {:.1f} ms, {} skipped frames at {:.1f} ms\n", g_rendered_frames,
+             g_rendered_frames ? g_rendered_us / 1000.0 / g_rendered_frames : 0.0, g_skipped_frames,
+             g_skipped_frames ? g_skipped_us / 1000.0 / g_skipped_frames : 0.0);
   retro_unload_game();
   retro_deinit();
   BoxEmu::get().audio_sample_rate(48000);

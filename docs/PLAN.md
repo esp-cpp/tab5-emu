@@ -151,8 +151,20 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
   8 MB contiguous block is not available after a JK session; JK releases
   the arena while it runs). GBA plays but feels slow: ~15.5 ms/frame avg
   with rendered frames up to 70 ms, i.e. ~40-50 rendered fps with
-  frameskip; a gpSP performance pass (hot loops in IRAM, flags, L2 cache)
-  is the next step there.
+  frameskip. **GBA performance pass (2026-09-20):** -O3, the CPU registers
+  / IO / OAM / palette kept in internal RAM, never skipping two frames in a
+  row (gpSP allowed 30), cumulative frame pacing, the whole 16 MB ROM
+  resident (SD paging stalled the emulation). Result: smooth, ~80-90% of
+  real time in heavy scenes (Fire Red: ~21 ms of emulation per frame vs
+  16.7 budget; light scenes run at speed and sleep). The sampling profile
+  (`jk_prof` hooked into the GBA cart in debug builds) shows the time spread
+  evenly over the interpreter's opcode dispatch and per-instruction loop
+  header, ~40% in the two big switches; rendering is ~5%, audio <1%, the
+  idle-loop skip is active. No hot spot left to fix. Remaining levers, all
+  substantial: execute_arm (74 KB) in internal RAM (the executable region
+  `sram_low` is 175 KB and full of IDF's IRAM code; a smaller L2 cache only
+  grows the data region, so this needs a custom placement plus disabling
+  the PMP I/D split), or a RISC-V dynarec for gpSP (none exists).
 
 ## Internal RAM policy (2026-09-20)
 
