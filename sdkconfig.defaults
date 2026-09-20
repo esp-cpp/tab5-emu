@@ -70,7 +70,8 @@ CONFIG_LV_DEF_REFR_PERIOD=16
 CONFIG_LV_BUILD_EXAMPLES=n
 # LVGL allocates through the C heap (large blocks land in PSRAM) instead of a
 # static internal-RAM pool, which does not fit next to the P4's other .bss.
-CONFIG_LV_USE_CLIB_MALLOC=y
+# LVGL allocates from PSRAM (components/tab5-emu/src/lv_mem_core_psram.c)
+CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 CONFIG_LV_USE_THEME_DEFAULT=y

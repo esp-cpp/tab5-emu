@@ -23,9 +23,12 @@ extern "C" void app_main(void) {
 
   // initialize the hardware abstraction layer
   auto internal_free_log = [&](const char *stage) {
-    logger.info("internal RAM after {}: free {} (largest {}), dma-capable {}", stage,
+    multi_heap_info_t info;
+    heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
+    logger.info("internal RAM after {}: free {} (largest {}), dma-capable {}; {} blocks allocated ({} bytes)", stage,
                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-                heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+                heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL), info.allocated_blocks,
+                info.total_allocated_bytes);
   };
   internal_free_log("boot");
   Tab5Emu &emu = Tab5Emu::get();

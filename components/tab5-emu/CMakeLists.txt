@@ -27,3 +27,7 @@ idf_component_register(
   "esp_hal_usb"
   "sdcard"
   )
+
+# LVGL's custom allocator lives in src/lv_mem_core_psram.c; liblvgl is linked
+# after this library, so pull the object in explicitly
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_mem_init")
