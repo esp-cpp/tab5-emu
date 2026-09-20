@@ -72,6 +72,9 @@ protected:
   lv_obj_t *volume_slider_{nullptr};
   lv_obj_t *brightness_slider_{nullptr};
   lv_obj_t *mute_switch_{nullptr};
+  lv_obj_t *usb_switch_{nullptr};
+  lv_obj_t *usb_label_{nullptr};
+  void set_usb_drive(bool on);
   lv_obj_t *video_dropdown_{nullptr};
   lv_obj_t *battery_label_{nullptr};
   std::vector<lv_obj_t *> rom_buttons_;

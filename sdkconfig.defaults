@@ -46,7 +46,9 @@ CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_SPIRAM_USE_MALLOC=y
 # anything larger than this is attempted to allocate within SPIRAM first
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# small plain-malloc allocations (LVGL objects, strings) go to PSRAM too:
+# internal RAM is the scarce resource on the P4 (SD DMA buffers, USB, tiles)
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
 # reserve internal memory for DMA / task stacks
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=131072
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
@@ -101,3 +103,9 @@ CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM=y
 # LVGL image cache (PSRAM via lv_malloc): without it the JPEG decoder yields
 # partially decoded images, which LVGL cannot scale (boxart never showed)
 CONFIG_LV_CACHE_DEF_SIZE=2097152
+
+# USB mass storage (espp::UsbDevice MSC over the SD card)
+CONFIG_TINYUSB_MSC_ENABLED=y
+CONFIG_TINYUSB_MSC_BUFSIZE=8192
+CONFIG_TINYUSB_CDC_ENABLED=n
+CONFIG_FATFS_USE_LABEL=y

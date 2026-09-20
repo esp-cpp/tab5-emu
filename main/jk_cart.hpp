@@ -15,11 +15,18 @@ class JkCart : public Cart {
 public:
   explicit JkCart(const Cart::Config &config)
       : Cart(config) {
+    // the engine's level load needs ~10 MB of PSRAM; give it the ROM arena
+    Tab5Emu::get().release_rom_arena();
     handle_video_setting();
     init();
   }
 
-  ~JkCart() override { deinit(); }
+  ~JkCart() override {
+    deinit();
+    // the heap is clean right after the engine shutdown: reserve the arena
+    // again now, before the GUI fragments it
+    Tab5Emu::get().reserve_rom_arena();
+  }
 
   void reset() override {
     Cart::reset();

@@ -8,7 +8,10 @@
 // bitmap and a mouse accumulator that the game glue polls.
 #include "tab5-emu.hpp"
 
+#include <atomic>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -24,20 +27,35 @@ struct Tab5Emu::UsbHid {
   QueueHandle_t connect_queue{nullptr};
   TaskHandle_t usb_task{nullptr};
   TaskHandle_t open_task{nullptr};
+  std::atomic<bool> quit{false};
+  std::atomic<bool> all_free{false};
+  std::mutex open_mutex;
+  std::vector<hid_host_device_handle_t> open_devices; // for teardown
   espp::Logger logger{{.tag = "UsbHid", .level = espp::Logger::Verbosity::INFO}};
 
   static void usb_lib_task(void *arg) {
     auto *self = static_cast<UsbHid *>(arg);
     while (true) {
       uint32_t event_flags = 0;
-      usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+      usb_host_lib_handle_events(pdMS_TO_TICKS(100), &event_flags);
       if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
-        // HID driver deregistered (not expected while running); free devices
-        // so a re-install could start clean
-        usb_host_device_free_all();
+        // the HID driver deregistered: free the devices so the library can
+        // be uninstalled (teardown) or re-used. With nothing attached this
+        // completes at once and no ALL_FREE event follows.
+        if (usb_host_device_free_all() == ESP_OK) {
+          self->all_free = true;
+        }
       }
-      (void)self;
+      if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
+        self->all_free = true;
+      }
+      if (self->quit && self->all_free) {
+        break;
+      }
     }
+    // deinitialize_usb_host() deletes us (a WithCaps task cannot free its
+    // own stack)
+    vTaskSuspend(nullptr);
   }
 
   // HID driver task context: just hand the new interface to the worker
@@ -68,7 +86,10 @@ struct Tab5Emu::UsbHid {
       }
       break;
     }
-    case HID_HOST_INTERFACE_EVENT_DISCONNECTED:
+    case HID_HOST_INTERFACE_EVENT_DISCONNECTED: {
+      std::lock_guard<std::mutex> lk(self->open_mutex);
+      std::erase(self->open_devices, dev);
+    }
       self->logger.info("HID {} disconnected (addr {} iface {})",
                         params.proto == HID_PROTOCOL_KEYBOARD ? "keyboard"
                         : params.proto == HID_PROTOCOL_MOUSE  ? "mouse"
@@ -132,6 +153,8 @@ struct Tab5Emu::UsbHid {
       } else {
         self->emu->usb_mice_++;
       }
+      std::lock_guard<std::mutex> lk(self->open_mutex);
+      self->open_devices.push_back(dev);
     }
   }
 };
@@ -234,4 +257,50 @@ Tab5Emu::MouseState Tab5Emu::take_mouse_motion() {
   auto st = mouse_;
   mouse_.dx = mouse_.dy = mouse_.wheel = 0;
   return st;
+}
+
+void Tab5Emu::deinitialize_usb_host() {
+  auto *hid = usb_hid_;
+  if (!hid) {
+    return;
+  }
+  logger_.info("stopping the USB host");
+  // close what we opened, then the class driver, then the library
+  {
+    std::lock_guard<std::mutex> lk(hid->open_mutex);
+    for (auto dev : hid->open_devices) {
+      hid_host_device_stop(dev);
+      hid_host_device_close(dev);
+    }
+    hid->open_devices.clear();
+  }
+  usb_keyboards_ = 0;
+  usb_mice_ = 0;
+  {
+    std::lock_guard<std::mutex> lk(hid_mutex_);
+    memset(keyboard_.keys, 0, sizeof(keyboard_.keys));
+    mouse_ = {};
+  }
+  hid->quit = true;
+  if (auto err = hid_host_uninstall(); err != ESP_OK) {
+    logger_.warn("hid_host_uninstall: {}", esp_err_to_name(err));
+  }
+  // the event task sees NO_CLIENTS -> frees devices -> ALL_FREE -> parks
+  for (int i = 0; i < 300 && eTaskGetState(hid->usb_task) != eSuspended; i++) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  if (eTaskGetState(hid->usb_task) != eSuspended) {
+    // last resort: if the library still holds devices the uninstall below
+    // fails and we leave the host installed rather than corrupt it
+    logger_.warn("USB event task did not park");
+  }
+  vTaskDeleteWithCaps(hid->usb_task);
+  vTaskDeleteWithCaps(hid->open_task); // blocked on its queue
+  vQueueDelete(hid->connect_queue);
+  if (auto err = usb_host_uninstall(); err != ESP_OK) {
+    logger_.warn("usb_host_uninstall: {}", esp_err_to_name(err));
+  }
+  delete hid;
+  usb_hid_ = nullptr;
+  logger_.info("USB host stopped");
 }

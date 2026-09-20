@@ -76,6 +76,14 @@ extern "C" void app_main(void) {
 
   print_heap_state();
 
+#if CONFIG_TAB5_EMU_USB_MSC_AT_BOOT
+  logger.warn("USB drive test: enabling USB mass storage at boot");
+  emu.initialize_usb_msc();
+  while (true) {
+    std::this_thread::sleep_for(1s);
+  }
+#endif
+
   // set the task priority (for main) to high
   vTaskPrioritySet(nullptr, 20);
 

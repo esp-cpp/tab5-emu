@@ -24,6 +24,7 @@
 #include "task.hpp"
 
 #include "gamepad_state.hpp"
+#include "usb_device.hpp"
 #include "video_setting.hpp"
 
 /// Event topics published by the HAL (payloads are empty / informational)
@@ -77,6 +78,17 @@ public:
   size_t copy_file_to_romdata(const std::string &filename);
   uint8_t *romdata() const { return romdata_; }
   void free_romdata();
+  /// A permanent PSRAM block reserved at boot for cores that need one big
+  /// contiguous ROM buffer (the SNES core wants 4 MB); the general heap gets
+  /// too fragmented by GUI allocations to guarantee that later. Returns
+  /// nullptr if `bytes` exceeds the reservation.
+  uint8_t *rom_arena(size_t bytes) const { return (rom_arena_ && bytes <= ROM_ARENA_BYTES) ? rom_arena_ : nullptr; }
+  static constexpr size_t rom_arena_size() { return ROM_ARENA_BYTES; }
+  /// Carts that need the PSRAM more than a ROM buffer (JK's level load takes
+  /// ~10 MB) release the arena while they run and reserve it again as soon
+  /// as they are done, before the GUI can fragment the heap.
+  void release_rom_arena();
+  bool reserve_rom_arena();
 
   /////////////////////////////////////////////////////////////////////////////
   // Audio
@@ -157,6 +169,29 @@ public:
   MouseState take_mouse_motion();
   bool usb_keyboard_present() const { return usb_keyboards_ > 0; }
   bool usb_mouse_present() const { return usb_mice_ > 0; }
+  /// Stop the USB host library (keyboard / mouse stop working). The USB
+  /// controller is shared with device mode (see initialize_usb_msc()).
+  void deinitialize_usb_host();
+  bool is_usb_host_enabled() const { return usb_hid_ != nullptr; }
+
+  /////////////////////////////////////////////////////////////////////////////
+  // USB mass storage: expose the SD card to a PC as a USB drive
+  //
+  // The card's FAT volume is unmounted here while a PC has it, so nothing on
+  // the device may use /sdcard in that time (the GUI shows a "USB drive" mode
+  // and reloads the ROM list afterwards). The P4 has one USB OTG controller,
+  // so the USB host (keyboard / mouse) is stopped while the drive is on and
+  // restarted afterwards.
+  /////////////////////////////////////////////////////////////////////////////
+
+  bool initialize_usb_msc();
+  void deinitialize_usb_msc();
+  /// Give the USB-C pins back to the serial console if a previous run left
+  /// them on the OTG controller (called once at construction).
+  void usb_msc_restore_console();
+  bool is_usb_msc_enabled() const { return usb_device_ != nullptr; }
+  /// True while a PC holds the card (the volume is not mounted here)
+  bool usb_msc_host_has_card() const;
   bool button_state() const { return Bsp::get().button_state(); }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -273,6 +308,8 @@ protected:
   // memory
   uint8_t *romdata_{nullptr};
   size_t romdata_size_{0};
+  static constexpr size_t ROM_ARENA_BYTES = 0x400000 + 0x200 + 0x8000; // snes9x MAX_ROM_SIZE + slack
+  uint8_t *rom_arena_{nullptr};
 
   // display
   std::shared_ptr<espp::Display<Pixel>> display_;
@@ -290,6 +327,9 @@ protected:
   // usb hid (see usb_hid.cpp)
   struct UsbHid;
   UsbHid *usb_hid_{nullptr};
+  // usb msc (see usb_msc.cpp)
+  std::unique_ptr<espp::UsbDevice> usb_device_;
+  bool usb_host_was_enabled_{false};
   mutable std::mutex hid_mutex_;
   KeyboardState keyboard_{};
   MouseState mouse_{};

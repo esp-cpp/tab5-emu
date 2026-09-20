@@ -150,6 +150,14 @@ void Gui::init_ui() {
   lv_slider_set_range(brightness_slider_, 5, 100);
   lv_obj_add_event_cb(brightness_slider_, event_callback, LV_EVENT_VALUE_CHANGED, this);
 
+  make_label(LV_SYMBOL_USB "  USB drive");
+  usb_switch_ = lv_switch_create(settings);
+  lv_obj_add_event_cb(usb_switch_, event_callback, LV_EVENT_VALUE_CHANGED, this);
+  usb_label_ = lv_label_create(settings);
+  lv_label_set_text(usb_label_, "SD card as a USB drive on the USB-C port");
+  lv_obj_set_width(usb_label_, lv_pct(95));
+  lv_label_set_long_mode(usb_label_, LV_LABEL_LONG_WRAP);
+
   make_label(LV_SYMBOL_IMAGE "  Video scaling");
   video_dropdown_ = lv_dropdown_create(settings);
   lv_dropdown_set_options(video_dropdown_, "Original\nFit\nFill");
@@ -304,8 +312,32 @@ void Gui::event_callback(lv_event_t *e) {
       emu.brightness(lv_slider_get_value(gui->brightness_slider_));
     } else if (target == gui->mute_switch_) {
       emu.mute(lv_obj_has_state(gui->mute_switch_, LV_STATE_CHECKED));
+    } else if (target == gui->usb_switch_) {
+      gui->set_usb_drive(lv_obj_has_state(gui->usb_switch_, LV_STATE_CHECKED));
     } else if (target == gui->video_dropdown_) {
       emu.video_setting(static_cast<VideoSetting>(lv_dropdown_get_selected(gui->video_dropdown_)));
     }
+  }
+}
+
+// USB drive mode: hand the SD card to a PC. Nothing may touch the card
+// meanwhile, so Play is disabled; when it ends the ROM list is reloaded so
+// anything copied over shows up.
+void Gui::set_usb_drive(bool on) {
+  auto &emu = Tab5Emu::get();
+  if (on) {
+    if (!emu.initialize_usb_msc()) {
+      lv_obj_remove_state(usb_switch_, LV_STATE_CHECKED);
+      lv_label_set_text(usb_label_, "USB drive could not start (no SD card?)");
+      return;
+    }
+    lv_obj_add_state(play_button_, LV_STATE_DISABLED);
+    lv_label_set_text(usb_label_, "Plug the USB-C port into a PC. Eject there, then switch off.");
+  } else {
+    emu.deinitialize_usb_msc();
+    lv_obj_remove_state(play_button_, LV_STATE_DISABLED);
+    lv_label_set_text(usb_label_, "SD card as a USB drive on the USB-C port");
+    update_rom_list();
+    update_shared_state();
   }
 }

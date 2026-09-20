@@ -38,7 +38,9 @@ struct BspAccess : espp::M5StackTab5 {
 } // namespace
 
 Tab5Emu::Tab5Emu()
-    : espp::BaseComponent("Tab5Emu", espp::Logger::Verbosity::INFO) {}
+    : espp::BaseComponent("Tab5Emu", espp::Logger::Verbosity::INFO) {
+  usb_msc_restore_console();
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // Board
@@ -259,8 +261,16 @@ bool Tab5Emu::initialize_battery() {
 /////////////////////////////////////////////////////////////////////////////
 
 bool Tab5Emu::initialize_input() {
-  // Touch is initialized with the board; nothing else yet (USB HID host is
-  // planned, see docs/PLAN.md).
+  // Touch is initialized with the board (USB HID is separate, see
+  // usb_hid.cpp). The BSP's touchpad driver also registers a "home button"
+  // input device that the Tab5 has no button for; LVGL 9 warns on every
+  // read of a button device without a point table, so give it one.
+  static const lv_point_t no_button_points[] = {{0, 0}};
+  for (lv_indev_t *indev = lv_indev_get_next(nullptr); indev; indev = lv_indev_get_next(indev)) {
+    if (lv_indev_get_type(indev) == LV_INDEV_TYPE_BUTTON) {
+      lv_indev_set_button_points(indev, no_button_points);
+    }
+  }
   return true;
 }
 
@@ -395,9 +405,14 @@ bool Tab5Emu::initialize_video() {
     logger_.error("Could not register a PPA client: {}", esp_err_to_name(err));
     return false;
   }
-  // the conversion tile (internal RAM) is allocated by the video task at the
-  // first frame and released with release_video_buffers() when a cart ends,
-  // so emulator cores get first pick of internal RAM for their own hot data
+  // the conversion tile (internal RAM) is allocated now, before the GUI
+  // fragments the internal heap, and kept for the life of the app: every
+  // cart needs it and the cores' own hot data lives in PSRAM
+  if (!ensure_tile_buffer()) {
+    return false;
+  }
+  // likewise the big contiguous ROM arena (see rom_arena())
+  reserve_rom_arena();
   video_queue_ = xQueueCreate(1, sizeof(VideoFrame));
   frame_done_ = xSemaphoreCreateBinary();
   using namespace std::placeholders;
@@ -407,6 +422,26 @@ bool Tab5Emu::initialize_video() {
   });
   video_task_->start();
   return true;
+}
+
+bool Tab5Emu::reserve_rom_arena() {
+  if (rom_arena_) {
+    return true;
+  }
+  rom_arena_ = static_cast<uint8_t *>(heap_caps_malloc(ROM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!rom_arena_) {
+    logger_.warn("Could not reserve the {} byte ROM arena (psram free {}, largest {})", ROM_ARENA_BYTES,
+                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    return false;
+  }
+  return true;
+}
+
+void Tab5Emu::release_rom_arena() {
+  if (rom_arena_) {
+    heap_caps_free(rom_arena_);
+    rom_arena_ = nullptr;
+  }
 }
 
 void Tab5Emu::display_size(size_t width, size_t height) {
@@ -445,12 +480,8 @@ void Tab5Emu::palette(const uint16_t *palette, size_t size) {
 
 void Tab5Emu::release_video_buffers() {
   wait_frame();
-  // nothing is queued now (wait_frame returned), the video task is idle
-  if (tile_buf_) {
-    heap_caps_free(tile_buf_);
-    tile_buf_ = nullptr;
-    tile_buf_bytes_ = 0;
-  }
+  // nothing is queued now (wait_frame returned), the video task is idle;
+  // the tile buffer stays (see initialize_video)
   for (auto &fb : frame_buffers_) {
     if (fb) {
       heap_caps_free(fb);

@@ -23,4 +23,7 @@ idf_component_register(
   "statistics"
   "usb"
   "usb_host_hid"
+  "usb_device"
+  "esp_hal_usb"
+  "sdcard"
   )

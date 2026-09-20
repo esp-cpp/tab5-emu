@@ -7,4 +7,11 @@ menu "tab5-emu"
             Bring-up aid: launch the first entry of metadata.csv automatically
             a little after boot, as if Play had been pressed.
 
+    config TAB5_EMU_USB_MSC_AT_BOOT
+        bool "Test: turn the USB drive on right after boot"
+        default n
+        help
+            Development aid: enable USB mass storage (the SD card as a USB
+            drive) as soon as the GUI is up, without touching the screen.
+
 endmenu
