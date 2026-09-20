@@ -26,7 +26,8 @@ via [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2) (our fork:
 | Touch | GT911 capacitive |
 | Audio | ES8388 codec + NS4150B amp, dual mics |
 | Storage | microSD (SDMMC 4-bit) |
-| Input | touch (virtual gamepad), BOOT button (pause menu); USB HID planned |
+| Input | touch (virtual gamepad), BOOT button (pause menu), USB keyboard + mouse on the USB-A port (hubs supported) |
+| USB-C | serial console, or the SD card as a USB drive (settings > "USB drive") |
 
 ## Layout
 
@@ -89,12 +90,27 @@ idf.py build flash monitor
 (Do not recurse into the engine's own submodules; they are desktop-only
 dependencies.)
 
-## Controls (touch virtual gamepad, until USB HID lands)
+## Controls
+
+Touch (virtual gamepad):
 
 - Left third: d-pad (relative to the zone center)
 - Right third: A (lower right), B (lower left), X (upper right), Y (upper left)
 - Bottom strip of the middle third: SELECT (left) / START (right)
 - Top-right corner, or the BOOT button: pause menu
+
+USB keyboard / mouse on the USB-A port (directly or through a hub): arrows,
+Z/X/A/S, Enter, Shift/Backspace map to the gamepad for the emulators; Jedi
+Knight gets the full keyboard and mouse look.
+
+## USB drive (file transfer)
+
+Settings > "USB drive" exposes the SD card as a USB mass storage device on
+the USB-C port, so ROMs, boxart and game data can be copied without pulling
+the card. While the drive is on the serial console is off (the Tab5's
+USB-C carries the P4's full-speed USB PHY, which the console and the USB
+device controller share) and the launcher cannot start games; switch it off
+(eject first) to get the card, the console and the ROM list back.
 
 ## License
 

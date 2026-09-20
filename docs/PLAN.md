@@ -144,5 +144,45 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
   (`snes_glue.c`); `components/gba` compiles gpSP's own libretro front end
   and hosts it with a minimal libretro environment (`gba.cpp`). Both cores'
   static state is moved to PSRAM with `tools/bss_to_psram.py`. Adaptive
-  frameskip in both (skip after an over-budget frame). Performance on the
-  360 MHz P4 not yet measured; untested on hardware at the time of writing.
+  frameskip in both (skip after an over-budget frame).
+  **Verified on hardware 2026-09-20:** SNES (Super Mario World, Zelda) runs
+  at speed (~14 ms/frame avg incl. skipped frames, audio clean); the SNES
+  ROM buffer comes from a 4 MB PSRAM arena the HAL reserves at boot (an
+  8 MB contiguous block is not available after a JK session; JK releases
+  the arena while it runs). GBA plays but feels slow: ~15.5 ms/frame avg
+  with rendered frames up to 70 ms, i.e. ~40-50 rendered fps with
+  frameskip; a gpSP performance pass (hot loops in IRAM, flags, L2 cache)
+  is the next step there.
+
+## Internal RAM policy (2026-09-20)
+
+Internal RAM (~440 KB DIRAM, ~150 KB free after link) is the constraint,
+not PSRAM. Rules that keep everything booting:
+
+- Emulator cores keep no static state in internal RAM (`bss_to_psram.py`
+  for .bss; big initialized tables are `const` so they live in flash).
+- Plain `malloc` of >256 bytes goes to PSRAM
+  (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256`); anything that needs internal
+  or DMA memory asks for it explicitly. JK's level load otherwise drained
+  the DMA heap and SD reads failed.
+- The 64 KB video tile is allocated at boot and kept; allocating it at the
+  first frame fell back to PSRAM once the GUI had fragmented the heap (JK
+  dropped from 38 to 21 fps).
+- The 128 KB DMA reserve pool at boot must fit: watch the
+  "internal RAM after ..." log lines (currently ~76 KB free after the GUI).
+  Remaining levers: the GUI's ~48 KB (not small mallocs; likely task
+  stacks), JK's 60 KB of GUI tables in .data, L2 cache 256 -> 128 KB.
+
+## USB drive (2026-09-20)
+
+Settings > "USB drive": espp::UsbDevice (MSC, auto hand-over) over the
+BSP's espp::SdCard on the USB-C port. The P4 has two full-speed PHYs; the
+Tab5's USB-C is PHY 0 (GPIO24/25, the USB-Serial-JTAG console's by default)
+and the OTG 1.1 controller sits on PHY 1 (GPIO26/27 = I2S). `usb_msc.cpp`
+swaps the controllers with `LP_SYS.usb_ctrl` (console pads off, 300 ms
+disconnect gap, then TinyUSB on port 0) and swaps back on switch-off; the
+HAL restores the console mapping at boot since the register survives a
+software reset. The USB host (HID) is stopped while the drive is on.
+Verified: the drive appears on a Mac, files edited, card handed back.
+`UsbDevice::Config::port` is in espp PR #802 (local override until
+released).
