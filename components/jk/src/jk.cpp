@@ -340,14 +340,14 @@ void jk_esp_mouse_take(int *dx, int *dy, int *wheel) {
   int sx = 0, sy = 0;
   if (emu.usb_gamepad_present()) {
     // right stick = mouse look: 20% dead zone, squared response, up to
-    // ~16 px per input read (~300 px/s at the engine's input rate)
+    // ~40 px per input read (~750 px/s at the engine's input rate)
     const auto ax = emu.gamepad_axes();
     auto curve = [](int v) -> int {
       const float f = v / 32767.0f;
       const float a = std::fabs(f);
       if (a < 0.2f) return 0;
       const float t = (a - 0.2f) / 0.8f;
-      return static_cast<int>((f < 0 ? -1.0f : 1.0f) * t * t * 16.0f);
+      return static_cast<int>((f < 0 ? -1.0f : 1.0f) * t * t * 40.0f);
     };
     sx = curve(ax.rx);
     sy = curve(ax.ry);
