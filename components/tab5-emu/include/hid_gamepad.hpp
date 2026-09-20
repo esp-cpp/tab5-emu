@@ -58,7 +58,8 @@ struct HidGamepadMap {
     uint8_t report_id{0};
     bool known{false}; ///< the report id has fields in this map
   };
-  bool decode(const uint8_t *report, size_t len, GamepadState &state, bool &menu, Raw *raw = nullptr) const;
+  bool decode(const uint8_t *report, size_t len, GamepadState &state, bool &menu, Raw *raw = nullptr,
+              GamepadAxes *axes = nullptr) const;
   /// One-line summary for the log
   size_t button_count() const { return buttons.size(); }
 };

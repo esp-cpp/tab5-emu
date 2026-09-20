@@ -806,6 +806,7 @@ const u32 spsr_masks[4] = { 0x00000000, 0x000000EF, 0xF0000000, 0xF00000EF };
 
 #define arm_psr_store_cpsr(source)                                            \
   const u32 store_mask = cpsr_masks[psr_pfield][PRIVMODE(reg[CPU_MODE])];     \
+  collapse_flags();                                                           \
   reg[REG_CPSR] = (source & store_mask) | (reg[REG_CPSR] & (~store_mask));    \
   extract_flags();                                                            \
   if(store_mask & 0xFF)                                                       \
@@ -1006,7 +1007,7 @@ inline cpu_alert_type exec_arm_block_mem(u32 rn, u32 reglist, s32 &cycles_remain
   // If sbit is set, change to user mode and back, so to write the user regs.
   // However for LDM {PC} we restore CPSR from SPSR.
   // TODO: implement CPSR restore, only USER mode is now implemented.
-  u32 old_cpsr = reg[REG_CPSR];
+  u32 old_cpsr = reg[REG_CPSR]; // only its mode bits are used
   if (sbit && (mode == AccStore || rn != REG_PC))
     set_cpu_mode(MODE_USER);
 
@@ -1476,6 +1477,9 @@ u8 vram[1024 * 96];
 u16 io_registers[512];
 #endif
 
+#ifdef GBA_CPU_IN_IRAM
+__attribute__((section(".gba_cpu_text")))
+#endif
 void execute_arm(u32 cycles)
 {
   u32 opcode;
@@ -1514,7 +1518,7 @@ void execute_arm(u32 cycles)
     {
 arm_loop:
 
-       collapse_flags();
+       /* tab5-emu: flags stay in n/z/c/v; collapsed only where the CPSR is read */
 
        /* Process cheats if we are about to execute the cheat hook */
        if (reg[REG_PC] == cheat_master_hook)
@@ -3078,7 +3082,7 @@ skip_instruction:
     {
 thumb_loop:
 
-       collapse_flags();
+       /* tab5-emu: flags stay in n/z/c/v; collapsed only where the CPSR is read */
 
        /* Process cheats if we are about to execute the cheat hook */
        if (reg[REG_PC] == cheat_master_hook)

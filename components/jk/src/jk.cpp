@@ -312,6 +312,21 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   const auto kb = emu.keyboard_state();
   static_assert(sizeof(kb.keys) == sizeof(out->keys));
   memcpy(out->keys, kb.keys, sizeof(out->keys));
+  // gamepad as keyboard (the engine's default binds): left stick / d-pad =
+  // W A S D (forward, strafe, back), R = fire (ctrl), L = secondary fire (z),
+  // A = activate (space), B = jump (x), X = crouch (c), Y = use item (enter)
+  const GamepadState gp{.buttons = out->buttons};
+  auto press = [&](int usage) { out->keys[usage >> 3] |= 1 << (usage & 7); };
+  if (gp.up) press(26);     // w
+  if (gp.down) press(22);   // s
+  if (gp.left) press(4);    // a
+  if (gp.right) press(7);   // d
+  if (gp.r) press(0xE0);    // left ctrl: fire
+  if (gp.l) press(29);      // z: secondary fire
+  if (gp.a) press(44);      // space: activate
+  if (gp.b) press(27);      // x: jump
+  if (gp.x) press(6);       // c: crouch
+  if (gp.y) press(40);      // enter: use inventory item
   const auto ms = emu.mouse_state();
   out->mouse_buttons = ms.buttons;
   out->mouse_dx = static_cast<int16_t>(std::clamp(ms.dx, -32767, 32767));
@@ -320,9 +335,25 @@ void jk_esp_read_input(jk_esp_input_t *out) {
 }
 
 void jk_esp_mouse_take(int *dx, int *dy, int *wheel) {
-  const auto ms = Tab5Emu::get().take_mouse_motion();
-  if (dx) *dx = ms.dx;
-  if (dy) *dy = ms.dy;
+  auto &emu = Tab5Emu::get();
+  const auto ms = emu.take_mouse_motion();
+  int sx = 0, sy = 0;
+  if (emu.usb_gamepad_present()) {
+    // right stick = mouse look: 20% dead zone, squared response, up to
+    // ~16 px per input read (~300 px/s at the engine's input rate)
+    const auto ax = emu.gamepad_axes();
+    auto curve = [](int v) -> int {
+      const float f = v / 32767.0f;
+      const float a = std::fabs(f);
+      if (a < 0.2f) return 0;
+      const float t = (a - 0.2f) / 0.8f;
+      return static_cast<int>((f < 0 ? -1.0f : 1.0f) * t * t * 16.0f);
+    };
+    sx = curve(ax.rx);
+    sy = curve(ax.ry);
+  }
+  if (dx) *dx = ms.dx + sx;
+  if (dy) *dy = ms.dy + sy;
   if (wheel) *wheel = ms.wheel;
 }
 

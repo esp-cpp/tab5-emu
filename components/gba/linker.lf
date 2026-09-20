@@ -1,0 +1,12 @@
+[sections:gba_cpu_text]
+entries:
+    .gba_cpu_text+
+
+[scheme:gba_cpu_in_dram]
+entries:
+    gba_cpu_text -> dram0_data
+
+[mapping:gba_cpu]
+archive: libgba.a
+entries:
+    cpu (gba_cpu_in_dram)

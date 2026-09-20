@@ -276,7 +276,56 @@ bool Tab5Emu::initialize_input() {
       lv_indev_set_button_points(indev, no_button_points);
     }
   }
+  // gamepad / keyboard navigation of the LVGL menus
+  keypad_indev_ = lv_indev_create();
+  if (keypad_indev_) {
+    lv_indev_set_type(keypad_indev_, LV_INDEV_TYPE_KEYPAD);
+    lv_indev_set_read_cb(keypad_indev_, &Tab5Emu::keypad_read);
+    lv_indev_set_user_data(keypad_indev_, this);
+  }
   return true;
+}
+
+void Tab5Emu::keypad_read(lv_indev_t *indev, lv_indev_data_t *data) {
+  auto *self = static_cast<Tab5Emu *>(lv_indev_get_user_data(indev));
+  GamepadState st{};
+  if (self->usb_gamepad_present()) {
+    std::lock_guard<std::mutex> lk(self->hid_mutex_);
+    st.buttons = self->usb_gamepad_.buttons;
+  }
+  if (self->usb_keyboard_present()) {
+    const auto kb = self->keyboard_state();
+    auto key = [&](int usage) { return (kb.keys[usage >> 3] >> (usage & 7)) & 1; };
+    st.up |= key(82);
+    st.down |= key(81);
+    st.left |= key(80);
+    st.right |= key(79);
+    st.a |= key(40) | key(88) | key(44); // enter, keypad enter, space
+    st.b |= key(41);                     // escape
+  }
+  // left / right adjust a focused slider or dropdown, otherwise move focus
+  bool horizontal_widget = false;
+  if (auto *group = lv_indev_get_group(indev)) {
+    if (auto *focused = lv_group_get_focused(group)) {
+      horizontal_widget = lv_obj_check_type(focused, &lv_slider_class) || lv_obj_check_type(focused, &lv_dropdown_class) ||
+                          lv_obj_check_type(focused, &lv_switch_class);
+    }
+  }
+  uint32_t key = 0;
+  if (st.a) key = LV_KEY_ENTER;
+  else if (st.b) key = LV_KEY_ESC;
+  else if (st.up) key = LV_KEY_PREV;
+  else if (st.down) key = LV_KEY_NEXT;
+  else if (st.left) key = horizontal_widget ? LV_KEY_LEFT : LV_KEY_PREV;
+  else if (st.right) key = horizontal_widget ? LV_KEY_RIGHT : LV_KEY_NEXT;
+  if (key) {
+    self->keypad_last_key_ = key;
+    data->key = key;
+    data->state = LV_INDEV_STATE_PRESSED;
+  } else {
+    data->key = self->keypad_last_key_;
+    data->state = LV_INDEV_STATE_RELEASED;
+  }
 }
 
 void Tab5Emu::on_touch(const TouchpadData &raw) {
@@ -362,10 +411,16 @@ GamepadState Tab5Emu::gamepad_state() {
   return state;
 }
 
-void Tab5Emu::on_hid_gamepad_state(const GamepadState &state, bool menu) {
+GamepadAxes Tab5Emu::gamepad_axes() const {
+  std::lock_guard<std::mutex> lk(hid_mutex_);
+  return usb_gamepad_axes_;
+}
+
+void Tab5Emu::on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes) {
   {
     std::lock_guard<std::mutex> lk(hid_mutex_);
     usb_gamepad_ = state;
+    usb_gamepad_axes_ = axes;
   }
   if (menu) {
     menu_requested_ = true;

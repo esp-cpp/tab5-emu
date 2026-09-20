@@ -13,7 +13,7 @@ idf_component_register(
 target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_BLARGG_APU LOAD_FROM_MEMORY LAGFIX __LIBRETRO__ SNES_HOST_ROM_ALLOC)
 # the core's ~700 KB of static state lives in PSRAM (its .bss is renamed to the
 # PSRAM section after the archive is built); no gp-relative small data then
-target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fno-strict-aliasing -msmall-data-limit=0
+target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fno-strict-aliasing -fjump-tables -ftree-switch-conversion -msmall-data-limit=0
   -Wno-error -w -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers)
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py

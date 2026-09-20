@@ -63,3 +63,12 @@ struct GamepadState {
     return !(*this == other);
   }
 };
+
+/// Analog sticks, -32767..32767; x grows to the right, y grows downwards
+/// (the HID convention). 0 when the controller has no sticks.
+struct GamepadAxes {
+  int16_t lx{0};
+  int16_t ly{0};
+  int16_t rx{0};
+  int16_t ry{0};
+};

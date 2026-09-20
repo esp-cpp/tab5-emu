@@ -17,6 +17,7 @@ idf_component_register(
   INCLUDE_DIRS "include"
   PRIV_INCLUDE_DIRS "${GPSP}" "${GPSP}/libretro" "${GPSP_COMMON}/include" "src"
   REQUIRES tab5-emu statistics
+  LDFRAGMENTS "linker.lf"
 )
 # ROM cache: 1 MB blocks in PSRAM, enough for a 16 MB ROM (larger ones page
 # in from the SD card, which stalls the emulation)
@@ -25,7 +26,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE __LIBRETRO__ ROM_BUFFER_SIZE
 # post-build step; the CPU registers, IO registers, OAM and palette stay
 # internal: ~5 KB the interpreter touches constantly); no gp-relative small
 # data then
-target_compile_options(${COMPONENT_LIB} PRIVATE -O3 -fno-strict-aliasing -msmall-data-limit=0 -include ${CMAKE_CURRENT_LIST_DIR}/gpsp/retro_inline.h
+target_compile_options(${COMPONENT_LIB} PRIVATE -O3 -fno-strict-aliasing -fjump-tables -ftree-switch-conversion -msmall-data-limit=0 -include ${CMAKE_CURRENT_LIST_DIR}/gpsp/retro_inline.h
   -Wno-error -w -Wno-error=incompatible-pointer-types -Wno-error=int-conversion
   -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers)
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
@@ -34,3 +35,7 @@ add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
           --keep reg,reg_mode,spsr,cpu_ticks,io_registers,oam_ram,palette_ram,palette_ram_converted,oam_update_count
   COMMENT "Moving the GBA core's .bss to PSRAM"
   VERBATIM)
+# the interpreter loop in internal RAM (see linker.lf and main/Kconfig.projbuild)
+if(CONFIG_TAB5_EMU_GBA_CPU_IRAM)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE GBA_CPU_IN_IRAM)
+endif()

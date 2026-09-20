@@ -14,4 +14,13 @@ menu "tab5-emu"
             Development aid: enable USB mass storage (the SD card as a USB
             drive) as soon as the GUI is up, without touching the screen.
 
+    config TAB5_EMU_GBA_CPU_IRAM
+        bool "GBA: ARM interpreter loop in internal RAM (74 KB)"
+        default n
+        help
+            Places gpSP's execute_arm() in internal RAM instead of running
+            it from PSRAM-XIP (see components/gba/linker.lf). Needs
+            CONFIG_ESP_SYSTEM_MEMPROT=n (the code lives in the data region)
+            and CONFIG_CACHE_L2_CACHE_128KB for the room.
+
 endmenu

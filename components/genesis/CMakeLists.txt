@@ -26,7 +26,7 @@ idf_component_register(
 # target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-char-subscripts -Wno-attributes -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-variable -Wno-discarded-qualifiers)
 # the core's static state lives in PSRAM (see the post-build step); no
 # gp-relative small data then
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-const-variable -Wno-unused-value -Ofast -msmall-data-limit=0
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-const-variable -Wno-unused-value -Ofast -msmall-data-limit=0 -fjump-tables -ftree-switch-conversion
   # gcc 15 (ESP-IDF 6.x) promotes these to errors; the core is upstream code
   -Wno-error=sizeof-pointer-memaccess -Wno-char-subscripts -Wno-attributes -Wno-implicit-fallthrough
   -Wno-unused-function -Wno-unused-variable -Wno-error=discarded-qualifiers -Wno-error=incompatible-pointer-types

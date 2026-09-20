@@ -98,8 +98,9 @@ struct Tab5Emu::UsbHid {
         GamepadState state;
         bool menu = false;
         HidGamepadMap::Raw raw;
-        if (map && map->decode(data, len, state, menu, &raw)) {
-          self->emu->on_hid_gamepad_state(state, menu);
+        GamepadAxes axes;
+        if (map && map->decode(data, len, state, menu, &raw, &axes)) {
+          self->emu->on_hid_gamepad_state(state, menu, axes);
           // mapping diagnostics: log the raw report whenever the pressed
           // buttons / d-pad / consumer controls change (not the sticks)
           if (raw.buttons != self->last_raw.buttons || raw.dpad != self->last_raw.dpad || raw.hat != self->last_raw.hat ||

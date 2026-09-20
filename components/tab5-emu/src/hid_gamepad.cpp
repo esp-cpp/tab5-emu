@@ -207,7 +207,8 @@ void HidGamepadMap::apply_quirks(uint16_t vid, uint16_t pid) {
   }
 }
 
-bool HidGamepadMap::decode(const uint8_t *report, size_t len, GamepadState &state, bool &menu, Raw *raw) const {
+bool HidGamepadMap::decode(const uint8_t *report, size_t len, GamepadState &state, bool &menu, Raw *raw,
+                           GamepadAxes *axes_out) const {
   if (len == 0) return false;
   uint8_t report_id = 0;
   if (uses_report_ids) {
@@ -287,10 +288,24 @@ bool HidGamepadMap::decode(const uint8_t *report, size_t len, GamepadState &stat
     const int32_t v = field_value(a, ok);
     if (!ok || a.logical_max <= a.logical_min) continue;
     if (raw && a.usage >= USAGE_X && a.usage <= USAGE_RZ) raw->axes[a.usage - USAGE_X] = v;
-    if (a.usage != USAGE_X && a.usage != USAGE_Y) continue;
-    any = true;
     const int32_t range = a.logical_max - a.logical_min;
     const int32_t centered = 2 * (v - a.logical_min) - range; // -range .. +range
+    if (axes_out) {
+      // normalized, y downwards (see GamepadAxes); left stick X/Y, right stick Z/Rz
+      const int64_t n64 = static_cast<int64_t>(centered) * 32767 / range;
+      int16_t n = static_cast<int16_t>(std::clamp<int64_t>(n64, -32767, 32767));
+      const bool vertical = a.usage == USAGE_Y || a.usage == USAGE_RZ || a.usage == USAGE_RY;
+      if (vertical && y_up_positive) n = -n;
+      switch (a.usage) {
+      case USAGE_X: axes_out->lx = n; break;
+      case USAGE_Y: axes_out->ly = n; break;
+      case USAGE_Z: case USAGE_RX: axes_out->rx = n; break;
+      case USAGE_RZ: case USAGE_RY: axes_out->ry = n; break;
+      default: break;
+      }
+    }
+    if (a.usage != USAGE_X && a.usage != USAGE_Y) continue;
+    any = true;
     const bool neg = centered < -(range * 2 / 5);
     const bool pos = centered > (range * 2 / 5);
     if (a.usage == USAGE_X) {

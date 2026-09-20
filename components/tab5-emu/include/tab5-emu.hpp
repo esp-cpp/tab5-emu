@@ -174,6 +174,13 @@ public:
   /// Generic HID gamepads (report-descriptor driven, see hid_gamepad.hpp)
   /// are merged into gamepad_state(); select+start opens the pause menu.
   bool usb_gamepad_present() const { return usb_gamepads_ > 0; }
+  /// The gamepad's sticks (zeros without a gamepad)
+  GamepadAxes gamepad_axes() const;
+  /// LVGL keypad input device driven by the gamepad (and a USB keyboard's
+  /// arrows / enter / escape): d-pad = focus prev/next (left/right adjust a
+  /// focused slider / dropdown), A = enter, B = escape. Menus attach their
+  /// lv_group to it (lv_indev_set_group) when shown.
+  lv_indev_t *keypad_indev() const { return keypad_indev_; }
   /// Stop the USB host library (keyboard / mouse stop working). The USB
   /// controller is shared with device mode (see initialize_usb_msc()).
   void deinitialize_usb_host();
@@ -342,9 +349,13 @@ protected:
   std::atomic<int> usb_mice_{0};
   std::atomic<int> usb_gamepads_{0};
   GamepadState usb_gamepad_{};
+  GamepadAxes usb_gamepad_axes_{};
+  lv_indev_t *keypad_indev_{nullptr};
+  uint32_t keypad_last_key_{0};
+  static void keypad_read(lv_indev_t *indev, lv_indev_data_t *data);
   void on_hid_keyboard_report(const uint8_t *data, size_t len);
   void on_hid_mouse_report(const uint8_t *data, size_t len);
-  void on_hid_gamepad_state(const GamepadState &state, bool menu);
+  void on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes = {});
 
   // video
   std::atomic<VideoSetting> video_setting_{VideoSetting::FIT};
