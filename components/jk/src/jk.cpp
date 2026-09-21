@@ -265,6 +265,11 @@ void jk_esp_present_report(void) {
   const float secs = (now - last_us) / 1e6f;
   const auto vs = Tab5Emu::get().video_stats();
   const float vf = vs.frames ? static_cast<float>(vs.frames) : 1.0f;
+  logger.info("heap: internal free {} (largest {}), dma {} (largest {}), psram free {}",
+              heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+              heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+              heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+              heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   logger.info("present: {} frames in {:.1f}s = {:.1f} fps; engine wait {:.1f} ms/frame, copy {:.1f} ms/frame; "
               "video task avg {:.1f} ms max {:.1f} ms (convert {:.1f} ms, blit {:.1f} ms, {} tiles/frame)",
               n, secs, secs > 0 ? n / secs : 0.0f, n ? (jk_esp_us_wait - last_wait) / 1000.0f / n : 0.0f,
@@ -376,6 +381,21 @@ void jk_esp_audio_lock(void) { g_audio_mutex.lock(); }
 void jk_esp_audio_unlock(void) { g_audio_mutex.unlock(); }
 
 uint32_t jk_esp_time_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+size_t jk_esp_psram_free(void) { return heap_caps_get_free_size(MALLOC_CAP_SPIRAM); }
+void *jk_esp_malloc_dma(size_t bytes) { return heap_caps_malloc(bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL); }
+void jk_esp_free_dma(void *ptr) { heap_caps_free(ptr); }
+
+int jk_esp_park_point(void) {
+  if (!g_paused) {
+    return 0;
+  }
+  g_parked = true;
+  while (g_paused && !g_engine_stop && !jk_esp_quit_requested) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  g_parked = false;
+  return 1;
+}
 uint64_t jk_esp_time_us(void) { return (uint64_t)esp_timer_get_time(); }
 void jk_esp_sleep_ms(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
@@ -477,11 +497,11 @@ void jk_esp_alloc_dump(int top) {
 void jk_esp_alloc_dump(int) {}
 #endif
 
+// PSRAM only, on purpose: the engine's material cache evicts when an
+// allocation fails, and a fallback to internal RAM would instead drain the
+// internal heap (SD card DMA buffers, USB) once PSRAM is full.
 void *jk_esp_malloc_site(size_t size, const void *site) {
   void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!p) {
-    p = heap_caps_malloc(size, MALLOC_CAP_8BIT);
-  }
 #if defined(JK_ESP_FS_DEBUG)
   alloc_track(p, size, site);
 #endif
@@ -495,9 +515,6 @@ void *jk_esp_realloc_site(void *ptr, size_t size, const void *site) {
   alloc_untrack(ptr);
 #endif
   void *p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!p) {
-    p = heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
-  }
 #if defined(JK_ESP_FS_DEBUG)
   alloc_track(p, size, site);
 #endif
@@ -677,12 +694,7 @@ bool init(const Config &config) {
           g_engine_started_ok = true;
           while (!g_engine_stop && !jk_esp_quit_requested) {
             run_pending_request();
-            if (g_paused) {
-              g_parked = true;
-              vTaskDelay(pdMS_TO_TICKS(10));
-              continue;
-            }
-            g_parked = false;
+            jk_esp_park_point();
             if (!jk_esp_engine_frame()) {
               logger.warn("engine frame returned 0");
               break;

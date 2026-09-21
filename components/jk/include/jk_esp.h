@@ -75,6 +75,15 @@ void jk_esp_music_volume(float volume);
 void jk_esp_music_mix(int16_t *stereo, size_t frames, uint32_t rate);
 /// Milliseconds since boot.
 uint32_t jk_esp_time_ms(void);
+/// Internal, DMA-capable memory (SD card reads); NULL when exhausted.
+void *jk_esp_malloc_dma(size_t bytes);
+size_t jk_esp_psram_free(void);
+void jk_esp_free_dma(void *ptr);
+/// Called by the engine at safe points (the frame loop, the modal menu
+/// loops): blocks while the emulator has the engine paused. Returns 1 if it
+/// did block (the caller may want to redraw).
+int jk_esp_park_point(void);
+void jk_esp_file_release_buffers(void);
 /// Microseconds since boot.
 uint64_t jk_esp_time_us(void);
 /// Sleep for the given milliseconds (yields to other tasks).

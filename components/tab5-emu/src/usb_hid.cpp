@@ -156,9 +156,30 @@ struct Tab5Emu::UsbHid {
       }
       hid_host_device_close(dev);
     } break;
-    case HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR:
-      self->logger.warn("HID transfer error (addr {} iface {})", params.addr, params.iface_num);
-      break;
+    case HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR: {
+      // the interface stops reporting: drop whatever was held (a stuck
+      // button otherwise stays pressed) and try to get the transfers going
+      // again; if that fails the user has to re-plug the device
+      self->logger.warn("HID transfer error (addr {} iface {}); restarting the interface", params.addr, params.iface_num);
+      bool gamepad = false;
+      {
+        std::lock_guard<std::mutex> lk(self->open_mutex);
+        gamepad = self->gamepads.count(dev) > 0;
+      }
+      if (gamepad) {
+        self->emu->on_hid_gamepad_state(GamepadState{}, false);
+      } else if (params.proto == HID_PROTOCOL_KEYBOARD) {
+        std::lock_guard<std::mutex> lk(self->emu->hid_mutex_);
+        memset(self->emu->keyboard_.keys, 0, sizeof(self->emu->keyboard_.keys));
+      } else if (params.proto == HID_PROTOCOL_MOUSE) {
+        std::lock_guard<std::mutex> lk(self->emu->hid_mutex_);
+        self->emu->mouse_.buttons = 0;
+      }
+      hid_host_device_stop(dev);
+      if (auto err = hid_host_device_start(dev); err != ESP_OK) {
+        self->logger.error("HID interface restart failed: {}", esp_err_to_name(err));
+      }
+    } break;
     default:
       break;
     }
