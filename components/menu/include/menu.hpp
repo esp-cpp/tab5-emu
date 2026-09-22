@@ -62,6 +62,7 @@ protected:
   slot_image_fn slot_image_callback_;
 
   lv_obj_t *screen_{nullptr};
+  lv_group_t *group_{nullptr}; ///< gamepad / keyboard focus order
   lv_obj_t *pause_image_{nullptr};
   lv_obj_t *slot_image_{nullptr};
   lv_obj_t *slot_label_{nullptr};

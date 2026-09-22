@@ -63,6 +63,7 @@ protected:
   std::atomic<int> focused_rom_{-1};
 
   lv_obj_t *screen_{nullptr};
+  lv_group_t *group_{nullptr}; ///< gamepad / keyboard focus order
   lv_obj_t *rom_list_{nullptr};
   lv_obj_t *boxart_{nullptr};
   lv_draw_buf_t *boxart_buf_{nullptr}; ///< decoded boxart the image widget shows

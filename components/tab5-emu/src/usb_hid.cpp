@@ -12,6 +12,9 @@
 
 #include "hid_gamepad.hpp"
 
+#include <hal/usb_dwc_ll.h>
+#include <soc/usb_dwc_struct.h>
+
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -33,6 +36,7 @@ struct Tab5Emu::UsbHid {
   TaskHandle_t open_task{nullptr};
   std::atomic<bool> quit{false};
   std::atomic<bool> all_free{false};
+  bool fs_only{true};
   std::mutex open_mutex;
   std::vector<hid_host_device_handle_t> open_devices; // for teardown
   std::map<hid_host_device_handle_t, HidGamepadMap> gamepads; // generic HID devices with a gamepad-like descriptor
@@ -45,6 +49,11 @@ struct Tab5Emu::UsbHid {
     while (true) {
       uint32_t event_flags = 0;
       usb_host_lib_handle_events(pdMS_TO_TICKS(100), &event_flags);
+      // FS/LS-only host mode (see initialize_usb_host): a root port recovery
+      // soft-resets the core and clears it, so keep asserting it
+      if (self->fs_only && !USB_DWC_HS.hcfg_reg.fslssupp) {
+        usb_dwc_ll_hcfg_set_fsls_supp_only(&USB_DWC_HS);
+      }
       if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
         // the HID driver deregistered: free the devices so the library can
         // be uninstalled (teardown) or re-used. With nothing attached this
@@ -266,6 +275,11 @@ bool Tab5Emu::initialize_usb_host() {
       .skip_phy_setup = false,
       .intr_flags = ESP_INTR_FLAG_LOWMED,
   };
+  // Full/low-speed-only host mode: a high-speed hub would need the hub's
+  // transaction translator for the full-speed HID devices behind it, which
+  // the host library does not implement ("TT is not supported"); with the
+  // root port limited to FS the hub enumerates at FS and its devices are
+  // reached directly. HID never needs more than FS anyway.
   if (auto err = usb_host_install(&host_config); err != ESP_OK) {
     logger_.error("usb_host_install failed: {}", esp_err_to_name(err));
     delete hid;
@@ -278,6 +292,9 @@ bool Tab5Emu::initialize_usb_host() {
     usb_host_uninstall();
     delete hid;
     return false;
+  }
+  if (hid->fs_only) {
+    usb_dwc_ll_hcfg_set_fsls_supp_only(&USB_DWC_HS);
   }
   hid->connect_queue = xQueueCreate(8, sizeof(hid_host_device_handle_t));
   if (xTaskCreatePinnedToCoreWithCaps(&UsbHid::open_worker, "usb_hid", 4096, hid, 5, &hid->open_task, 1,

@@ -82,7 +82,9 @@ public:
   /// contiguous ROM buffer (the SNES core wants 4 MB); the general heap gets
   /// too fragmented by GUI allocations to guarantee that later. Returns
   /// nullptr if `bytes` exceeds the reservation.
-  uint8_t *rom_arena(size_t bytes) const { return (rom_arena_ && bytes <= ROM_ARENA_BYTES) ? rom_arena_ : nullptr; }
+  uint8_t *rom_arena(size_t bytes) const {
+    return (rom_arena_ && !romdata_in_arena_ && bytes <= ROM_ARENA_BYTES) ? rom_arena_ : nullptr;
+  }
   static constexpr size_t rom_arena_size() { return ROM_ARENA_BYTES; }
   /// Carts that need the PSRAM more than a ROM buffer (JK's level load takes
   /// ~10 MB) release the arena while they run and reserve it again as soon
@@ -322,6 +324,7 @@ protected:
   size_t romdata_size_{0};
   static constexpr size_t ROM_ARENA_BYTES = 0x400000 + 0x200 + 0x8000; // snes9x MAX_ROM_SIZE + slack
   uint8_t *rom_arena_{nullptr};
+  bool romdata_in_arena_{false};
 
   // display
   std::shared_ptr<espp::Display<Pixel>> display_;

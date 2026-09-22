@@ -17,7 +17,7 @@ inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
         .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
   case Emulator::SNES:
     return std::make_unique<SnesCart>(Cart::Config{
-        .info = info, .copy_romdata = true, .verbosity = espp::Logger::Verbosity::INFO});
+        .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO}); // loads into its ROM arena
   case Emulator::SEGA_GENESIS:
   case Emulator::SEGA_MEGA_DRIVE:
     return std::make_unique<GenesisCart>(Cart::Config{

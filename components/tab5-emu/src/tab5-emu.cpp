@@ -117,6 +117,13 @@ size_t Tab5Emu::copy_file_to_romdata(const std::string &filename) {
   file.seekg(0);
   free_romdata();
   romdata_ = static_cast<uint8_t *>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!romdata_ && rom_arena_ && size <= ROM_ARENA_BYTES) {
+    // the heap is fragmented (a JK session leaves it that way): the
+    // contiguous arena serves as the ROM buffer instead
+    logger_.warn("No contiguous PSRAM block of {} bytes; using the ROM arena for {}", size, filename);
+    romdata_ = rom_arena_;
+    romdata_in_arena_ = true;
+  }
   if (!romdata_) {
     logger_.error("Could not allocate {} bytes for {}", size, filename);
     return 0;
@@ -127,6 +134,12 @@ size_t Tab5Emu::copy_file_to_romdata(const std::string &filename) {
 }
 
 void Tab5Emu::free_romdata() {
+  if (romdata_ && romdata_in_arena_) {
+    romdata_in_arena_ = false;
+    romdata_ = nullptr;
+    romdata_size_ = 0;
+    return;
+  }
   if (romdata_) {
     heap_caps_free(romdata_);
     romdata_ = nullptr;
@@ -319,6 +332,11 @@ void Tab5Emu::keypad_read(lv_indev_t *indev, lv_indev_data_t *data) {
   else if (st.left) key = horizontal_widget ? LV_KEY_LEFT : LV_KEY_PREV;
   else if (st.right) key = horizontal_widget ? LV_KEY_RIGHT : LV_KEY_NEXT;
   if (key) {
+    if (key != self->keypad_last_key_) {
+      auto *group = lv_indev_get_group(indev);
+      self->logger_.debug("keypad: key {} group {} focused {}", key, fmt::ptr(group),
+                          fmt::ptr(group ? lv_group_get_focused(group) : nullptr));
+    }
     self->keypad_last_key_ = key;
     data->key = key;
     data->state = LV_INDEV_STATE_PRESSED;

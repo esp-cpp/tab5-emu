@@ -16,6 +16,10 @@ void *snes_host_rom_alloc(size_t size);
 void snes_host_rom_free(void *p);
 
 bool snes_glue_init(uint8_t *rom, size_t rom_size);
+/// Like snes_glue_init, but the ROM file is read straight into the core's
+/// ROM buffer (no separate copy of the file in PSRAM).
+bool snes_glue_init_file(const char *path);
+size_t snes_glue_rom_size(void); ///< bytes of ROM loaded (0 before init)
 void snes_glue_deinit(void);
 void snes_glue_reset(void);
 // run one frame; render = whether the PPU should draw it (frameskip)

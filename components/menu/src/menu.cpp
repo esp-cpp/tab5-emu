@@ -41,6 +41,10 @@ void Menu::resume() {
   lv_label_set_text_fmt(fps_label_, "%.1f FPS", get_fps());
   lv_screen_load(screen_);
   lv_obj_invalidate(screen_);
+  if (auto *keypad = Tab5Emu::get().keypad_indev(); keypad && group_) {
+    lv_indev_set_group(keypad, group_);
+    lv_group_focus_obj(btn_resume_);
+  }
   task_.periodic(16 * 1000);
   paused_ = false;
 }
@@ -206,10 +210,25 @@ void Menu::init_ui() {
   lv_dropdown_set_options(video_dropdown_, "Original\nFit\nFill");
   lv_obj_set_width(video_dropdown_, lv_pct(90));
   lv_obj_add_event_cb(video_dropdown_, event_callback, LV_EVENT_VALUE_CHANGED, this);
+
+  // gamepad / keyboard focus order (see Tab5Emu::keypad_indev())
+  group_ = lv_group_create();
+  for (auto *o : {btn_resume_, btn_save_, btn_load_, btn_reset_, btn_quit_, btn_slot_prev_, btn_slot_next_, volume_slider_,
+                  brightness_slider_, video_dropdown_}) {
+    lv_group_add_obj(group_, o);
+  }
+  lv_group_set_wrap(group_, true);
 }
 
 void Menu::deinit_ui() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
+  if (group_) {
+    if (auto *keypad = Tab5Emu::get().keypad_indev(); keypad && lv_indev_get_group(keypad) == group_) {
+      lv_indev_set_group(keypad, nullptr);
+    }
+    lv_group_delete(group_);
+    group_ = nullptr;
+  }
   if (screen_) {
     lv_obj_delete(screen_);
     screen_ = nullptr;

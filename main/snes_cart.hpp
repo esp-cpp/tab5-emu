@@ -36,7 +36,7 @@ public:
   }
   void init() {
 #if defined(ENABLE_SNES)
-    init_snes(romdata_, rom_size_bytes_);
+    init_snes(get_rom_filename()); // straight into the core's ROM arena
 #endif
   }
   void deinit() {

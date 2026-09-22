@@ -669,7 +669,10 @@ again:
    if (TotalFileSize > MAX_ROM_SIZE)
       return false;
 
-   memcpy(Memory.ROM, src, TotalFileSize);
+   /* tab5-emu: the host may have read the file straight into Memory.ROM
+      (no second copy of a multi-MB ROM); the header strip then overlaps */
+   if (src != Memory.ROM)
+      memmove(Memory.ROM, src, TotalFileSize);
 
 #else
    TotalFileSize = FileLoader(Memory.ROM, filename, MAX_ROM_SIZE);

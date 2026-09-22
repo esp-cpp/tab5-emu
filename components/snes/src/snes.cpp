@@ -67,9 +67,13 @@ extern "C" void snes_host_audio(const int16_t *stereo, size_t frames) {
   BoxEmu::get().play_audio(reinterpret_cast<const uint8_t *>(stereo), frames * 2 * sizeof(int16_t));
 }
 
-void init_snes(uint8_t *romdata, size_t rom_data_size) {
+static void init_snes_common(bool ok);
+void init_snes(uint8_t *romdata, size_t rom_data_size) { init_snes_common(snes_glue_init(romdata, rom_data_size)); }
+void init_snes(const std::string &rom_path) { init_snes_common(snes_glue_init_file(rom_path.c_str())); }
+
+static void init_snes_common(bool ok) {
   g_initialized = false;
-  if (!snes_glue_init(romdata, rom_data_size)) {
+  if (!ok) {
     fmt::print("snes: init failed (psram free {} largest {}, internal free {} largest {})\n",
                heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));

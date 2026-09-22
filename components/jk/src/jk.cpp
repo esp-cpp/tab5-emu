@@ -497,11 +497,83 @@ void jk_esp_alloc_dump(int top) {
 void jk_esp_alloc_dump(int) {}
 #endif
 
+// ---------------------------------------------------------------------------
+// Small-object pool for the engine: allocations up to 128 bytes (strings,
+// COG values, list nodes) come from one PSRAM slab with per-size free lists.
+// The engine leaks a few hundred of these per run (stdString_FastWCopy,
+// sithCogExec_PushVector); scattered over the general heap they pinned it so
+// badly that no 4 MB block (the SNES ROM arena) was left afterwards. The slab
+// is released whole at shutdown, which also retires the leaks.
+namespace {
+constexpr size_t POOL_BYTES = 512 * 1024;
+constexpr size_t POOL_CLASSES[] = {16, 32, 48, 64, 96, 128};
+constexpr size_t POOL_NUM_CLASSES = sizeof(POOL_CLASSES) / sizeof(POOL_CLASSES[0]);
+constexpr size_t POOL_HDR = 8; // class index + magic in front of every block
+constexpr uint32_t POOL_MAGIC = 0x4b4a5350;
+uint8_t *g_pool_base = nullptr;
+size_t g_pool_bump = 0;
+void *g_pool_free[POOL_NUM_CLASSES] = {};
+portMUX_TYPE g_pool_lock = portMUX_INITIALIZER_UNLOCKED;
+size_t g_pool_allocs = 0, g_pool_fallbacks = 0;
+
+inline bool pool_owns(const void *p) {
+  return g_pool_base && p >= g_pool_base && p < g_pool_base + POOL_BYTES;
+}
+void *pool_alloc(size_t size) {
+  size_t c = 0;
+  while (c < POOL_NUM_CLASSES && POOL_CLASSES[c] < size) c++;
+  if (c == POOL_NUM_CLASSES) return nullptr;
+  portENTER_CRITICAL(&g_pool_lock);
+  void *blk = g_pool_free[c];
+  if (blk) {
+    g_pool_free[c] = *static_cast<void **>(blk);
+  } else if (g_pool_bump + POOL_HDR + POOL_CLASSES[c] <= POOL_BYTES) {
+    uint32_t *hdr = reinterpret_cast<uint32_t *>(g_pool_base + g_pool_bump);
+    hdr[0] = static_cast<uint32_t>(c);
+    hdr[1] = POOL_MAGIC;
+    blk = hdr + 2;
+    g_pool_bump += POOL_HDR + POOL_CLASSES[c];
+  }
+  if (blk) g_pool_allocs++; else g_pool_fallbacks++;
+  portEXIT_CRITICAL(&g_pool_lock);
+  return blk;
+}
+size_t pool_block_size(const void *p) {
+  const uint32_t *hdr = static_cast<const uint32_t *>(p) - 2;
+  return hdr[1] == POOL_MAGIC && hdr[0] < POOL_NUM_CLASSES ? POOL_CLASSES[hdr[0]] : 0;
+}
+void pool_free(void *p) {
+  const uint32_t *hdr = static_cast<const uint32_t *>(p) - 2;
+  if (hdr[1] != POOL_MAGIC || hdr[0] >= POOL_NUM_CLASSES) return; // not ours (corrupt header)
+  portENTER_CRITICAL(&g_pool_lock);
+  *static_cast<void **>(p) = g_pool_free[hdr[0]];
+  g_pool_free[hdr[0]] = p;
+  portEXIT_CRITICAL(&g_pool_lock);
+}
+} // namespace
+
+void jk_esp_pool_create() {
+  if (g_pool_base) return;
+  g_pool_base = static_cast<uint8_t *>(heap_caps_malloc(POOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  g_pool_bump = 0;
+  memset(g_pool_free, 0, sizeof(g_pool_free));
+  g_pool_allocs = g_pool_fallbacks = 0;
+  if (!g_pool_base) logger.warn("small-object pool: no PSRAM, using the heap");
+}
+void jk_esp_pool_destroy() {
+  if (!g_pool_base) return;
+  logger.info("small-object pool: {} bytes used of {}, {} allocations, {} heap fallbacks", g_pool_bump, POOL_BYTES,
+              g_pool_allocs, g_pool_fallbacks);
+  heap_caps_free(g_pool_base);
+  g_pool_base = nullptr;
+}
+
 // PSRAM only, on purpose: the engine's material cache evicts when an
 // allocation fails, and a fallback to internal RAM would instead drain the
 // internal heap (SD card DMA buffers, USB) once PSRAM is full.
 void *jk_esp_malloc_site(size_t size, const void *site) {
-  void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  void *p = size <= POOL_CLASSES[POOL_NUM_CLASSES - 1] ? pool_alloc(size) : nullptr;
+  if (!p) p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #if defined(JK_ESP_FS_DEBUG)
   alloc_track(p, size, site);
 #endif
@@ -514,7 +586,29 @@ void *jk_esp_realloc_site(void *ptr, size_t size, const void *site) {
 #if defined(JK_ESP_FS_DEBUG)
   alloc_untrack(ptr);
 #endif
-  void *p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  void *p;
+  if (ptr && pool_owns(ptr)) {
+    const size_t old = pool_block_size(ptr);
+    if (size <= old) {
+      p = ptr; // still fits its class
+    } else {
+      p = jk_esp_malloc_site(size, site);
+      if (p) {
+        memcpy(p, ptr, old);
+        pool_free(ptr);
+      }
+#if defined(JK_ESP_FS_DEBUG)
+      return p; // already tracked by jk_esp_malloc_site
+#endif
+    }
+  } else if (!ptr && size <= POOL_CLASSES[POOL_NUM_CLASSES - 1]) {
+    p = jk_esp_malloc_site(size, site);
+#if defined(JK_ESP_FS_DEBUG)
+    return p;
+#endif
+  } else {
+    p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
 #if defined(JK_ESP_FS_DEBUG)
   alloc_track(p, size, site);
 #endif
@@ -526,7 +620,11 @@ void jk_esp_free(void *ptr) {
 #if defined(JK_ESP_FS_DEBUG)
   alloc_untrack(ptr);
 #endif
-  heap_caps_free(ptr);
+  if (pool_owns(ptr)) {
+    pool_free(ptr);
+  } else {
+    heap_caps_free(ptr);
+  }
   jk_esp_us_free += esp_timer_get_time() - t0; jk_esp_n_free++;
 }
 
@@ -690,6 +788,7 @@ bool init(const Config &config) {
         logger.info("heap before engine startup: internal {} (largest {}), psram {} (largest {})",
                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                     heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+        jk_esp_pool_create();
         if (jk_esp_engine_startup(g_config.game_dir.c_str())) {
           g_engine_started_ok = true;
           while (!g_engine_stop && !jk_esp_quit_requested) {
@@ -709,6 +808,9 @@ bool init(const Config &config) {
         } else {
           logger.error("engine startup failed");
         }
+        jk_esp_pool_destroy();
+        logger.info("heap after pool release: psram {} (largest {})", heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                    heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         g_engine_running = false;
         // a task created ...WithCaps must be deleted by another task for its
         // (PSRAM) stack to be freed: park here, deinit() deletes us

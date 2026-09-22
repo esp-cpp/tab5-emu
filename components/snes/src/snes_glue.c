@@ -120,14 +120,48 @@ static void audio_pull(void) {
   snes_host_audio(audio_buffer, samples / 2);
 }
 
+static size_t loaded_rom_size = 0;
+size_t snes_glue_rom_size(void) { return loaded_rom_size; }
+
+static bool snes_glue_init_common(uint8_t *rom, size_t rom_size);
+
 bool snes_glue_init(uint8_t *rom, size_t rom_size) {
-  init_settings();
-  CPU.Flags = 0;
   if (!rom || rom_size < 0x8000) {
     printf("snes: no ROM data (%u bytes)\n", (unsigned)rom_size);
     return false;
   }
+  return snes_glue_init_common(rom, rom_size);
+}
+
+bool snes_glue_init_file(const char *path) {
+  // the core's buffer is MAX_ROM_SIZE + 0x200 (+ 0x8000 in front); read the
+  // file into it and let LoadROM strip a copier header in place
+  return snes_glue_init_common((uint8_t *)path, (size_t)-1);
+}
+
+static bool snes_glue_init_common(uint8_t *rom, size_t rom_size) {
+  init_settings();
+  CPU.Flags = 0;
+  loaded_rom_size = 0;
   if (!S9xInitMemory()) { printf("snes: S9xInitMemory failed\n"); return false; }
+  if (rom_size == (size_t)-1) {
+    // rom is a path: read the file into Memory.ROM
+    const char *path = (const char *)rom;
+    FILE *f = fopen(path, "rb");
+    if (!f) { printf("snes: cannot open %s\n", path); return false; }
+    size_t total = 0;
+    const size_t cap = MAX_ROM_SIZE + 0x200;
+    while (total < cap) {
+      size_t chunk = cap - total < 65536 ? cap - total : 65536;
+      size_t n = fread(Memory.ROM + total, 1, chunk, f);
+      total += n;
+      if (n < chunk) break;
+    }
+    fclose(f);
+    if (total < 0x8000) { printf("snes: %s: only %u bytes\n", path, (unsigned)total); return false; }
+    rom = Memory.ROM;
+    rom_size = total;
+  }
   if (!S9xInitAPU()) { printf("snes: S9xInitAPU failed\n"); return false; }
   if (!init_display()) { printf("snes: display buffers failed\n"); return false; }
   if (!S9xInitGFX()) { printf("snes: S9xInitGFX failed\n"); return false; }
@@ -139,6 +173,7 @@ bool snes_glue_init(uint8_t *rom, size_t rom_size) {
   game.data = rom;
   game.size = rom_size;
   if (!LoadROM(&game)) { printf("snes: LoadROM failed (%u bytes)\n", (unsigned)rom_size); return false; }
+  loaded_rom_size = rom_size;
   Settings.FrameTime = Settings.PAL ? Settings.FrameTimePAL : Settings.FrameTimeNTSC;
   screen_index = 0;
   return true;
@@ -213,7 +248,7 @@ bool snes_glue_state_save(void *data, size_t size) {
 bool snes_glue_state_load(const void *data, size_t size) {
   const uint8_t *buffer = data;
   uint32_t sa1_old_flags = SA1.Flags;
-  SSA1 sa1_state;
+  static SSA1 sa1_state; // 33 KB (two 4096-entry maps): not on the task stack
   if (size != snes_glue_state_size()) return false;
   S9xReset();
   memcpy(&CPU, buffer, sizeof(CPU)); buffer += sizeof(CPU);

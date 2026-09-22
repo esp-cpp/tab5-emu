@@ -11,6 +11,18 @@ Gui::Gui(const Config &config)
   init_ui();
   update_rom_list();
   update_shared_state();
+  // gamepad / keyboard navigation from the first screen on (resume() does
+  // the same after a game)
+  if (auto *keypad = Tab5Emu::get().keypad_indev(); keypad && group_) {
+    lv_indev_set_group(keypad, group_);
+    if (focused_rom_ >= 0 && focused_rom_ < (int)rom_buttons_.size()) {
+      lv_group_focus_obj(rom_buttons_[focused_rom_]);
+    }
+    logger_.info("keypad group attached: {} objects, focused rom {}, focused obj {}", lv_group_get_obj_count(group_),
+                 focused_rom_.load(), fmt::ptr(lv_group_get_focused(group_)));
+  } else {
+    logger_.warn("no keypad input device / group at startup");
+  }
   task_.periodic(16 * 1000);
   using namespace std::placeholders;
   espp::EventManager::get().add_subscriber(volume_changed_topic, "gui", std::bind(&Gui::on_volume, this, _1), 4 * 1024);
@@ -35,6 +47,16 @@ void Gui::resume() {
   update_shared_state();
   lv_screen_load(screen_);
   lv_obj_invalidate(screen_);
+  if (auto *keypad = Tab5Emu::get().keypad_indev(); keypad && group_) {
+    lv_indev_set_group(keypad, group_);
+    if (focused_rom_ >= 0 && focused_rom_ < (int)rom_buttons_.size()) {
+      lv_group_focus_obj(rom_buttons_[focused_rom_]);
+    }
+    logger_.info("keypad group attached: {} objects, focused rom {}, focused obj {}", lv_group_get_obj_count(group_),
+                 focused_rom_.load(), fmt::ptr(lv_group_get_focused(group_)));
+  } else {
+    logger_.warn("no keypad input device / group at startup");
+  }
   task_.periodic(16 * 1000);
   paused_ = false;
 }
@@ -164,6 +186,11 @@ void Gui::init_ui() {
   lv_obj_set_width(video_dropdown_, lv_pct(90));
   lv_obj_add_event_cb(video_dropdown_, event_callback, LV_EVENT_VALUE_CHANGED, this);
 
+  // gamepad / keyboard focus order (see Tab5Emu::keypad_indev()): the ROM
+  // buttons come first (added by update_rom_list), then the controls
+  group_ = lv_group_create();
+  lv_group_set_wrap(group_, true);
+
   lv_screen_load(screen_);
 }
 
@@ -187,11 +214,21 @@ void Gui::update_rom_list() {
   rom_infos_ = parse_metadata(metadata_filename_);
   lv_obj_clean(rom_list_);
   rom_buttons_.clear();
+  if (group_) {
+    lv_group_remove_all_objs(group_);
+  }
   for (size_t i = 0; i < rom_infos_.size(); i++) {
     auto btn = lv_list_add_button(rom_list_, LV_SYMBOL_FILE, rom_infos_[i].name.c_str());
     lv_obj_set_user_data(btn, reinterpret_cast<void *>(i));
     lv_obj_add_event_cb(btn, event_callback, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(btn, event_callback, LV_EVENT_FOCUSED, this);
     rom_buttons_.push_back(btn);
+    if (group_) lv_group_add_obj(group_, btn);
+  }
+  if (group_) {
+    for (auto *o : {play_button_, volume_slider_, mute_switch_, brightness_slider_, usb_switch_, video_dropdown_}) {
+      if (o) lv_group_add_obj(group_, o);
+    }
   }
   if (rom_infos_.empty()) {
     lv_list_add_text(rom_list_, "No games found.\nAdd metadata.csv to the SD card.");
@@ -214,6 +251,10 @@ void Gui::select_rom(int index) {
       lv_obj_add_state(rom_buttons_[i], LV_STATE_CHECKED);
     else
       lv_obj_remove_state(rom_buttons_[i], LV_STATE_CHECKED);
+  }
+  // keep the keypad focus (and its highlight) on the selected game too
+  if (group_ && index < (int)rom_buttons_.size() && lv_group_get_focused(group_) != rom_buttons_[index]) {
+    lv_group_focus_obj(rom_buttons_[index]);
   }
   const auto &rom = rom_infos_[index];
   lv_label_set_text(title_label_, rom.name.c_str());
@@ -292,7 +333,15 @@ void Gui::event_callback(lv_event_t *e) {
   auto target = static_cast<lv_obj_t *>(lv_event_get_target(e));
   auto code = lv_event_get_code(e);
   auto &emu = Tab5Emu::get();
-  if (code == LV_EVENT_CLICKED) {
+  if (code == LV_EVENT_FOCUSED) {
+    // gamepad / keyboard: moving the focus through the list selects the game
+    for (size_t i = 0; i < gui->rom_buttons_.size(); i++) {
+      if (gui->rom_buttons_[i] == target) {
+        if (gui->focused_rom_ != (int)i) gui->select_rom(i);
+        return;
+      }
+    }
+  } else if (code == LV_EVENT_CLICKED) {
     if (target == gui->play_button_) {
       if (gui->focused_rom_ >= 0) {
         gui->ready_to_play_ = true;
@@ -301,7 +350,14 @@ void Gui::event_callback(lv_event_t *e) {
     }
     for (size_t i = 0; i < gui->rom_buttons_.size(); i++) {
       if (gui->rom_buttons_[i] == target) {
-        gui->select_rom(i);
+        // a tap selects; enter on the already selected game (gamepad A /
+        // keyboard enter) starts it
+        const bool from_keypad = lv_indev_get_type(lv_indev_active()) == LV_INDEV_TYPE_KEYPAD;
+        if (from_keypad && gui->focused_rom_ == (int)i) {
+          gui->ready_to_play_ = true;
+        } else {
+          gui->select_rom(i);
+        }
         return;
       }
     }

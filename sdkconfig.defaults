@@ -103,7 +103,7 @@ CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM=y
 
 # LVGL image cache (PSRAM via lv_malloc): without it the JPEG decoder yields
 # partially decoded images, which LVGL cannot scale (boxart never showed)
-CONFIG_LV_CACHE_DEF_SIZE=2097152
+CONFIG_LV_CACHE_DEF_SIZE=65536
 
 # USB mass storage (espp::UsbDevice MSC over the SD card)
 CONFIG_TINYUSB_MSC_ENABLED=y
