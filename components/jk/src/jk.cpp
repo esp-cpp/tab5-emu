@@ -505,7 +505,7 @@ void jk_esp_alloc_dump(int) {}
 // badly that no 4 MB block (the SNES ROM arena) was left afterwards. The slab
 // is released whole at shutdown, which also retires the leaks.
 namespace {
-constexpr size_t POOL_BYTES = 512 * 1024;
+constexpr size_t POOL_BYTES = 2 * 1024 * 1024; // the level load has ~10k small blocks live at once; a fallback to the heap fragments it
 constexpr size_t POOL_CLASSES[] = {16, 32, 48, 64, 96, 128};
 constexpr size_t POOL_NUM_CLASSES = sizeof(POOL_CLASSES) / sizeof(POOL_CLASSES[0]);
 constexpr size_t POOL_HDR = 8; // class index + magic in front of every block

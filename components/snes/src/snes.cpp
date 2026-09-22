@@ -14,6 +14,14 @@
 #include "box-emu.hpp"
 #include "statistics.hpp"
 
+#include <sdkconfig.h>
+#if CONFIG_JK_ESP_DEBUG
+// the JK component's sampling profiler (tick hook on core 0); weak so this
+// component does not depend on it
+extern "C" void jk_prof_start(void) __attribute__((weak));
+extern "C" void jk_prof_dump(int top) __attribute__((weak));
+#endif
+
 extern "C" {
 #include "snes9x.h" // SNES_*_MASK
 }
@@ -24,6 +32,9 @@ uint8_t *g_last_frame = nullptr;
 int g_last_w = 256, g_last_h = 224;
 int g_skip_run = 0;
 constexpr int MAX_SKIP = 3;
+// rendered vs skipped frames (the frame-time statistics blend both)
+static uint64_t g_rendered_frames = 0, g_rendered_us = 0, g_skipped_frames = 0, g_skipped_us = 0;
+static uint64_t g_next_due = 0; // cumulative frame deadline (esp_timer us)
 }
 
 extern "C" uint32_t snes_host_read_joypad(int port) {
@@ -89,6 +100,13 @@ static void init_snes_common(bool ok) {
   g_last_h = 224;
   g_skip_run = 0;
   reset_frame_time();
+  g_rendered_frames = g_rendered_us = g_skipped_frames = g_skipped_us = 0;
+  g_next_due = 0;
+#if CONFIG_JK_ESP_DEBUG
+  if (jk_prof_start) {
+    jk_prof_start(); // PC histogram of core 0 (this task), dumped at deinit
+  }
+#endif
   g_initialized = true;
   fmt::print("snes: ROM loaded ({}), {} state bytes\n", snes_glue_pal() ? "PAL" : "NTSC", snes_glue_state_size());
 }
@@ -101,10 +119,16 @@ void run_snes_rom() {
   if (!g_initialized) return;
   const auto start = esp_timer_get_time();
   const uint64_t frame_us = snes_glue_pal() ? 20000 : 16667;
-  // adaptive frameskip: after a slow frame, skip rendering up to MAX_SKIP
+  // cumulative pacing (fast frames pay back slow ones), resync when > 2
+  // frames behind; never skip two frames in a row (rendering is a small
+  // part of a frame, skipping mostly makes the output choppy)
+  if (g_next_due == 0 || start > g_next_due + 2 * frame_us) {
+    g_next_due = start;
+  }
+  const bool behind = start > g_next_due;
   static uint64_t last_elapsed = 0;
   bool render = true;
-  if (last_elapsed > frame_us && g_skip_run < MAX_SKIP) {
+  if (behind && last_elapsed > frame_us && g_skip_run < 1) {
     render = false;
     g_skip_run++;
   } else {
@@ -123,11 +147,20 @@ void run_snes_rom() {
     g_last_frame = screen;
     BoxEmu::get().push_frame(screen);
   }
-  const uint64_t elapsed = esp_timer_get_time() - start;
+  const auto end = esp_timer_get_time();
+  const uint64_t elapsed = end - start;
   last_elapsed = elapsed;
   update_frame_time(elapsed);
-  if (elapsed < frame_us) {
-    std::this_thread::sleep_for(std::chrono::microseconds(frame_us - elapsed));
+  if (render) {
+    g_rendered_frames++;
+    g_rendered_us += elapsed;
+  } else {
+    g_skipped_frames++;
+    g_skipped_us += elapsed;
+  }
+  g_next_due += frame_us;
+  if (end < g_next_due) {
+    std::this_thread::sleep_for(std::chrono::microseconds(g_next_due - end));
   } else {
     std::this_thread::yield();
   }
@@ -167,6 +200,14 @@ std::span<uint8_t> get_snes_video_buffer() {
 
 void deinit_snes() {
   if (!g_initialized) return;
+#if CONFIG_JK_ESP_DEBUG
+  if (jk_prof_dump) {
+    jk_prof_dump(200);
+  }
+#endif
+  fmt::print("snes: {} rendered frames at {:.1f} ms, {} skipped frames at {:.1f} ms\n", g_rendered_frames,
+             g_rendered_frames ? g_rendered_us / 1000.0 / g_rendered_frames : 0.0, g_skipped_frames,
+             g_skipped_frames ? g_skipped_us / 1000.0 / g_skipped_frames : 0.0);
   g_initialized = false;
   snes_glue_deinit();
   BoxEmu::get().audio_sample_rate(48000);

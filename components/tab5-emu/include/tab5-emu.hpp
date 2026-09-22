@@ -79,7 +79,7 @@ public:
   uint8_t *romdata() const { return romdata_; }
   void free_romdata();
   /// A permanent PSRAM block reserved at boot for cores that need one big
-  /// contiguous ROM buffer (the SNES core wants 4 MB); the general heap gets
+  /// contiguous ROM buffer (the SNES core wants 6 MB); the general heap gets
   /// too fragmented by GUI allocations to guarantee that later. Returns
   /// nullptr if `bytes` exceeds the reservation.
   uint8_t *rom_arena(size_t bytes) const {
@@ -322,7 +322,7 @@ protected:
   // memory
   uint8_t *romdata_{nullptr};
   size_t romdata_size_{0};
-  static constexpr size_t ROM_ARENA_BYTES = 0x400000 + 0x200 + 0x8000; // snes9x MAX_ROM_SIZE + slack
+  static constexpr size_t ROM_ARENA_BYTES = 0x600000 + 0x200 + 0x8000; // snes9x MAX_ROM_SIZE + slack
   uint8_t *rom_arena_{nullptr};
   bool romdata_in_arena_{false};
 

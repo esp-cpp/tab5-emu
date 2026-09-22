@@ -18,5 +18,6 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fno-strict-aliasing -fjump-
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
           ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
-  COMMENT "Moving the SNES core's .bss to PSRAM"
+          --keep CPU,ICPU,PPU,IPPU,Settings
+  COMMENT "Moving the SNES core's .bss to PSRAM (CPU / PPU state stays internal)"
   VERBATIM)

@@ -78,6 +78,9 @@ static bool init_display(void) {
   GFX.ZBuffer_buffer = (uint8_t *)psram_malloc((GFX.Pitch >> 1) * h + SCREEN_SAFETY);
   GFX.SubZBuffer_buffer = (uint8_t *)psram_malloc((GFX.Pitch >> 1) * h + SCREEN_SAFETY);
   if (!GFX.SubScreen_buffer || !GFX.ZBuffer_buffer || !GFX.SubZBuffer_buffer) return false;
+  memset(GFX.SubScreen_buffer, 0, GFX.Pitch * h + SCREEN_SAFETY);
+  memset(GFX.ZBuffer_buffer, 0, (GFX.Pitch >> 1) * h + SCREEN_SAFETY);
+  memset(GFX.SubZBuffer_buffer, 0, (GFX.Pitch >> 1) * h + SCREEN_SAFETY);
   GFX.Screen = GFX.Screen_buffer + SCREEN_SAFETY;
   GFX.SubScreen = GFX.SubScreen_buffer + SCREEN_SAFETY;
   GFX.ZBuffer = GFX.ZBuffer_buffer + SCREEN_SAFETY;
