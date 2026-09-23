@@ -92,6 +92,11 @@ public:
   /// as they are done, before the GUI can fragment the heap.
   void release_rom_arena();
   bool reserve_rom_arena();
+  /// A permanent 2 MB PSRAM slab reserved at boot right after the ROM arena,
+  /// for a game's small-object pool (JK): allocating it later would land it
+  /// inside the released arena's hole and split it for good.
+  uint8_t *small_object_slab() const { return small_object_slab_; }
+  static constexpr size_t SMALL_OBJECT_SLAB_BYTES = 2 * 1024 * 1024;
 
   /////////////////////////////////////////////////////////////////////////////
   // Audio
@@ -335,6 +340,7 @@ protected:
   static constexpr size_t ROM_ARENA_BYTES = 0x600000 + 0x200 + 0x8000; // snes9x MAX_ROM_SIZE + slack
   uint8_t *rom_arena_{nullptr};
   bool romdata_in_arena_{false};
+  uint8_t *small_object_slab_{nullptr};
 
   // display
   std::shared_ptr<espp::Display<Pixel>> display_;

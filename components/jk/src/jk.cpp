@@ -3,6 +3,7 @@
 #include "jk_esp.h"
 
 #include <algorithm>
+#include <map>
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -570,7 +571,11 @@ void pool_free(void *p) {
 
 void jk_esp_pool_create() {
   if (g_pool_base) return;
-  g_pool_base = static_cast<uint8_t *>(heap_caps_malloc(POOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  static_assert(POOL_BYTES == Tab5Emu::SMALL_OBJECT_SLAB_BYTES);
+  g_pool_base = Tab5Emu::get().small_object_slab(); // reserved at boot, next to the ROM arena
+  if (!g_pool_base) {
+    g_pool_base = static_cast<uint8_t *>(heap_caps_malloc(POOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
   g_pool_bump = 0;
   memset(g_pool_free, 0, sizeof(g_pool_free));
   g_pool_allocs = g_pool_fallbacks = 0;
@@ -747,9 +752,55 @@ void pattern_frame() {
 // ---------------------------------------------------------------------------
 namespace jk {
 
+#if defined(JK_ESP_FS_DEBUG) && CONFIG_HEAP_TRACING_STANDALONE
+// Diagnostic (needs CONFIG_HEAP_TRACING_STANDALONE): which allocations made
+// during a session outlive it (they split the PSRAM heap so the ROM arena
+// cannot be reserved afterwards)
+#include <esp_heap_trace.h>
+static heap_trace_record_t *g_trace_records = nullptr;
+constexpr size_t TRACE_RECORDS = 6000;
+static void trace_start() {
+  if (!g_trace_records) {
+    g_trace_records = static_cast<heap_trace_record_t *>(
+        heap_caps_calloc(TRACE_RECORDS, sizeof(heap_trace_record_t), MALLOC_CAP_SPIRAM));
+    if (!g_trace_records) return;
+    heap_trace_init_standalone(g_trace_records, TRACE_RECORDS);
+  }
+  heap_trace_start(HEAP_TRACE_LEAKS);
+}
+static void trace_dump_big() {
+  heap_trace_stop();
+  const size_t n = heap_trace_get_count();
+  logger.info("heap trace: {} outstanding allocations from this session", n);
+  std::map<uintptr_t, std::pair<size_t, size_t>> small; // top caller -> (count, bytes)
+  for (size_t i = 0; i < n; i++) {
+    heap_trace_record_t rec;
+    if (heap_trace_get(i, &rec) != ESP_OK) continue;
+    if (rec.size < 4 * 1024) {
+      auto &e = small[reinterpret_cast<uintptr_t>(rec.alloced_by[2] ? rec.alloced_by[2] : rec.alloced_by[1])];
+      e.first++;
+      e.second += rec.size;
+      continue;
+    }
+    std::string callers;
+    for (int d = 0; d < CONFIG_HEAP_TRACING_STACK_DEPTH && rec.alloced_by[d]; d++) {
+      callers += fmt::format("{:#x} ", reinterpret_cast<uintptr_t>(rec.alloced_by[d]));
+    }
+    logger.info("  {} KB at {:#x} by {}", rec.size / 1024, reinterpret_cast<uintptr_t>(rec.address), callers);
+  }
+  for (const auto &[caller, e] : small) {
+    logger.info("  small: {} allocations, {} bytes by {:#x}", e.first, e.second, caller);
+  }
+}
+#else
+static void trace_start() {}
+static void trace_dump_big() {}
+#endif
+
 void ensure_pool() { jk_esp_pool_create(); }
 
 bool init(const Config &config) {
+  trace_start();
   g_config = config;
   g_paused = false;
   jk_esp_quit_requested = 0;
@@ -857,6 +908,7 @@ bool init(const Config &config) {
           for (size_t i = 0; i < nblk; i++) {
             logger.info("  psram block {:#x} {} KB {}", blks[i].ptr, blks[i].size / 1024, blks[i].used ? "used" : "free");
           }
+          trace_dump_big();
         }
 #endif
         g_engine_running = false;

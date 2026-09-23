@@ -84,6 +84,7 @@ void jk_esp_free_dma(void *ptr);
 /// did block (the caller may want to redraw).
 int jk_esp_park_point(void);
 void jk_esp_file_release_buffers(void);
+void jk_esp_music_deinit(void); ///< release the music streamer (engine session over)
 /// Microseconds since boot.
 uint64_t jk_esp_time_us(void);
 /// Sleep for the given milliseconds (yields to other tasks).
