@@ -13,6 +13,10 @@ dependencies:
     version: '>=1.3.4'
     override_path: '../../../espp/components/usb_device'
   espp/sdcard: '>=1.0'
+  # crash reports + core dump download at boot (not in a release yet: local espp)
+  espp/coredump:
+    version: '>=1.0'
+    override_path: '../../../espp/components/coredump'
   # USB host (HID keyboard / mouse / gamepad on the USB-A jack) and the hid-rp
   # runtime report decoders. TEMPORARY: local espp (branch
   # feat/usb-host-tab5-integration) until a release carries UsbHost's

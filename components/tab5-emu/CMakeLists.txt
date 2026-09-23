@@ -25,8 +25,7 @@ idf_component_register(
   "hid-rp"
   "usb_device"
   "esp_hal_usb"
-  "espcoredump"
-  "esp_partition"
+  "coredump"
   "mbedtls"
   "sdcard"
   )

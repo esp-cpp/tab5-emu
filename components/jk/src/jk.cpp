@@ -834,6 +834,31 @@ bool init(const Config &config) {
 #endif
         logger.info("heap after pool release: psram {} (largest {})", heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+#if defined(JK_ESP_FS_DEBUG)
+        // what splits the PSRAM heap after a session: allocated blocks >= 64 KB
+        // and free blocks >= 1 MB. Collected inside the walk (the heap lock is
+        // held there: no logging, it takes a mutex and aborts), printed after.
+        {
+          struct Blk { uintptr_t ptr; size_t size; bool used; };
+          static Blk blks[64];
+          static size_t nblk;
+          nblk = 0;
+          heap_caps_walk(
+              MALLOC_CAP_SPIRAM,
+              [](walker_heap_into_t, walker_block_info_t block, void *) -> bool {
+                const bool big_used = block.used && block.size >= 64 * 1024;
+                const bool big_free = !block.used && block.size >= 1024 * 1024;
+                if ((big_used || big_free) && nblk < 64) {
+                  blks[nblk++] = {reinterpret_cast<uintptr_t>(block.ptr), block.size, block.used};
+                }
+                return true;
+              },
+              nullptr);
+          for (size_t i = 0; i < nblk; i++) {
+            logger.info("  psram block {:#x} {} KB {}", blks[i].ptr, blks[i].size / 1024, blks[i].used ? "used" : "free");
+          }
+        }
+#endif
         g_engine_running = false;
         // a task created ...WithCaps must be deleted by another task for its
         // (PSRAM) stack to be freed: park here, deinit() deletes us
