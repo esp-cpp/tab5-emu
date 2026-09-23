@@ -97,6 +97,7 @@ void jk_esp_free(void *ptr);
 void *jk_esp_malloc_site(size_t size, const void *site);
 void *jk_esp_realloc_site(void *ptr, size_t size, const void *site);
 void jk_esp_alloc_dump(int top);
+void jk_esp_alloc_release(void); ///< free the tracker table (engine shut down)
 /// Log line
 void jk_esp_log(const char *fmt, ...);
 /// Set to 1 by the glue when the engine should quit at the next opportunity.

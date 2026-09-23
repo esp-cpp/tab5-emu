@@ -31,6 +31,7 @@ extern "C" void app_main(void) {
                 info.total_allocated_bytes);
   };
   internal_free_log("boot");
+  Tab5Emu::dump_core_dump_to_console();
   Tab5Emu &emu = Tab5Emu::get();
 
   if (!emu.initialize_tab5()) {

@@ -24,6 +24,7 @@
 #include "task.hpp"
 
 #include "gamepad_state.hpp"
+#include "hid-rp-report-map.hpp"
 #include "usb_device.hpp"
 #include "video_setting.hpp"
 
@@ -173,11 +174,16 @@ public:
   MouseState take_mouse_motion();
   bool usb_keyboard_present() const { return usb_keyboards_ > 0; }
   bool usb_mouse_present() const { return usb_mice_ > 0; }
-  /// Generic HID gamepads (report-descriptor driven, see hid_gamepad.hpp)
+  /// Generic HID gamepads (decoded with the hid-rp report map, see usb_hid.cpp)
   /// are merged into gamepad_state(); select+start opens the pause menu.
   bool usb_gamepad_present() const { return usb_gamepads_ > 0; }
   /// The gamepad's sticks (zeros without a gamepad)
   GamepadAxes gamepad_axes() const;
+  /// The USB gamepad's buttons alone (gamepad_state() also merges the touch
+  /// pad and the keyboard-as-gamepad keys)
+  GamepadState usb_gamepad_state() const;
+  /// The touch virtual gamepad alone
+  GamepadState touch_gamepad_state() const;
   /// LVGL keypad input device driven by the gamepad (and a USB keyboard's
   /// arrows / enter / escape): d-pad = focus prev/next (left/right adjust a
   /// focused slider / dropdown), A = enter, B = escape. Menus attach their
@@ -203,6 +209,10 @@ public:
   /// Give the USB-C pins back to the serial console if a previous run left
   /// them on the OTG controller (called once at construction).
   void usb_msc_restore_console();
+  /// A crash while the console is unavailable (e.g. during the USB drive
+  /// hand-over) leaves its core dump in flash: print it base64 to the console
+  /// (decode on the PC with esp-coredump info_corefile), then erase it.
+  static void dump_core_dump_to_console();
   bool is_usb_msc_enabled() const { return usb_device_ != nullptr; }
   /// True while a PC holds the card (the volume is not mounted here)
   bool usb_msc_host_has_card() const;
@@ -356,8 +366,8 @@ protected:
   lv_indev_t *keypad_indev_{nullptr};
   uint32_t keypad_last_key_{0};
   static void keypad_read(lv_indev_t *indev, lv_indev_data_t *data);
-  void on_hid_keyboard_report(const uint8_t *data, size_t len);
-  void on_hid_mouse_report(const uint8_t *data, size_t len);
+  void on_hid_keyboard(const espp::hid_rp::KeyboardReport &report);
+  void on_hid_mouse(const espp::hid_rp::MouseReport &report);
   void on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes = {});
 
   // video

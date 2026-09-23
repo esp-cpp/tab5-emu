@@ -136,6 +136,9 @@ void Tab5Emu::deinitialize_usb_msc() {
   // (initialized, unmounted); then it is ours again
   usb_device_.reset();
   usb_otg11_take_usb_c(false);
+  // give the PC time to re-enumerate the console before anything that can
+  // fail loudly (host re-init, mount): a panic printed earlier is lost
+  vTaskDelay(pdMS_TO_TICKS(1500));
   auto *sd = Bsp::get().sdcard_component();
   std::error_code ec;
   if (sd && !sd->is_mounted() && !sd->mount(ec)) {

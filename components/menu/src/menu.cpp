@@ -7,6 +7,11 @@ Menu::Menu(const Config &config)
     , action_callback_(config.action_callback)
     , slot_image_callback_(config.slot_image_callback)
     , logger_({.tag = "Menu", .level = config.log_level}) {
+  // the screenshot buffers are sized now, while the heap still has room: a
+  // running game (JK) can leave PSRAM without a 600 KB block, and a failed
+  // allocation on pause would throw std::bad_alloc (no way to recover there)
+  pause_image_data_.reserve(SCREENSHOT_MAX_BYTES);
+  slot_image_data_.reserve(SCREENSHOT_MAX_BYTES);
   init_ui();
   using namespace std::placeholders;
   espp::EventManager::get().add_subscriber(volume_changed_topic, "menu", std::bind(&Menu::on_volume, this, _1), 4 * 1024);
@@ -79,11 +84,11 @@ bool Menu::load_screenshot(const std::string &path, lv_obj_t *image, std::vector
   file.read((char *)header, 4);
   uint16_t w = (header[0] << 8) | header[1];
   uint16_t h = (header[2] << 8) | header[3];
-  if (w == 0 || h == 0 || w > 2048 || h > 2048) {
+  if (w == 0 || h == 0 || w > 2048 || h > 2048 || (size_t)w * h * 2 > storage.capacity()) {
     lv_image_set_src(image, nullptr);
     return false;
   }
-  storage.resize((size_t)w * h * 2);
+  storage.resize((size_t)w * h * 2); // within the reserved capacity: no allocation
   file.read((char *)storage.data(), storage.size());
   memset(&desc, 0, sizeof(desc));
   desc.header.magic = LV_IMAGE_HEADER_MAGIC;

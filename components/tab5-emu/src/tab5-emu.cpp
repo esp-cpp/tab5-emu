@@ -429,6 +429,16 @@ GamepadState Tab5Emu::gamepad_state() {
   return state;
 }
 
+GamepadState Tab5Emu::touch_gamepad_state() const {
+  std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
+  return touch_gamepad_.state;
+}
+
+GamepadState Tab5Emu::usb_gamepad_state() const {
+  std::lock_guard<std::mutex> lk(hid_mutex_);
+  return usb_gamepad_;
+}
+
 GamepadAxes Tab5Emu::gamepad_axes() const {
   std::lock_guard<std::mutex> lk(hid_mutex_);
   return usb_gamepad_axes_;

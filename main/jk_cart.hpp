@@ -15,6 +15,8 @@ class JkCart : public Cart {
 public:
   explicit JkCart(const Cart::Config &config)
       : Cart(config) {
+    // the engine's permanent small-object pool goes outside the arena's hole
+    jk::ensure_pool();
     // the engine's level load needs ~10 MB of PSRAM; give it the ROM arena
     Tab5Emu::get().release_rom_arena();
     handle_video_setting();
