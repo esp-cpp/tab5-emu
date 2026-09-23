@@ -105,12 +105,22 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
    core-1 decode task and a PCM ring the mixer resamples from; `.ogg` also
    plays via stb_vorbis but costs ~75% of a core, so it is only a fallback.
 4. **Input**: USB HID host on the Tab5's USB-A port. **Done (2026-09-18):
-   keyboard + mouse** through the USB host library (hubs enabled, USB DMA
-   memory in PSRAM) and Espressif's HID class driver; HID usages feed the
-   engine's SDL-scancode table, mouse motion is look input in game and the
-   cursor in menus. Not yet: gamepads (generic HID needs per-device report
-   parsing), hub verified on hardware, in-game touch layout. IMU aim as a
-   stretch. Touch remains for menus.
+   keyboard + mouse**, **gamepads and hubs (2026-09-21/22)**. Since
+   2026-09-22 the host is `espp::UsbHost` and every device is decoded from
+   its report descriptor with espp's `hid-rp` runtime report map
+   (`hid-rp-report-map.hpp`: ReportMap + Gamepad / Keyboard / Mouse
+   decoders, VID/PID quirk table); `usb_hid.cpp` only classifies interfaces
+   and merges states. Needed upstream (espp branches, one PR each once #807
+   lands): `Task::stack_alloc_caps` (PSRAM task stacks),
+   `UsbHost::full_speed_only` (IDF has no transaction translator, so HID
+   devices behind a high-speed hub are unreachable unless the root port runs
+   at full speed), `UsbHost::task_stack_alloc_caps` (with the HID driver's
+   event pump on an espp task, and the uninstall ordering the driver
+   expects), transfer-error recovery (restart the interface, drop held
+   state), and the hid-rp report map. HID usages feed JK's SDL-scancode
+   table, mouse motion / right stick is look input, the left stick strafes.
+   Not yet: in-game touch layout, non-HID pads (Xbox's own protocol). IMU
+   aim as a stretch. Touch remains for menus.
 5. **Save / load** through the engine's native `.jks` saves under
    `/sdcard/jk/player`, wired to the pause menu slots.
 6. **Cutscenes** (`.SMK` via libsmacker) if memory allows; else skip.
@@ -197,4 +207,17 @@ HAL restores the console mapping at boot since the register survives a
 software reset. The USB host (HID) is stopped while the drive is on.
 Verified: the drive appears on a Mac, files edited, card handed back.
 `UsbDevice::Config::port` is in espp PR #802 (local override until
-released).
+released). The switch-off "crash" seen during bring-up was a
+`CHIP_USB_UART_RESET`: a terminal reopening the restored console port with
+DTR low + RTS high resets the chip; keep both asserted.
+
+## Crash capture (2026-09-22)
+
+Core dumps to flash (64 KB `coredump` partition, ELF); at the next boot
+`Tab5Emu::dump_core_dump_to_console()` prints the image base64 and erases
+it, so crashes during the USB drive hand-over (console on the other PHY)
+are still decodable (`esp-coredump info_corefile -t raw`). Found with it:
+the pause menu's 600 KB screenshot buffers must be reserved before a game
+fills PSRAM (bad_alloc on pause in JK), and JK's small-object pool has to be
+permanent (the engine frees the previous session's strings at the next
+start).

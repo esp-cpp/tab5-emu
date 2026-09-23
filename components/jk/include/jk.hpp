@@ -14,6 +14,10 @@ struct Config {
 };
 
 /// Start the engine (or the test pattern when CONFIG_JK_ENGINE is off).
+/// Allocate the engine's permanent small-object pool (2 MB of PSRAM). Called
+/// by the cart before it releases the ROM arena, so the pool never lands in
+/// the arena's hole (it is never freed).
+void ensure_pool();
 bool init(const Config &config);
 /// Tear the engine down and free its memory.
 void deinit();

@@ -169,6 +169,8 @@ char *g_vorbis_alloc = nullptr;
 std::string g_pending_path; // set by open(), consumed by the decode task
 std::atomic<bool> g_open_request{false};
 std::atomic<bool> g_stop_request{false};
+std::atomic<bool> g_quit_request{false}; // the decode task parks itself (deinit deletes it)
+std::atomic<bool> g_parked{false};
 TaskHandle_t g_task = nullptr;
 
 // decode statistics
@@ -224,6 +226,13 @@ bool open_file(const std::string &path) {
     }
   }
   int error = 0;
+  if (!g_vorbis_alloc) { // only .ogg needs it (640 KB); the ADPCM path never allocates it
+    g_vorbis_alloc = static_cast<char *>(heap_caps_malloc(VORBIS_ALLOC_BYTES, MALLOC_CAP_SPIRAM));
+    if (!g_vorbis_alloc) {
+      logger.warn("no memory for the vorbis decoder");
+      return false;
+    }
+  }
   stb_vorbis_alloc alloc = {g_vorbis_alloc, static_cast<int>(VORBIS_ALLOC_BYTES)};
   g_vorbis = stb_vorbis_open_filename(path.c_str(), &error, &alloc);
   if (!g_vorbis) {
@@ -245,6 +254,14 @@ bool open_file(const std::string &path) {
 void decode_task(void *) {
   int16_t chunk[DECODE_CHUNK_FRAMES * 2];
   while (true) {
+    if (g_quit_request) {
+      {
+        std::lock_guard<std::mutex> lk(g_open_mutex);
+        close_file();
+      }
+      g_parked = true;
+      vTaskSuspend(nullptr); // a WithCaps task cannot free its own stack
+    }
     if (g_stop_request.exchange(false)) {
       std::lock_guard<std::mutex> lk(g_open_mutex);
       close_file();
@@ -315,8 +332,7 @@ bool ensure_started() {
     return true;
   }
   g_ring = static_cast<int16_t *>(heap_caps_malloc(RING_FRAMES * 2 * sizeof(int16_t), MALLOC_CAP_SPIRAM));
-  g_vorbis_alloc = static_cast<char *>(heap_caps_malloc(VORBIS_ALLOC_BYTES, MALLOC_CAP_SPIRAM));
-  if (!g_ring || !g_vorbis_alloc) {
+  if (!g_ring) {
     logger.error("no memory for the music streamer");
     return false;
   }
@@ -369,6 +385,32 @@ void jk_esp_music_stop(void) {
 }
 
 int jk_esp_music_playing(void) { return g_active && (!g_eof || ring_available() > 0); }
+
+// Release the streamer (task, ring, decoder buffer): the engine session is
+// over, and these would otherwise stay in the middle of the PSRAM heap.
+void jk_esp_music_deinit(void) {
+  if (g_task) {
+    g_active = false;
+    g_eof = true;
+    g_quit_request = true;
+    for (int i = 0; i < 200 && !g_parked; i++) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (g_parked) {
+      vTaskDeleteWithCaps(g_task);
+    } else {
+      logger.error("music decode task did not park; leaking it");
+    }
+    g_task = nullptr;
+    g_parked = false;
+    g_quit_request = false;
+  }
+  heap_caps_free(g_ring);
+  g_ring = nullptr;
+  heap_caps_free(g_vorbis_alloc);
+  g_vorbis_alloc = nullptr;
+  g_ring_w = g_ring_r = 0;
+}
 
 void jk_esp_music_volume(float volume) {
   const int v = static_cast<int>(std::clamp(volume, 0.0f, 1.0f) * 256.0f);

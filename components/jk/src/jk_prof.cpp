@@ -110,6 +110,14 @@ void jk_prof_start(void) {
 
 void jk_prof_stop(void) { s_enabled = 0; }
 
+void jk_prof_release(void) {
+  s_enabled = 0;
+  heap_caps_free(s_slots); s_slots = nullptr;
+  heap_caps_free(s_chains); s_chains = nullptr;
+  heap_caps_free(s_task_h); s_task_h = nullptr;
+  heap_caps_free(s_task_n); s_task_n = nullptr;
+}
+
 void jk_prof_dump(int top) {
   s_enabled = 0;
   if (!s_slots) return;

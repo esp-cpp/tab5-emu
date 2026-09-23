@@ -3,6 +3,7 @@
 #include "jk_esp.h"
 
 #include <algorithm>
+#include <map>
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -57,6 +58,7 @@ std::mutex g_audio_mutex;
 // frames; the caller blocks until the engine has handled them
 enum class Request { NONE, SAVE, LOAD, RESET };
 std::atomic<Request> g_request{Request::NONE};
+extern "C" void jk_prof_release(void);
 std::string g_request_path;
 std::string g_request_label;
 std::atomic<int> g_request_result{0};
@@ -304,7 +306,10 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   struct Acc { int64_t t0; ~Acc() { jk_esp_us_input += esp_timer_get_time() - t0; jk_esp_n_input++; } } acc{t0};
   auto &emu = Tab5Emu::get();
   memset(out, 0, sizeof(*out));
-  out->buttons = emu.gamepad_state().buttons;
+  // touch + USB gamepad; not gamepad_state(), whose keyboard-as-gamepad keys
+  // (W = R, S = Y ...) would reach the engine's joystick binds on top of the
+  // keys themselves
+  out->buttons = static_cast<uint16_t>(emu.touch_gamepad_state().buttons | emu.usb_gamepad_state().buttons);
   auto touch = emu.touchpad_data();
   out->touch_down = touch.num_touch_points > 0;
   out->touch_x = out->touch_down ? touch.x : -1;
@@ -320,7 +325,9 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   // gamepad as keyboard (the engine's default binds): left stick / d-pad =
   // W A S D (forward, strafe, back), R = fire (ctrl), L = secondary fire (z),
   // A = activate (space), B = jump (x), X = crouch (c), Y = use item (enter)
-  const GamepadState gp{.buttons = out->buttons};
+  // from the USB gamepad only: the merged state also carries the keyboard's
+  // own keys (W = R shoulder, A = X ...) which would come back as extra keys
+  const GamepadState gp = emu.usb_gamepad_state();
   auto press = [&](int usage) { out->keys[usage >> 3] |= 1 << (usage & 7); };
   if (gp.up) press(26);     // w
   if (gp.down) press(22);   // s
@@ -463,6 +470,12 @@ void alloc_untrack(void *p) {
 }
 } // namespace
 
+void jk_esp_alloc_release(void) {
+  heap_caps_free(g_alloc_table);
+  g_alloc_table = nullptr;
+  g_alloc_live = g_alloc_dropped = 0;
+}
+
 void jk_esp_alloc_dump(int top) {
   if (!g_alloc_table) {
     logger.info("alloc: nothing tracked");
@@ -502,8 +515,12 @@ void jk_esp_alloc_dump(int) {}
 // COG values, list nodes) come from one PSRAM slab with per-size free lists.
 // The engine leaks a few hundred of these per run (stdString_FastWCopy,
 // sithCogExec_PushVector); scattered over the general heap they pinned it so
-// badly that no 4 MB block (the SNES ROM arena) was left afterwards. The slab
-// is released whole at shutdown, which also retires the leaks.
+// badly that no 6 MB block (the SNES ROM arena) was left afterwards. The slab
+// is permanent: the engine keeps pointers to some of these blocks in statics
+// across sessions and frees them at the *next* start (jkGui_InitMenu frees
+// the previous session's element strings), so releasing the slab at shutdown
+// turned those into stale frees that corrupted whatever had reused the
+// memory. Leaked blocks stay in the slab (~18 KB per session).
 namespace {
 constexpr size_t POOL_BYTES = 2 * 1024 * 1024; // the level load has ~10k small blocks live at once; a fallback to the heap fragments it
 constexpr size_t POOL_CLASSES[] = {16, 32, 48, 64, 96, 128};
@@ -554,18 +571,20 @@ void pool_free(void *p) {
 
 void jk_esp_pool_create() {
   if (g_pool_base) return;
-  g_pool_base = static_cast<uint8_t *>(heap_caps_malloc(POOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  static_assert(POOL_BYTES == Tab5Emu::SMALL_OBJECT_SLAB_BYTES);
+  g_pool_base = Tab5Emu::get().small_object_slab(); // reserved at boot, next to the ROM arena
+  if (!g_pool_base) {
+    g_pool_base = static_cast<uint8_t *>(heap_caps_malloc(POOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
   g_pool_bump = 0;
   memset(g_pool_free, 0, sizeof(g_pool_free));
   g_pool_allocs = g_pool_fallbacks = 0;
   if (!g_pool_base) logger.warn("small-object pool: no PSRAM, using the heap");
 }
-void jk_esp_pool_destroy() {
+void jk_esp_pool_report() {
   if (!g_pool_base) return;
   logger.info("small-object pool: {} bytes used of {}, {} allocations, {} heap fallbacks", g_pool_bump, POOL_BYTES,
               g_pool_allocs, g_pool_fallbacks);
-  heap_caps_free(g_pool_base);
-  g_pool_base = nullptr;
 }
 
 // PSRAM only, on purpose: the engine's material cache evicts when an
@@ -733,7 +752,55 @@ void pattern_frame() {
 // ---------------------------------------------------------------------------
 namespace jk {
 
+#if defined(JK_ESP_FS_DEBUG) && CONFIG_HEAP_TRACING_STANDALONE
+// Diagnostic (needs CONFIG_HEAP_TRACING_STANDALONE): which allocations made
+// during a session outlive it (they split the PSRAM heap so the ROM arena
+// cannot be reserved afterwards)
+#include <esp_heap_trace.h>
+static heap_trace_record_t *g_trace_records = nullptr;
+constexpr size_t TRACE_RECORDS = 6000;
+static void trace_start() {
+  if (!g_trace_records) {
+    g_trace_records = static_cast<heap_trace_record_t *>(
+        heap_caps_calloc(TRACE_RECORDS, sizeof(heap_trace_record_t), MALLOC_CAP_SPIRAM));
+    if (!g_trace_records) return;
+    heap_trace_init_standalone(g_trace_records, TRACE_RECORDS);
+  }
+  heap_trace_start(HEAP_TRACE_LEAKS);
+}
+static void trace_dump_big() {
+  heap_trace_stop();
+  const size_t n = heap_trace_get_count();
+  logger.info("heap trace: {} outstanding allocations from this session", n);
+  std::map<uintptr_t, std::pair<size_t, size_t>> small; // top caller -> (count, bytes)
+  for (size_t i = 0; i < n; i++) {
+    heap_trace_record_t rec;
+    if (heap_trace_get(i, &rec) != ESP_OK) continue;
+    if (rec.size < 4 * 1024) {
+      auto &e = small[reinterpret_cast<uintptr_t>(rec.alloced_by[2] ? rec.alloced_by[2] : rec.alloced_by[1])];
+      e.first++;
+      e.second += rec.size;
+      continue;
+    }
+    std::string callers;
+    for (int d = 0; d < CONFIG_HEAP_TRACING_STACK_DEPTH && rec.alloced_by[d]; d++) {
+      callers += fmt::format("{:#x} ", reinterpret_cast<uintptr_t>(rec.alloced_by[d]));
+    }
+    logger.info("  {} KB at {:#x} by {}", rec.size / 1024, reinterpret_cast<uintptr_t>(rec.address), callers);
+  }
+  for (const auto &[caller, e] : small) {
+    logger.info("  small: {} allocations, {} bytes by {:#x}", e.first, e.second, caller);
+  }
+}
+#else
+static void trace_start() {}
+static void trace_dump_big() {}
+#endif
+
+void ensure_pool() { jk_esp_pool_create(); }
+
 bool init(const Config &config) {
+  trace_start();
   g_config = config;
   g_paused = false;
   jk_esp_quit_requested = 0;
@@ -788,7 +855,7 @@ bool init(const Config &config) {
         logger.info("heap before engine startup: internal {} (largest {}), psram {} (largest {})",
                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                     heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
-        jk_esp_pool_create();
+        jk_esp_pool_create(); // no-op after the first session (see ensure_pool)
         if (jk_esp_engine_startup(g_config.game_dir.c_str())) {
           g_engine_started_ok = true;
           while (!g_engine_stop && !jk_esp_quit_requested) {
@@ -808,9 +875,42 @@ bool init(const Config &config) {
         } else {
           logger.error("engine startup failed");
         }
-        jk_esp_pool_destroy();
+        jk_esp_pool_report();
+#if defined(JK_ESP_FS_DEBUG)
+        // the debug tables (1.5 MB tracker, profiler) were allocated inside
+        // the released ROM arena's hole at the first start: free them too so
+        // the arena can be reserved again
+        jk_esp_alloc_release();
+        jk_prof_release();
+#endif
         logger.info("heap after pool release: psram {} (largest {})", heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+#if defined(JK_ESP_FS_DEBUG)
+        // what splits the PSRAM heap after a session: allocated blocks >= 64 KB
+        // and free blocks >= 1 MB. Collected inside the walk (the heap lock is
+        // held there: no logging, it takes a mutex and aborts), printed after.
+        {
+          struct Blk { uintptr_t ptr; size_t size; bool used; };
+          static Blk blks[64];
+          static size_t nblk;
+          nblk = 0;
+          heap_caps_walk(
+              MALLOC_CAP_SPIRAM,
+              [](walker_heap_into_t, walker_block_info_t block, void *) -> bool {
+                const bool big_used = block.used && block.size >= 64 * 1024;
+                const bool big_free = !block.used && block.size >= 1024 * 1024;
+                if ((big_used || big_free) && nblk < 64) {
+                  blks[nblk++] = {reinterpret_cast<uintptr_t>(block.ptr), block.size, block.used};
+                }
+                return true;
+              },
+              nullptr);
+          for (size_t i = 0; i < nblk; i++) {
+            logger.info("  psram block {:#x} {} KB {}", blks[i].ptr, blks[i].size / 1024, blks[i].used ? "used" : "free");
+          }
+          trace_dump_big();
+        }
+#endif
         g_engine_running = false;
         // a task created ...WithCaps must be deleted by another task for its
         // (PSRAM) stack to be freed: park here, deinit() deletes us

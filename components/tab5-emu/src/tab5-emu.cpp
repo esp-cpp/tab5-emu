@@ -429,6 +429,16 @@ GamepadState Tab5Emu::gamepad_state() {
   return state;
 }
 
+GamepadState Tab5Emu::touch_gamepad_state() const {
+  std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
+  return touch_gamepad_.state;
+}
+
+GamepadState Tab5Emu::usb_gamepad_state() const {
+  std::lock_guard<std::mutex> lk(hid_mutex_);
+  return usb_gamepad_;
+}
+
 GamepadAxes Tab5Emu::gamepad_axes() const {
   std::lock_guard<std::mutex> lk(hid_mutex_);
   return usb_gamepad_axes_;
@@ -505,8 +515,17 @@ bool Tab5Emu::initialize_video() {
   if (!ensure_tile_buffer()) {
     return false;
   }
-  // likewise the big contiguous ROM arena (see rom_arena())
+  // likewise the big contiguous ROM arena (see rom_arena()) and, right after
+  // it, the small-object slab (see small_object_slab())
   reserve_rom_arena();
+  small_object_slab_ =
+      static_cast<uint8_t *>(heap_caps_malloc(SMALL_OBJECT_SLAB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  logger_.info("PSRAM reservations: ROM arena at {} ({} KB), small-object slab at {} ({} KB)",
+               fmt::ptr(rom_arena_), ROM_ARENA_BYTES / 1024, fmt::ptr(small_object_slab_),
+               SMALL_OBJECT_SLAB_BYTES / 1024);
+  // and the audio resampler's output buffer: sized once here instead of
+  // growing during the first game (where it lands in the arena's hole)
+  audio_resample_buf_.reserve(64 * 1024);
   video_queue_ = xQueueCreate(1, sizeof(VideoFrame));
   frame_done_ = xSemaphoreCreateBinary();
   using namespace std::placeholders;
@@ -528,6 +547,7 @@ bool Tab5Emu::reserve_rom_arena() {
                  heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
     return false;
   }
+  logger_.debug("ROM arena at {}", fmt::ptr(rom_arena_));
   return true;
 }
 

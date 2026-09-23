@@ -77,6 +77,8 @@ protected:
   lv_obj_t *btn_quit_{nullptr};
   lv_obj_t *btn_slot_prev_{nullptr};
   lv_obj_t *btn_slot_next_{nullptr};
+  /// screenshots are at most the largest native game frame (JK's 640x480 menu / HUD)
+  static constexpr size_t SCREENSHOT_MAX_BYTES = 640 * 480 * 2;
   std::vector<uint8_t> pause_image_data_;
   lv_image_dsc_t pause_image_desc_{};
   std::vector<uint8_t> slot_image_data_;

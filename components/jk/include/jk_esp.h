@@ -84,6 +84,7 @@ void jk_esp_free_dma(void *ptr);
 /// did block (the caller may want to redraw).
 int jk_esp_park_point(void);
 void jk_esp_file_release_buffers(void);
+void jk_esp_music_deinit(void); ///< release the music streamer (engine session over)
 /// Microseconds since boot.
 uint64_t jk_esp_time_us(void);
 /// Sleep for the given milliseconds (yields to other tasks).
@@ -97,6 +98,7 @@ void jk_esp_free(void *ptr);
 void *jk_esp_malloc_site(size_t size, const void *site);
 void *jk_esp_realloc_site(void *ptr, size_t size, const void *site);
 void jk_esp_alloc_dump(int top);
+void jk_esp_alloc_release(void); ///< free the tracker table (engine shut down)
 /// Log line
 void jk_esp_log(const char *fmt, ...);
 /// Set to 1 by the glue when the engine should quit at the next opportunity.
