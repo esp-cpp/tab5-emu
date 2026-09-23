@@ -26,7 +26,7 @@ via [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2) (our fork:
 | Touch | GT911 capacitive |
 | Audio | ES8388 codec + NS4150B amp, dual mics |
 | Storage | microSD (SDMMC 4-bit) |
-| Input | touch (virtual gamepad), BOOT button (pause menu), USB keyboard + mouse on the USB-A port (hubs supported) |
+| Input | touch (virtual gamepad), BOOT button (pause menu), USB keyboard / mouse / gamepad on the USB-A port (hubs supported) |
 | USB-C | serial console, or the SD card as a USB drive (settings > "USB drive") |
 
 ## Layout
@@ -99,9 +99,37 @@ Touch (virtual gamepad):
 - Bottom strip of the middle third: SELECT (left) / START (right)
 - Top-right corner, or the BOOT button: pause menu
 
-USB keyboard / mouse on the USB-A port (directly or through a hub): arrows,
-Z/X/A/S, Enter, Shift/Backspace map to the gamepad for the emulators; Jedi
-Knight gets the full keyboard and mouse look.
+USB keyboard / mouse / gamepad on the USB-A port (directly or through a
+hub; the host runs at full speed so hubs work). Devices are decoded from
+their HID report descriptors (espp `hid-rp` report map), so any standard HID
+gamepad works: face buttons by position (A = east, B = south, X = north,
+Y = west), shoulders / triggers = L / R, select / start (also the Consumer
+"back" / "menu" controls of mobile pads), d-pad / hat / left stick = d-pad,
+select+start or the home button = pause menu. Known layouts: Xbox-style and
+DirectInput / DualShock numbering, Backbone Pro quirks. Keyboards: arrows,
+Z/X/A/S, Enter, Shift/Backspace, Q/W map to the gamepad for the emulators.
+Jedi Knight gets the full keyboard and mouse look; on a gamepad the left
+stick strafes, the right stick looks, R = fire, L = secondary fire, A =
+activate, B = jump, X = crouch, Y = use item.
+
+New controllers: the console prints each device's decoded buttons on change
+(debug level in `usb_hid.cpp`); a wrong mapping is a quirk-table entry in
+espp's `hid-rp-report-map.hpp`.
+
+## Crashes
+
+Core dumps go to flash (`coredump` partition) and are printed base64 on the
+console at the next boot, so a crash while the console is unavailable (the
+USB drive hand-over) can still be read. Decode with:
+
+```
+base64 -d < dump.b64 > core.bin
+python -m esp_coredump --chip esp32p4 info_corefile -t raw -c core.bin build/tab5-emu.elf
+```
+
+Note that a terminal which opens the console port with DTR low and RTS high
+resets the chip (`rst:0x17 CHIP_USB_UART_RESET`); keep both asserted, or
+expect a reboot whenever the console re-enumerates (after the USB drive).
 
 ## USB drive (file transfer)
 
