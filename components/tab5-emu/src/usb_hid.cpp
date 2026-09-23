@@ -59,23 +59,24 @@ struct Tab5Emu::UsbHid {
     }
     Decoder decoder;
     const char *kind = "device";
-    if (espp::hid_rp::KeyboardDecoder kb(*map); kb.looks_like_keyboard()) {
-      for (const auto &f : map->fields()) {
+    if (espp::hid_rp::KeyboardDecoder::looks_like_keyboard(*map)) {
+      for (const auto &f : map->fields()) { // before the move below
         logger.debug("  field: report {} bits {}+{} page {:#x} usage {:#x}..{:#x} logical {}..{} {}", f.report_id,
                      f.bit_offset, f.bit_size, f.usage_page, f.usage, f.usage_max, f.logical_min, f.logical_max,
                      f.array ? "array" : "variable");
       }
-      decoder = std::move(kb);
+      decoder = espp::hid_rp::KeyboardDecoder(std::move(*map));
       kind = "keyboard";
       emu->usb_keyboards_++;
-    } else if (espp::hid_rp::MouseDecoder mouse(*map); mouse.looks_like_mouse()) {
-      decoder = std::move(mouse);
+    } else if (espp::hid_rp::MouseDecoder::looks_like_mouse(*map)) {
+      decoder = espp::hid_rp::MouseDecoder(std::move(*map));
       kind = "mouse";
       emu->usb_mice_++;
-    } else if (espp::hid_rp::GamepadDecoder pad(*map); pad.looks_like_gamepad()) {
+    } else if (espp::hid_rp::GamepadDecoder::looks_like_gamepad(*map)) {
+      espp::hid_rp::GamepadDecoder pad(std::move(*map));
       pad.apply_quirks(info.vid, info.pid);
       logger.info("HID gamepad {:04x}:{:04x} '{}': {} fields, report ids {}, {} layout", info.vid, info.pid,
-                  info.product, map->fields().size(), map->uses_report_ids() ? "yes" : "no",
+                  info.product, pad.map().fields().size(), pad.map().uses_report_ids() ? "yes" : "no",
                   pad.quirks().layout == espp::hid_rp::GamepadDecoder::Layout::Xbox ? "xbox-style" : "directinput");
       decoder = std::move(pad);
       kind = "gamepad";
