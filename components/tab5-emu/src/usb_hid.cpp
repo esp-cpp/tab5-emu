@@ -185,8 +185,8 @@ struct Tab5Emu::UsbHid {
             memcmp(report.consumer, last_gamepad.consumer, sizeof(report.consumer)) != 0 ||
             report.hat != last_gamepad.hat) {
           std::string btns, cons;
-          for (int n = 1; n < 32; n++) {
-            if (report.buttons & (1u << n)) btns += fmt::format("{} ", n);
+          for (int n = 1; n < 64; n++) {
+            if (report.buttons & (uint64_t{1} << n)) btns += fmt::format("{} ", n);
           }
           for (auto u : report.consumer) {
             if (u) cons += fmt::format("{:#x} ", u);
