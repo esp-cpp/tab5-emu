@@ -6,28 +6,15 @@ dependencies:
   espp/m5stack-tab5: '>=1.3.4'
   espp/event_manager: '>=1.3'
   espp/timer: '>=1.3'
-  # USB mass storage (the SD card as a USB drive), brings esp_tinyusb
-  # TEMPORARY: local espp (branch feat/usb-device-port) until a release carries
-  # UsbDevice::Config::port; the Tab5's USB-C is the P4's full-speed port
-  espp/usb_device:
-    version: '>=1.3.4'
-    override_path: '../../../espp/components/usb_device'
+  # USB mass storage (the SD card as a USB drive), brings esp_tinyusb; needs
+  # UsbDevice::Config::port (the Tab5's USB-C is the P4's full-speed port)
+  espp/usb_device: '>=1.3.5'
   espp/sdcard: '>=1.0'
-  # crash reports + core dump download at boot (not in a release yet: local espp)
-  espp/coredump:
-    version: '>=1.0'
-    override_path: '../../../espp/components/coredump'
-  # USB host (HID keyboard / mouse / gamepad on the USB-A jack) and the hid-rp
-  # runtime report decoders. TEMPORARY: local espp (branch
-  # feat/usb-host-tab5-integration) until a release carries UsbHost's
-  # full_speed_only / task_stack_alloc_caps / transfer-error recovery, the
-  # hid-rp report map and Task::stack_alloc_caps.
-  espp/usb_host:
-    version: '>=1.0'
-    override_path: '../../../espp/components/usb_host'
-  espp/hid-rp:
-    version: '>=1.0'
-    override_path: '../../../espp/components/hid-rp'
-  espp/task:
-    version: '>=1.0'
-    override_path: '../../../espp/components/task'
+  # crash reports + core dump download at boot
+  espp/coredump: '>=1.3.5'
+  # USB host (HID keyboard / mouse / gamepad on the USB-A jack): needs
+  # UsbHost's full_speed_only / task_stack_alloc_caps and the close-on-driver-
+  # task fix, the hid-rp runtime report map, and Task::stack_alloc_caps
+  espp/usb_host: '>=1.3.5'
+  espp/hid-rp: '>=1.3.5'
+  espp/task: '>=1.3.5'
