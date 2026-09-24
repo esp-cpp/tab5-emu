@@ -96,10 +96,6 @@ struct Tab5Emu::UsbHid {
     }
     auto *dev = device.get();
     device->set_input_callback([this, dev](std::span<const uint8_t> data) { on_input(dev, data); });
-    device->set_transfer_error_callback([this, dev](bool restarted) {
-      logger.warn("HID transfer error{}", restarted ? "; interface restarted" : "; interface could not be restarted");
-      clear_state(dev);
-    });
   }
 
   void on_disconnected(const std::shared_ptr<espp::UsbHost::HidDevice> &device) {
@@ -131,18 +127,6 @@ struct Tab5Emu::UsbHid {
     clear_state_of(decoder);
   }
 
-  void clear_state(const espp::UsbHost::HidDevice *dev) {
-    std::lock_guard<std::mutex> lk(mutex);
-    auto it = decoders.find(dev);
-    if (it != decoders.end()) {
-      if (std::holds_alternative<espp::hid_rp::KeyboardDecoder>(it->second)) {
-        keyboard_states.erase(dev);
-        publish_keyboard();
-        return;
-      }
-      clear_state_of(it->second);
-    }
-  }
   void clear_state_of(const Decoder &decoder) {
     if (std::holds_alternative<espp::hid_rp::KeyboardDecoder>(decoder)) {
       // handled per device (keyboard_states) by the callers
@@ -228,7 +212,6 @@ bool Tab5Emu::initialize_usb_host() {
       .on_device_connected = [hid](const auto &device) { hid->on_connected(device); },
       .on_device_disconnected = [hid](const auto &device) { hid->on_disconnected(device); },
       .auto_start = true,
-      .restart_on_transfer_error = true,
       .task_priority = 5,
       .dispatch_task_stack_size = 8 * 1024,
       .full_speed_only = true, // devices behind a hub: IDF has no transaction translator
