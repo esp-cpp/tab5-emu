@@ -2,8 +2,19 @@
 dependencies:
   idf: '>=6.0'
   lvgl/lvgl: '>=9.2.2'
-  # >= 1.3.4: powers the SD card IO rail through the P4's LDO (SDMMC works)
-  espp/m5stack-tab5: '>=1.3.4'
+  # >= 1.3.4: powers the SD card IO rail through the P4's LDO (SDMMC works).
+  # TEMPORARY: local espp (branch feat/touch-multi-point) for the multi-touch
+  # state (every finger, for the virtual gamepad) until a release carries it;
+  # same for the touch interface and the ST7123 touch driver it flows through.
+  espp/m5stack-tab5:
+    version: '>=1.3.4'
+    override_path: '../../../espp/components/m5stack-tab5'
+  espp/touch:
+    version: '>=1.3.5'
+    override_path: '../../../espp/components/touch'
+  espp/st7123touch:
+    version: '>=1.3.5'
+    override_path: '../../../espp/components/st7123touch'
   espp/event_manager: '>=1.3'
   espp/timer: '>=1.3'
   # USB mass storage (the SD card as a USB drive), brings esp_tinyusb; needs

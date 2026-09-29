@@ -348,8 +348,12 @@ void Tab5Emu::keypad_read(lv_indev_t *indev, lv_indev_data_t *data) {
 
 void Tab5Emu::on_touch(const TouchpadData &raw) {
   // convert from the raw (portrait, native) coordinates into the rotated
-  // (landscape) coordinates used by LVGL and the games
-  auto data = Bsp::get().touchpad_convert(raw);
+  // (landscape) coordinates used by LVGL and the games. The callback hands
+  // over the primary finger; the BSP has every finger of the same update, and
+  // the virtual gamepad wants all of them (d-pad and a face button at once).
+  auto &bsp = Bsp::get();
+  auto data = bsp.touchpad_convert(raw);
+  const auto fingers = bsp.touch_state_convert(bsp.touch_state());
   std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
   touch_gamepad_.last = data;
 
@@ -359,10 +363,10 @@ void Tab5Emu::on_touch(const TouchpadData &raw) {
   //   - right third: A (lower-right), B (lower-left), X (upper-right),
   //     Y (upper-left); a touch in the bottom strip of the middle third is
   //     START (right half) / SELECT (left half)
-  GamepadState state{};
-  if (data.num_touch_points > 0) {
-    const int w = lcd_width(), h = lcd_height();
-    const int x = data.x, y = data.y;
+  // Each finger presses whatever its zone says; the presses are OR'd, so a
+  // thumb on the d-pad and one on A both count.
+  const int w = lcd_width(), h = lcd_height();
+  const auto press = [&](int x, int y, GamepadState &state) {
     if (x >= w - 100 && y < 100) {
       menu_requested_ = true;
     } else if (x < w / 3) {
@@ -394,6 +398,14 @@ void Tab5Emu::on_touch(const TouchpadData &raw) {
       else
         state.select = 1;
     }
+  };
+  GamepadState state{};
+  if (fingers.num_touch_points > 0) {
+    for (size_t i = 0; i < fingers.num_touch_points && i < fingers.points.size(); i++) {
+      press(fingers.points[i].x, fingers.points[i].y, state);
+    }
+  } else if (data.num_touch_points > 0) {
+    press(data.x, data.y, state); // a driver that only reports the primary point
   }
   touch_gamepad_.state = state;
 }
