@@ -31,10 +31,17 @@ public:
 #endif
   }
 
-  // Memory-card saves are not implemented by the port, and the game cannot be
-  // restarted in place (see mgs::deinit); the menu's reset / save / load do
-  // nothing beyond the base class bookkeeping.
-  void reset() override { logger_.warn("reset: not supported (quit and start again)"); }
+  // Memory-card saves are not implemented by the port; the menu's save / load
+  // do nothing beyond the base class bookkeeping.
+  void reset() override {
+    Cart::reset();
+#if defined(ENABLE_MGS)
+    if (!mgs::reset()) {
+      logger_.error("could not restart Metal Gear Solid");
+      running_ = false;
+    }
+#endif
+  }
   void load() override { logger_.warn("load: the port has no memory card"); }
   void save() override { logger_.warn("save: the port has no memory card"); }
 

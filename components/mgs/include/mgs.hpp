@@ -8,8 +8,8 @@
 
 /// C++ interface of the Metal Gear Solid core (mgs_reversing + psyz) used by
 /// MgsCart. The game runs in its own FreeRTOS tasks (the PSX's mts scheduler
-/// on top of them, see port/esp32_threads.c); the cart only starts it, pauses
-/// it around the menu, and reads the presented frame for screenshots.
+/// on top of them, see port/esp32_threads.c); the cart starts it, freezes it
+/// around the menu, and reads the presented frame for screenshots.
 namespace mgs {
 
 struct Config {
@@ -19,15 +19,16 @@ struct Config {
 };
 
 /// Start the game. Returns false if the data is missing or the engine could
-/// not be started. There is no second start: the game's statics are not
-/// re-initialisable, so deinit() reboots the board.
+/// not be started.
 bool init(const Config &config);
-/// Tear down: reboots (see init()).
+/// Stop the game and put its statics back as linked, so init() can run again.
 void deinit();
-/// Whether the game's main thread is still alive.
+/// deinit() + init() with the same configuration.
+bool reset();
+/// Whether the game is alive (started, and its main() has not returned).
 bool running();
-/// Pause / resume (called around the tab5-emu pause menu): stops the vblank
-/// the game's scheduler runs on, and the scanout with it.
+/// Freeze / thaw around the tab5-emu pause menu: the game is stopped at a
+/// quiescent point (its scheduler idle) and every one of its tasks held.
 void pause();
 void resume();
 /// Size of the presented frame (the PSX's 320x240).

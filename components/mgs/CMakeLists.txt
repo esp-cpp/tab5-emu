@@ -82,6 +82,7 @@ idf_component_register(
   PRIV_INCLUDE_DIRS ${MGS_PRIV_INCLUDE_DIRS}
   REQUIRES tab5-emu
   PRIV_REQUIRES esp_timer esp_system heap statistics
+  LDFRAGMENTS "linker.lf"
 )
 
 if(CONFIG_MGS_ENGINE)
@@ -114,22 +115,10 @@ if(CONFIG_MGS_ENGINE)
   set_property(SOURCE ${SRC_PSYQ} APPEND PROPERTY COMPILE_OPTIONS
     "-include;${PSYZ}/include/common.h;-include;stdio.h")
 
-  # The game's ~140 KB of .bss (plus the port's) goes to PSRAM: internal RAM
-  # is the Tab5's scarce memory, and the big arrays (VRAM, the PSX RAM image)
-  # already say so with EXT_RAM_BSS_ATTR. Done on the archive after it is
-  # built, as for the other cores; -msmall-data-limit=0 above because nothing
-  # may then be addressed gp-relative.
-  # Its ~46 KB of initialized data too (--data): this build runs XIP from
-  # PSRAM, so .rodata is copied there at boot and is writable (memory
-  # protection is off in sdkconfig.defaults for this reason); the data
-  # is renamed into .rodata and arrives initialized and relocated like any
-  # other, with nothing to copy at run time. Relaunching the game is a reboot
-  # (mgs::deinit), which restores it.
-  add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
-    COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
-            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --data
-    COMMENT "Moving the game's .data and .bss to PSRAM"
-    VERBATIM)
+  # Where the game's statics go (PSRAM for .bss, the PSRAM-XIP .rodata for
+  # .data) and the symbols that bracket them are linker.lf's business;
+  # -msmall-data-limit=0 above because nothing in PSRAM may be addressed
+  # gp-relative.
 
   # The rasterizer's per-pixel loops run from PSRAM-XIP through the cache
   # rather than from IRAM: internal RAM is what the boot-time DMA reserve and
