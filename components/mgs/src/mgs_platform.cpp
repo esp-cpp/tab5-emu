@@ -11,6 +11,8 @@
 
 #include "esp_attr.h"
 
+#include "esp_timer.h"
+#include "statistics.hpp"
 #include "tab5-emu.hpp"
 
 #include "libpad.h"
@@ -73,6 +75,14 @@ void lcd_present(const unsigned short *src) {
   g_last_frame = g_frames[g_frame_index];
   Tab5Emu::get().push_frame(dst);
   g_frame_index ^= 1;
+  // the menu's frame statistics: the interval between presented frames (the
+  // game flips on its own tasks; nothing else here is per-frame)
+  static int64_t last_us = 0;
+  const int64_t now = esp_timer_get_time();
+  if (last_us) {
+    update_frame_time(static_cast<uint64_t>(now - last_us));
+  }
+  last_us = now;
 }
 
 void lcd_wait_snapshot(void) {}

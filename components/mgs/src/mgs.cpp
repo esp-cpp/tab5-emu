@@ -32,6 +32,7 @@ void Mgs_SetDataRoot(const char *p); // port/platform_headless.c
 void Mgs_StartVblank(void);          // port/esp32_vblank.c: vblank tick + scanout tasks
 void Mgs_CdInit(void);               // port/virtual_cd.c: open the disc files
 extern volatile int mgs_paused;      // port/esp32_vblank.c
+int lcd_init(void);                  // mgs_platform.cpp: the HAL frame buffers
 }
 #endif
 
@@ -60,6 +61,12 @@ bool init(const Config &config) {
   const auto root = std::filesystem::path(config.data_dir).parent_path().string();
   Mgs_SetDataRoot(root.c_str());
   mgs_platform_init(config.data_dir.c_str());
+  // the frame buffers the scanout converts VRAM into (the S3 port's app_main
+  // does this; here it is the cart's job)
+  if (lcd_init() != 0) {
+    logger.error("could not get the HAL's frame buffers");
+    return false;
+  }
   // the vblank the PSX gave for free; mts blocks on it during boot. It also
   // drives the scanout, so VRAM reaches the screen continuously.
   mgs_paused = 0;
@@ -72,7 +79,8 @@ bool init(const Config &config) {
   // hands over to them, so this task mostly sleeps suspended afterwards.
   // Core 0 with every mts task and the vblank tick (see esp32_threads.c for
   // why they must share a core); the scanout and the HAL's video task are
-  // on core 1.
+  // on core 1. Priority 5, the mts threads' own: the cart's poll loop runs
+  // on this core at the main task's priority and must not starve it.
   auto ok = xTaskCreatePinnedToCoreWithCaps(
       [](void *) {
         logger.info("entering the game's main()");
@@ -81,7 +89,7 @@ bool init(const Config &config) {
         g_main_returned = true;
         vTaskSuspend(nullptr);
       },
-      "mgs_main", 16 * 1024, nullptr, 1, &g_main_task, 0, MALLOC_CAP_SPIRAM);
+      "mgs_main", 16 * 1024, nullptr, 5, &g_main_task, 0, MALLOC_CAP_SPIRAM);
   if (ok != pdPASS) {
     logger.error("could not create the game task");
     return false;

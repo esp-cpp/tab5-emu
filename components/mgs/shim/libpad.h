@@ -12,9 +12,9 @@ extern "C" {
 #define PadStateDiscon 0
 #define PadStateFindPad 1
 #define PadStateFindCTP1 2
-#define PadStateReqInfo 4
-#define PadStateExecCmd 5
-#define PadStateStable 6
+#define PadStateReqInfo 5
+#define PadStateExecCmd 6
+#define PadStateStable 7
 
 /* PadInfoMode() / PadInfoAct() selectors */
 #define InfoModeCurID 1

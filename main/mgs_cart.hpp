@@ -45,6 +45,10 @@ public:
       return false;
     }
 #endif
+    // the game runs on its own tasks; this loop only polls for the menu, and
+    // it shares core 0 with them
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(10ms);
     return Cart::run();
   }
 
