@@ -119,11 +119,24 @@ if(CONFIG_MGS_ENGINE)
   # already say so with EXT_RAM_BSS_ATTR. Done on the archive after it is
   # built, as for the other cores; -msmall-data-limit=0 above because nothing
   # may then be addressed gp-relative.
+  # Its ~46 KB of initialized data too (tools/data_to_psram.py): ESP-IDF
+  # cannot load .data into PSRAM, so the sections become PSRAM bss and their
+  # initial values are copied back by the generated mgs_data_init() (compiled
+  # by components/mgs_data), called by mgs::init() before the game runs.
   add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+    COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/tools/data_to_psram.py
+            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} ${CMAKE_AR} $<TARGET_FILE:${COMPONENT_LIB}>
+            ${CMAKE_BINARY_DIR}/mgs_data_init.c
     COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
             ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
-    COMMENT "Moving the game's .bss to PSRAM"
+    COMMENT "Moving the game's .data and .bss to PSRAM"
     VERBATIM)
+
+  # The rasterizer's per-pixel loops run from PSRAM-XIP through the cache
+  # rather than from IRAM: internal RAM is what the boot-time DMA reserve and
+  # the HAL need, and the S3 port measured IRAM placement at -2%.
+  set_property(SOURCE ${MGS_ROOT}/port/soft_render.c APPEND PROPERTY
+    COMPILE_DEFINITIONS "SOFT_RASTER_IRAM=")
 
   # the game's main() becomes callable from the cart
   set_property(SOURCE ${MGS_ROOT}/source/main/main.c APPEND PROPERTY

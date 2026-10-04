@@ -24,7 +24,7 @@ set(SNES_COMPONENTS snes)
 ### GBA (gpSP) ###
 set(GBA_COMPONENTS gba)
 ### Metal Gear Solid (mgs_reversing decompilation on psyz, native) ###
-set(MGS_COMPONENTS mgs)
+set(MGS_COMPONENTS mgs mgs_data)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
