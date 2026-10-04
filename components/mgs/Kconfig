@@ -1,0 +1,20 @@
+menu "Metal Gear Solid (mgs_reversing + psyz)"
+
+    config MGS_ENGINE
+        bool "Build the Metal Gear Solid native port"
+        default y
+        help
+            Compile the decompiled game (components/mgs/mgs_reversing) against
+            psyz's PlayStation SDK reimplementation and software GPU, with the
+            Tab5 platform layer in components/mgs/src.
+
+    config MGS_START_STAGE
+        string "Stage to boot into"
+        default "s00a"
+        help
+            s00a is the dock, where the game begins; s01a the heliport; s02a
+            the tank hangar. Any name in port/stage_union.c's
+            Mgs_PlayableStages works. "title" runs the real boot chain, which
+            needs the memory card and CD streaming the port lacks.
+
+endmenu

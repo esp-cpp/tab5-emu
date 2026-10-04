@@ -23,6 +23,8 @@ set(GENESIS_COMPONENTS genesis shared_memory)
 set(SNES_COMPONENTS snes)
 ### GBA (gpSP) ###
 set(GBA_COMPONENTS gba)
+### Metal Gear Solid (mgs_reversing decompilation on psyz, native) ###
+set(MGS_COMPONENTS mgs)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
@@ -39,6 +41,9 @@ endif()
 if(GBA_COMPONENTS)
   add_compile_definitions(ENABLE_GBA)
 endif()
+if(MGS_COMPONENTS)
+  add_compile_definitions(ENABLE_MGS)
+endif()
 
 if(DARK_FORCES_COMPONENTS)
   add_compile_definitions(ENABLE_DARK_FORCES)
@@ -49,6 +54,7 @@ set(GAME_COMPONENTS
   ${GENESIS_COMPONENTS}
   ${SNES_COMPONENTS}
   ${GBA_COMPONENTS}
+  ${MGS_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
   )
 
