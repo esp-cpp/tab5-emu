@@ -119,16 +119,15 @@ if(CONFIG_MGS_ENGINE)
   # already say so with EXT_RAM_BSS_ATTR. Done on the archive after it is
   # built, as for the other cores; -msmall-data-limit=0 above because nothing
   # may then be addressed gp-relative.
-  # Its ~46 KB of initialized data too (tools/data_to_psram.py): ESP-IDF
-  # cannot load .data into PSRAM, so the sections become PSRAM bss and their
-  # initial values are copied back by the generated mgs_data_init() (compiled
-  # by components/mgs_data), called by mgs::init() before the game runs.
+  # Its ~46 KB of initialized data too (--data): this build runs XIP from
+  # PSRAM, so .rodata is copied there at boot and is writable (memory
+  # protection is off in sdkconfig.defaults for this reason); the data
+  # is renamed into .rodata and arrives initialized and relocated like any
+  # other, with nothing to copy at run time. Relaunching the game is a reboot
+  # (mgs::deinit), which restores it.
   add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
-    COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/tools/data_to_psram.py
-            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} ${CMAKE_AR} $<TARGET_FILE:${COMPONENT_LIB}>
-            ${CMAKE_BINARY_DIR}/mgs_data_init.c
     COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
-            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
+            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --data
     COMMENT "Moving the game's .data and .bss to PSRAM"
     VERBATIM)
 

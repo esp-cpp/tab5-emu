@@ -32,7 +32,6 @@ void Mgs_SetDataRoot(const char *p); // port/platform_headless.c
 void Mgs_StartVblank(void);          // port/esp32_vblank.c: vblank tick + scanout tasks
 void Mgs_CdInit(void);               // port/virtual_cd.c: open the disc files
 extern volatile int mgs_paused;      // port/esp32_vblank.c
-void mgs_data_init(void);            // generated: the game's .data initial values (PSRAM)
 }
 #endif
 
@@ -58,9 +57,6 @@ bool init(const Config &config) {
   // The game opens "cdrom:\MGS\NAME;1"; the translator maps that onto
   // <root>/MGS/NAME, so the root is the directory *above* the data dir, and
   // the directory must be called MGS (FAT is case-insensitive about it).
-  // the game's initialized data lives in PSRAM and starts out zeroed: give it
-  // its initial values before any of it is read (see tools/data_to_psram.py)
-  mgs_data_init();
   const auto root = std::filesystem::path(config.data_dir).parent_path().string();
   Mgs_SetDataRoot(root.c_str());
   mgs_platform_init(config.data_dir.c_str());
