@@ -219,6 +219,7 @@ bool init(const Config &config) {
   // the vblank the PSX gave for free: mts blocks on it during boot, and it
   // drives the scanout, so VRAM reaches the screen continuously
   Mgs_CdInit();
+  mgs_platform_audio_start();
   Mgs_StartVblank();
   // The game's main(): it builds the mts scheduler, opens its threads and
   // hands over to them, so this task mostly sleeps suspended afterwards.
@@ -238,6 +239,7 @@ bool init(const Config &config) {
   if (ok != pdPASS) {
     logger.error("could not create the game task");
     Mgs_StopVblank();
+    mgs_platform_audio_stop();
     Mgs_CdDeinit();
     return false;
   }
@@ -259,6 +261,7 @@ void pause() {
   }
   g_hang_enabled = false;
   freeze();
+  mgs_platform_audio_pause();
   g_paused = true;
 #endif
 }
@@ -269,6 +272,7 @@ void resume() {
     return;
   }
   g_paused = false;
+  mgs_platform_audio_resume();
   Mgs_ThreadsResume();
   Mgs_ResumeVblank();
   start_hang_detector();
@@ -297,6 +301,7 @@ void deinit() {
   }
   // let the scheduler retire the deleted tasks before their memory goes away
   vTaskDelay(pdMS_TO_TICKS(5));
+  mgs_platform_audio_stop(); // before the SPU state below is wiped
   Mgs_CdDeinit();
   // the game is gone: its statics can be put back for the next launch
   reset_statics();

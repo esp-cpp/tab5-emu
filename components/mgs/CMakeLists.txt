@@ -61,6 +61,7 @@ if(CONFIG_MGS_ENGINE)
     ${MGS_ROOT}/port/soft_render.c
     ${MGS_ROOT}/port/platform_headless.c
     ${MGS_ROOT}/port/stage_stubs.c
+    ${MGS_ROOT}/port/spu_compat.c
     ${MGS_ROOT}/port/esp32_threads.c
     ${MGS_ROOT}/port/esp32_vblank.c
     ${MGS_ROOT}/port/virtual_cd.c)

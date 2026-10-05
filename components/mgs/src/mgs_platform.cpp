@@ -12,6 +12,8 @@
 #include "esp_attr.h"
 
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "statistics.hpp"
 #include "tab5-emu.hpp"
 
@@ -26,6 +28,97 @@ unsigned char *g_pad_buf[2]{nullptr, nullptr};
 } // namespace
 
 void mgs_platform_init(const char *data_dir) { g_sd_root = data_dir ? data_dir : ""; }
+
+// ---------------------------------------------------------------------------
+// Audio: psyz emulates the SPU (24 ADPCM voices, the game's own driver talks
+// to it through the PSY-Q libspu); its mixer is pull-based at the PSX's
+// 44.1 kHz. A task on core 1 pulls ~10 ms at a time into the HAL's queue,
+// paced by the DAC (play_audio waits for room), and sits suspended while the
+// menu is up.
+// ---------------------------------------------------------------------------
+
+extern "C" {
+void Psyz_SpuInit(void);
+void Psyz_SpuPullSamples(short *out, int num_frames);
+extern volatile unsigned psyz_spu_irq_raised, psyz_spu_voices_active; // psyz_spu.c
+extern volatile unsigned mgs_spu_irq_delivered;                        // port/esp32_vblank.c
+void Psyz_SpuDebug(unsigned *spucnt, unsigned *irq_addr, int v, unsigned *cur_addr, unsigned *active);
+}
+
+namespace {
+constexpr int kAudioRate = 44100;
+constexpr int kAudioFrames = 441; // 10 ms
+TaskHandle_t g_audio_task{nullptr};
+std::atomic<bool> g_audio_stop{false};
+std::atomic<bool> g_audio_done{false};
+
+void audio_task(void *) {
+  auto &emu = Tab5Emu::get();
+  static int16_t buf[kAudioFrames * 2];
+  int64_t last_report = esp_timer_get_time();
+  unsigned loud = 0, pulls = 0;
+  while (!g_audio_stop.load()) {
+    Psyz_SpuPullSamples(buf, kAudioFrames);
+    emu.play_audio(reinterpret_cast<const uint8_t *>(buf), sizeof(buf));
+    pulls++;
+    for (int i = 0; i < kAudioFrames * 2; i += 8) {
+      if (buf[i] > 64 || buf[i] < -64) {
+        loud++;
+      }
+    }
+    const int64_t now = esp_timer_get_time();
+    if (now - last_report > 5000000) {
+      unsigned cnt, irq, cur, act;
+      Psyz_SpuDebug(&cnt, &irq, 23, &cur, &act);
+      printf("[audio] pulls %u loud-samples %u voices %u spu-irq raised %u delivered %u | spucnt %04x irq_addr %04x "
+             "v23 cur %05x active %u\n",
+             pulls, loud, psyz_spu_voices_active, psyz_spu_irq_raised, mgs_spu_irq_delivered, cnt, irq, cur, act);
+      pulls = loud = 0;
+      last_report = now;
+    }
+  }
+  g_audio_done = true;
+  vTaskSuspend(nullptr);
+}
+} // namespace
+
+void mgs_platform_audio_start() {
+  if (g_audio_task) {
+    return;
+  }
+  Psyz_SpuInit();
+  auto &emu = Tab5Emu::get();
+  emu.audio_sample_rate(kAudioRate);
+  emu.audio_max_wait_ms(30);
+  g_audio_stop = false;
+  g_audio_done = false;
+  xTaskCreatePinnedToCore(audio_task, "mgs_audio", 4096, nullptr, 7, &g_audio_task, 1);
+}
+
+void mgs_platform_audio_stop() {
+  if (!g_audio_task) {
+    return;
+  }
+  g_audio_stop = true;
+  vTaskResume(g_audio_task); // in case it was paused
+  while (!g_audio_done.load()) {
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+  vTaskDelete(g_audio_task);
+  g_audio_task = nullptr;
+}
+
+void mgs_platform_audio_pause() {
+  if (g_audio_task) {
+    vTaskSuspend(g_audio_task);
+  }
+}
+
+void mgs_platform_audio_resume() {
+  if (g_audio_task) {
+    vTaskResume(g_audio_task);
+  }
+}
 
 std::span<uint8_t> mgs_platform_last_frame() {
   auto *f = g_last_frame.load();
