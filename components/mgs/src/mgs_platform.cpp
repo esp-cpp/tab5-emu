@@ -47,7 +47,7 @@ void Psyz_SpuDebug(unsigned *spucnt, unsigned *irq_addr, int v, unsigned *cur_ad
 
 namespace {
 constexpr int kAudioRate = 44100;
-constexpr int kAudioFrames = 441; // 10 ms
+constexpr int kAudioFrames = 221; // 5 ms: the SPU interrupt is raised at pull time
 TaskHandle_t g_audio_task{nullptr};
 std::atomic<bool> g_audio_stop{false};
 std::atomic<bool> g_audio_done{false};
