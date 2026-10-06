@@ -57,6 +57,9 @@ extern int mts_active_task_800C0DB0;   // source/mts/mts_new.c
 extern volatile int psyz_critical_depth; // psyz libapi.c
 extern unsigned mgs_frame_seq;         // port/esp32_vblank.c
 extern unsigned mgs_vblank_count;
+extern volatile const char *mgs_tick_phase;
+extern volatile int mgs_in_printf;     // port/psyz_port.c
+int Mgs_CurrentThread(void);
 // linker.lf SURROUND symbols for libmgs.a's statics
 extern char _mgs_bss_start[], _mgs_bss_end[];
 extern char _mgs_common_start[], _mgs_common_end[];
@@ -144,10 +147,12 @@ void hang_check(void *) {
   if (!tick_stuck && !frame_stuck) {
     return;
   }
-  esp_rom_printf("[mgs] *** %s for %d ms: mts active %d crit %d vbl %u frame %u ***\n",
+  esp_rom_printf("[mgs] *** %s for %d ms: mts active %d crit %d vbl %u frame %u | tick in '%s', "
+                 "in-printf %d, thread %d ***\n",
                  tick_stuck ? "vblank tick stalled" : "no new frame",
                  (int)((now - (tick_stuck ? g_hang_vbl_since : g_hang_frame_since)) / 1000),
-                 mts_active_task_800C0DB0, psyz_critical_depth, mgs_vblank_count, mgs_frame_seq);
+                 mts_active_task_800C0DB0, psyz_critical_depth, mgs_vblank_count, mgs_frame_seq,
+                 mgs_tick_phase, mgs_in_printf, Mgs_CurrentThread());
   // report again in 10 s if still stuck
   g_hang_vbl_since = g_hang_frame_since = now - 20000000;
 }
