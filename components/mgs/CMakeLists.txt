@@ -96,7 +96,7 @@ if(CONFIG_MGS_ENGINE)
     COMPILE_OPTIONS
       "-std=gnu17;-w;-fno-strict-aliasing;-msmall-data-limit=0;-fjump-tables;-ftree-switch-conversion;-Wno-error;-Wno-incompatible-pointer-types;-Wno-int-conversion;-Wno-implicit-function-declaration;-Wno-builtin-declaration-mismatch;-Wno-return-mismatch;-include;string.h;-include;gtemac.h;-include;${MGS_ROOT}/port/mgs_printf.h"
     COMPILE_DEFINITIONS
-      "INTEGRAL;__psyz;VERSION_PC;NON_MATCHING;PERMUTER;HARD_LINK;_internal_version_us;MGS_START_STAGE=\"${CONFIG_MGS_START_STAGE}\";MGS_THREAD_STACK_CAPS=MALLOC_CAP_SPIRAM")
+      "INTEGRAL;__psyz;VERSION_PC;NON_MATCHING;PERMUTER;HARD_LINK;_internal_version_us;MGS_START_STAGE=\"${CONFIG_MGS_START_STAGE}\";MGS_THREAD_STACK_CAPS=MALLOC_CAP_SPIRAM;MGS_CODEC_SCREEN=1")
   #   -std=gnu17            gnu23 (GCC 14+'s default) rejects this code
   #   -fno-strict-aliasing  type punning everywhere: GCC at -O2 would delete
   #                         stores it "proves" dead (that is how CompMatrix
@@ -105,6 +105,8 @@ if(CONFIG_MGS_ENGINE)
   #                         width on MIPS
   #   MGS_THREAD_STACK_CAPS mts task stacks in PSRAM, not internal RAM (the
   #                         Tab5's scarce memory; see src/mgs.cpp)
+  #   MGS_CODEC_SCREEN=1    the real codec module draws the calls (the S3
+  #                         port answered them headless)
 
   # The PSY-Q decomp sources were written against psyz's common.h (the stub
   # macros for not-yet-decompiled functions, LEN(), STATIC_ASSERT via psyz.h),
@@ -126,6 +128,11 @@ if(CONFIG_MGS_ENGINE)
   # the HAL need, and the S3 port measured IRAM placement at -2%.
   set_property(SOURCE ${MGS_ROOT}/port/soft_render.c APPEND PROPERTY
     COMPILE_DEFINITIONS "SOFT_RASTER_IRAM=")
+  # ...and it is the one file whose inner loops decide the frame rate: -O3
+  # and no frame pointer (the IDF default keeps one for backtraces), which the
+  # game's own flag list above does not give it.
+  set_property(SOURCE ${MGS_ROOT}/port/soft_render.c APPEND PROPERTY
+    COMPILE_OPTIONS "-O3;-fomit-frame-pointer")
 
   # the game's main() becomes callable from the cart
   set_property(SOURCE ${MGS_ROOT}/source/main/main.c APPEND PROPERTY
