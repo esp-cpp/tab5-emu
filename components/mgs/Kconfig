@@ -10,11 +10,12 @@ menu "Metal Gear Solid (mgs_reversing + psyz)"
 
     config MGS_START_STAGE
         string "Stage to boot into"
-        default "s00a"
+        default "title"
         help
-            s00a is the dock, where the game begins; s01a the heliport; s02a
-            the tank hangar. Any name in port/stage_union.c's
-            Mgs_PlayableStages works. "title" runs the real boot chain, which
-            needs the memory card and CD streaming the port lacks.
+            "title" runs the real boot chain (title screen, opening cutscene,
+            then the dock), as retail does. To jump straight into a stage:
+            s00a is the dock, s01a the heliport, s02a the tank hangar; any name
+            in port/stage_union.c's Mgs_PlayableStages works (a demo stage,
+            dXXX, plays its cutscene).
 
 endmenu
