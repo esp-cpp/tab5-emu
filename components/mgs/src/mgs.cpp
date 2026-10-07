@@ -46,6 +46,8 @@ void Mgs_StartVblank(void);          // port/esp32_vblank.c: vblank tick + scano
 void Mgs_PauseVblank(void);
 void Mgs_ResumeVblank(void);
 void Mgs_StopVblank(void);
+void Psyz_GpuSync(void);              // psyz libgpu.c: wait for the raster worker
+extern unsigned short g_RawVram[];    // psyz soft raster: 1024x512 RGB1555
 void Mgs_ThreadsPause(void); // port/esp32_threads.c: the live PSX thread
 void Mgs_ThreadsResume(void);
 void Mgs_ThreadsStopAll(void);
@@ -286,6 +288,19 @@ void pause() {
   freeze();
   mgs_platform_audio_pause();
   g_paused = true;
+  {
+    // Debug: the whole 1024x512x16 VRAM to the card, so what the textures and
+    // the font areas actually hold can be inspected on a PC (raw RGB1555,
+    // little-endian, row stride 1024 pixels).
+    Psyz_GpuSync();
+    if (FILE *f = fopen("/sdcard/mgs_vram.bin", "wb")) {
+      const size_t n = fwrite(g_RawVram, 2, 1024u * 512u, f);
+      fclose(f);
+      logger.info("VRAM dump: /sdcard/mgs_vram.bin ({} px)", n);
+    } else {
+      logger.warn("VRAM dump: could not open /sdcard/mgs_vram.bin");
+    }
+  }
 #endif
 }
 

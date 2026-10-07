@@ -64,13 +64,13 @@ void audio_task(void *) {
     const int64_t t0 = esp_timer_get_time();
     Psyz_SpuPullSamples(buf, kAudioFrames);
     mix_us += esp_timer_get_time() - t0;
-    if (last_pull && t0 - last_pull > 12000) {
-      late_pulls++; // more than two chunks between pulls: the DAC queue ran dry
+    if (last_pull && t0 - last_pull > 8000) {
+      late_pulls++; // starved: >8 ms between finishing one chunk and starting the next
     }
-    last_pull = t0;
     if (emu.play_audio(reinterpret_cast<const uint8_t *>(buf), sizeof(buf)) < sizeof(buf)) {
       short_writes++; // queue full for longer than the wait: samples dropped
     }
+    last_pull = esp_timer_get_time();
     pulls++;
     for (int i = 0; i < kAudioFrames * 2; i += 8) {
       if (buf[i] > 64 || buf[i] < -64) {

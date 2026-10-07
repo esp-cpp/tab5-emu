@@ -123,3 +123,6 @@ CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 
 # NOT 400 MHz: this Tab5 (chip v1.3, eco2 ROM) boot-loops in the ROM clock setup
 # (Store/AMO fault at 0x50091000) with CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400.
+# The UART console is a byte-at-a-time sink nobody reads (the capture is on
+# USB); at 115200 a game printf stalls its thread 87 us per character.
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
