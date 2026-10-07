@@ -40,8 +40,9 @@ void mgs_platform_init(const char *data_dir) { g_sd_root = data_dir ? data_dir :
 extern "C" {
 void Psyz_SpuInit(void);
 void Psyz_SpuPullSamples(short *out, int num_frames);
-extern volatile unsigned psyz_spu_irq_raised, psyz_spu_voices_active; // psyz_spu.c
+extern volatile unsigned psyz_spu_irq_raised, psyz_spu_voices_active, psyz_spu_irq_caught_up; // psyz_spu.c
 extern volatile unsigned mgs_spu_irq_delivered;                        // port/esp32_vblank.c
+extern unsigned mgs_prof_present_us;                                   // port/esp32_vblank.c
 void Psyz_SpuDebug(unsigned *spucnt, unsigned *irq_addr, int v, unsigned *cur_addr, unsigned *active);
 }
 
@@ -57,8 +58,11 @@ void audio_task(void *) {
   static int16_t buf[kAudioFrames * 2];
   int64_t last_report = esp_timer_get_time();
   unsigned loud = 0, pulls = 0;
+  int64_t mix_us = 0;
   while (!g_audio_stop.load()) {
+    const int64_t t0 = esp_timer_get_time();
     Psyz_SpuPullSamples(buf, kAudioFrames);
+    mix_us += esp_timer_get_time() - t0;
     emu.play_audio(reinterpret_cast<const uint8_t *>(buf), sizeof(buf));
     pulls++;
     for (int i = 0; i < kAudioFrames * 2; i += 8) {
@@ -71,8 +75,11 @@ void audio_task(void *) {
       unsigned cnt, irq, cur, act;
       Psyz_SpuDebug(&cnt, &irq, 23, &cur, &act);
       printf("[audio] pulls %u loud-samples %u voices %u spu-irq raised %u delivered %u | spucnt %04x irq_addr %04x "
-             "v23 cur %05x active %u\n",
-             pulls, loud, psyz_spu_voices_active, psyz_spu_irq_raised, mgs_spu_irq_delivered, cnt, irq, cur, act);
+             "v23 cur %05x active %u | mix %u ms present %u ms caught-up %u\n",
+             pulls, loud, psyz_spu_voices_active, psyz_spu_irq_raised, mgs_spu_irq_delivered, cnt, irq, cur, act,
+             (unsigned)(mix_us / 1000), mgs_prof_present_us / 1000u, psyz_spu_irq_caught_up);
+      mix_us = 0;
+      mgs_prof_present_us = 0;
       pulls = loud = 0;
       last_report = now;
     }
@@ -92,7 +99,9 @@ void mgs_platform_audio_start() {
   emu.audio_max_wait_ms(30);
   g_audio_stop = false;
   g_audio_done = false;
-  xTaskCreatePinnedToCore(audio_task, "mgs_audio", 4096, nullptr, 7, &g_audio_task, 1);
+  // Core 0: the game core has slack while it waits for the rasterizer on
+  // core 1, and the mixer (13-30% of a core) was eating into drawing time.
+  xTaskCreatePinnedToCore(audio_task, "mgs_audio", 4096, nullptr, 7, &g_audio_task, 0);
 }
 
 void mgs_platform_audio_stop() {
