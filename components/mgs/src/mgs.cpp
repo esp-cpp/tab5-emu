@@ -60,6 +60,9 @@ extern unsigned mgs_vblank_count;
 extern volatile const char *mgs_tick_phase;
 extern volatile int mgs_in_printf;     // port/psyz_port.c
 int Mgs_CurrentThread(void);
+int Mgs_ThreadSample(int i, unsigned *pc, unsigned *ra, unsigned *sp);
+int Mgs_ThreadStackScan(int i, unsigned *out, int max);
+extern const char *mgs_where;
 // linker.lf SURROUND symbols for libmgs.a's statics
 extern char _mgs_bss_start[], _mgs_bss_end[];
 extern char _mgs_common_start[], _mgs_common_end[];
@@ -153,6 +156,21 @@ void hang_check(void *) {
                  (int)((now - (tick_stuck ? g_hang_vbl_since : g_hang_frame_since)) / 1000),
                  mts_active_task_800C0DB0, psyz_critical_depth, mgs_vblank_count, mgs_frame_seq,
                  mgs_tick_phase, mgs_in_printf, Mgs_CurrentThread());
+  esp_rom_printf("[mgs] where: %s\n", mgs_where);
+  for (int i = 0; i < 8; i++) {
+    unsigned pc = 0, ra = 0, sp = 0;
+    const int st = Mgs_ThreadSample(i, &pc, &ra, &sp);
+    if (st >= 0) {
+      esp_rom_printf("[mgs] thread %d: state %d pc 0x%08x ra 0x%08x sp 0x%08x\n", i, st, pc, ra, sp);
+      unsigned hits[20];
+      const int n = Mgs_ThreadStackScan(i, hits, 20);
+      esp_rom_printf("[mgs]   stack:");
+      for (int k = 0; k < n; k++) {
+        esp_rom_printf(" %08x", hits[k]);
+      }
+      esp_rom_printf("\n");
+    }
+  }
   // report again in 10 s if still stuck
   g_hang_vbl_since = g_hang_frame_since = now - 20000000;
 }
