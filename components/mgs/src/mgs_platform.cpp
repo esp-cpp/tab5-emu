@@ -58,12 +58,19 @@ void audio_task(void *) {
   static int16_t buf[kAudioFrames * 2];
   int64_t last_report = esp_timer_get_time();
   unsigned loud = 0, pulls = 0;
-  int64_t mix_us = 0;
+  int64_t mix_us = 0, last_pull = 0;
+  unsigned late_pulls = 0, short_writes = 0;
   while (!g_audio_stop.load()) {
     const int64_t t0 = esp_timer_get_time();
     Psyz_SpuPullSamples(buf, kAudioFrames);
     mix_us += esp_timer_get_time() - t0;
-    emu.play_audio(reinterpret_cast<const uint8_t *>(buf), sizeof(buf));
+    if (last_pull && t0 - last_pull > 12000) {
+      late_pulls++; // more than two chunks between pulls: the DAC queue ran dry
+    }
+    last_pull = t0;
+    if (emu.play_audio(reinterpret_cast<const uint8_t *>(buf), sizeof(buf)) < sizeof(buf)) {
+      short_writes++; // queue full for longer than the wait: samples dropped
+    }
     pulls++;
     for (int i = 0; i < kAudioFrames * 2; i += 8) {
       if (buf[i] > 64 || buf[i] < -64) {
@@ -75,9 +82,11 @@ void audio_task(void *) {
       unsigned cnt, irq, cur, act;
       Psyz_SpuDebug(&cnt, &irq, 23, &cur, &act);
       printf("[audio] pulls %u loud-samples %u voices %u spu-irq raised %u delivered %u | spucnt %04x irq_addr %04x "
-             "v23 cur %05x active %u | mix %u ms present %u ms caught-up %u\n",
+             "v23 cur %05x active %u | mix %u ms present %u ms caught-up %u late %u short %u\n",
              pulls, loud, psyz_spu_voices_active, psyz_spu_irq_raised, mgs_spu_irq_delivered, cnt, irq, cur, act,
-             (unsigned)(mix_us / 1000), mgs_prof_present_us / 1000u, psyz_spu_irq_caught_up);
+             (unsigned)(mix_us / 1000), mgs_prof_present_us / 1000u, psyz_spu_irq_caught_up, late_pulls,
+             short_writes);
+      late_pulls = short_writes = 0;
       mix_us = 0;
       mgs_prof_present_us = 0;
       pulls = loud = 0;
