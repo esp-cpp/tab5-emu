@@ -279,6 +279,17 @@ bool init(const Config &config) {
 
 bool running() { return g_initialized && !g_main_returned.load(); }
 
+extern "C" void Mgs_DumpVram(const char *path) {
+  Psyz_GpuSync();
+  if (FILE *f = fopen(path, "wb")) {
+    const size_t n = fwrite(g_RawVram, 2, 1024u * 512u, f);
+    fclose(f);
+    logger.info("VRAM dump: {} ({} px)", path, n);
+  } else {
+    logger.warn("VRAM dump: could not open {}", path);
+  }
+}
+
 void pause() {
 #if defined(CONFIG_MGS_ENGINE)
   if (!g_initialized || g_paused) {
