@@ -61,6 +61,7 @@ void Mgs_ResumeVblank(void);
 void Mgs_StopVblank(void);
 void Psyz_GpuSync(void);              // psyz libgpu.c: wait for the raster worker
 extern unsigned short g_RawVram[];    // psyz soft raster: 1024x512 RGB1555
+extern unsigned char mgs_main_ram[];  // port/psyz_port.c: the PSX's 2 MB, as laid out
 void Mgs_ThreadsPause(void); // port/esp32_threads.c: the live PSX thread
 void Mgs_ThreadsResume(void);
 void Mgs_ThreadsStopAll(void);
@@ -338,13 +339,44 @@ struct SnapRegion {
 struct SnapHeader {
   char magic[4];
   uint32_t version;
-  uint8_t elf_sha[32];
+  uint8_t elf_sha[32];     // informational: which build wrote it
   uint32_t n_regions;
   SnapRegion regions[7];
   uint32_t n_threads;
   MgsThreadSnap threads[MGS_SNAPSHOT_THREADS];
+  uint32_t layout[12];     // what the state really depends on, see layout_signature()
 };
-constexpr uint32_t kSnapVersion = 2;
+constexpr uint32_t kSnapVersion = 3;
+
+// A state is raw memory full of absolute addresses: pointers into the game's
+// statics and into its code (actor callbacks, scheduler entries). It loads
+// correctly into any build in which those addresses are unchanged -- not only
+// the build that wrote it. The regions' addresses and sizes cover the data;
+// a sample of the game's and the port's functions covers the code.
+extern "C" {
+int mgs_main(void);
+void GV_ExecActorSystem(int);
+void DG_SwapFrame(void);
+void GCL_ExecBlock(void);
+int Psyz_GpuExeque(void);
+unsigned long OpenTh(unsigned long (*)(), unsigned long, unsigned long);
+void mts_VSyncCallback(void);
+void Psyz_SpuPullSamples(short *, int);
+}
+void layout_signature(uint32_t out[12]) {
+  out[0] = reinterpret_cast<uint32_t>(&mgs_main);
+  out[1] = reinterpret_cast<uint32_t>(&GV_ExecActorSystem);
+  out[2] = reinterpret_cast<uint32_t>(&DG_SwapFrame);
+  out[3] = reinterpret_cast<uint32_t>(&GCL_ExecBlock);
+  out[4] = reinterpret_cast<uint32_t>(&Psyz_GpuExeque);
+  out[5] = reinterpret_cast<uint32_t>(&OpenTh);
+  out[6] = reinterpret_cast<uint32_t>(&mts_VSyncCallback);
+  out[7] = reinterpret_cast<uint32_t>(&Psyz_SpuPullSamples);
+  out[8] = reinterpret_cast<uint32_t>(&mgs_main_ram);
+  out[9] = reinterpret_cast<uint32_t>(g_RawVram);
+  out[10] = sizeof(SnapHeader);
+  out[11] = MGS_SNAPSHOT_THREADS;
+}
 
 std::vector<SnapRegion> snapshot_regions() {
   return {
@@ -393,6 +425,7 @@ bool save_state(const std::string &path) {
   }
   h.n_threads = MGS_SNAPSHOT_THREADS;
   Mgs_ThreadsSnapshot(h.threads, MGS_SNAPSHOT_THREADS);
+  layout_signature(h.layout);
   FILE *f = fopen(path.c_str(), "wb");
   if (!f) {
     logger.error("save state: cannot open {}", path);
@@ -431,8 +464,14 @@ bool load_state(const std::string &path) {
     fclose(f);
     return false;
   }
-  if (memcmp(h.elf_sha, esp_app_get_description()->app_elf_sha256, sizeof h.elf_sha) != 0) {
-    logger.error("load state: {} was saved by a different build", path);
+  const bool same_build =
+      memcmp(h.elf_sha, esp_app_get_description()->app_elf_sha256, sizeof h.elf_sha) == 0;
+  uint32_t layout[12];
+  layout_signature(layout);
+  if (memcmp(h.layout, layout, sizeof layout) != 0) {
+    logger.error("load state: {} was saved by a build whose game code or data sits at other addresses; "
+                 "it cannot be loaded here",
+                 path);
     fclose(f);
     return false;
   }
@@ -486,7 +525,8 @@ bool load_state(const std::string &path) {
   g_hang_vbl = mgs_vblank_count;
   g_hang_frame = mgs_frame_seq;
   g_hang_vbl_since = g_hang_frame_since = esp_timer_get_time();
-  logger.info("load state: {} restored in {} ms", path, (esp_timer_get_time() - t0) / 1000);
+  logger.info("load state: {} restored in {} ms{}", path, (esp_timer_get_time() - t0) / 1000,
+              same_build ? "" : " (written by another build with the same layout)");
   Mgs_ThreadsReport("after restore");
   g_report_after_resume = 120; // frames: the pad and scheduler state once running
   return true;
