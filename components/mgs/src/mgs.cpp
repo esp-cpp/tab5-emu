@@ -47,6 +47,7 @@ EXT_RAM_BSS_ATTR StackType_t g_main_stack[kMainStackBytes / sizeof(StackType_t)]
 StaticTask_t g_main_tcb;
 // addresses inside the game regions that belong to this run, not to a state
 std::vector<std::pair<void *, size_t>> g_preserve;
+int g_report_after_resume{0};
 uint8_t *g_data_snapshot{nullptr}; // libmgs.a's .data as linked; survives relaunches
 } // namespace
 
@@ -74,6 +75,11 @@ extern unsigned mgs_vblank_count;
 extern volatile const char *mgs_tick_phase;
 extern volatile int mgs_in_printf;     // port/psyz_port.c
 int Mgs_CurrentThread(void);
+void Mgs_ThreadsReport(const char *when);
+extern unsigned mts_ready_tasks_800C0DB4;
+extern unsigned char padbuf_800C1480[];
+extern int GV_PauseLevel;
+extern unsigned GM_GameStatus;
 int Mgs_ThreadSample(int i, unsigned *pc, unsigned *ra, unsigned *sp);
 int Mgs_ThreadStackScan(int i, unsigned *out, int max);
 extern const char *mgs_where;
@@ -82,6 +88,8 @@ extern char _mgs_bss_start[], _mgs_bss_end[];
 extern char _mgs_common_start[], _mgs_common_end[];
 extern char _mgs_xbss_start[], _mgs_xbss_end[];
 extern char _mgs_data_start[], _mgs_data_end[];
+extern char _mgs_sbss_start[], _mgs_sbss_end[];
+extern char _mgs_sdata_start[], _mgs_sdata_end[];
 }
 
 namespace {
@@ -91,21 +99,27 @@ constexpr int MTS_TASK_IDLE = 11;
 // none of the game's tasks exist.
 void reset_statics() {
   const size_t data_size = _mgs_data_end - _mgs_data_start;
+  const size_t sdata_size = _mgs_sdata_end - _mgs_sdata_start;
   if (!g_data_snapshot) {
-    // first launch: the sections are pristine, remember .data
-    g_data_snapshot = static_cast<uint8_t *>(heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    // one snapshot for both initialised regions: .data then the renamed .sdata
+    g_data_snapshot =
+        static_cast<uint8_t *>(heap_caps_malloc(data_size + sdata_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (g_data_snapshot) {
       memcpy(g_data_snapshot, _mgs_data_start, data_size);
+      memcpy(g_data_snapshot + data_size, _mgs_sdata_start, sdata_size);
     }
-    logger.info("statics: bss {} B, common {} B, psram bss {} B, data {} B (snapshot {})",
+    logger.info("statics: bss {} B, common {} B, psram bss {} B, sbss {} B, data {} B, sdata {} B (snapshot {})",
                 _mgs_bss_end - _mgs_bss_start, _mgs_common_end - _mgs_common_start,
-                _mgs_xbss_end - _mgs_xbss_start, data_size, g_data_snapshot ? "ok" : "FAILED");
+                _mgs_xbss_end - _mgs_xbss_start, _mgs_sbss_end - _mgs_sbss_start, data_size, sdata_size,
+                g_data_snapshot ? "ok" : "FAILED");
     return;
   }
   memset(_mgs_bss_start, 0, _mgs_bss_end - _mgs_bss_start);
   memset(_mgs_common_start, 0, _mgs_common_end - _mgs_common_start);
   memset(_mgs_xbss_start, 0, _mgs_xbss_end - _mgs_xbss_start);
+  memset(_mgs_sbss_start, 0, _mgs_sbss_end - _mgs_sbss_start);
   memcpy(_mgs_data_start, g_data_snapshot, data_size);
+  memcpy(_mgs_sdata_start, g_data_snapshot + data_size, sdata_size);
 }
 
 // Wait (up to max_ms) for the mts scheduler to reach its idle task outside a
@@ -149,6 +163,13 @@ int64_t g_hang_vbl_since{0}, g_hang_frame_since{0};
 void hang_check(void *) {
   if (!g_hang_enabled) {
     return;
+  }
+  if (g_report_after_resume > 0 && (g_report_after_resume -= 120) <= 0) {
+    Mgs_ThreadsReport("2 s after resume");
+    esp_rom_printf("[state] mts active %d ready %08x crit %d | pad %02x %02x %02x %02x | pause %d status %08x | vbl %u frame %u\n",
+                   mts_active_task_800C0DB0, mts_ready_tasks_800C0DB4, psyz_critical_depth, padbuf_800C1480[0],
+                   padbuf_800C1480[1], padbuf_800C1480[2], padbuf_800C1480[3], GV_PauseLevel, GM_GameStatus,
+                   mgs_vblank_count, mgs_frame_seq);
   }
   const int64_t now = esp_timer_get_time();
   if (mgs_vblank_count != g_hang_vbl) {
@@ -313,11 +334,11 @@ struct SnapHeader {
   uint32_t version;
   uint8_t elf_sha[32];
   uint32_t n_regions;
-  SnapRegion regions[5];
+  SnapRegion regions[7];
   uint32_t n_threads;
   MgsThreadSnap threads[MGS_SNAPSHOT_THREADS];
 };
-constexpr uint32_t kSnapVersion = 1;
+constexpr uint32_t kSnapVersion = 2;
 
 std::vector<SnapRegion> snapshot_regions() {
   return {
@@ -326,6 +347,8 @@ std::vector<SnapRegion> snapshot_regions() {
        static_cast<uint32_t>(_mgs_common_end - _mgs_common_start)},
       {reinterpret_cast<uint32_t>(_mgs_xbss_start), static_cast<uint32_t>(_mgs_xbss_end - _mgs_xbss_start)},
       {reinterpret_cast<uint32_t>(_mgs_data_start), static_cast<uint32_t>(_mgs_data_end - _mgs_data_start)},
+      {reinterpret_cast<uint32_t>(_mgs_sbss_start), static_cast<uint32_t>(_mgs_sbss_end - _mgs_sbss_start)},
+      {reinterpret_cast<uint32_t>(_mgs_sdata_start), static_cast<uint32_t>(_mgs_sdata_end - _mgs_sdata_start)},
       {reinterpret_cast<uint32_t>(g_main_stack), static_cast<uint32_t>(sizeof g_main_stack)},
   };
 }
@@ -452,6 +475,8 @@ bool load_state(const std::string &path) {
   g_hang_frame = mgs_frame_seq;
   g_hang_vbl_since = g_hang_frame_since = esp_timer_get_time();
   logger.info("load state: {} restored in {} ms", path, (esp_timer_get_time() - t0) / 1000);
+  Mgs_ThreadsReport("after restore");
+  g_report_after_resume = 120; // frames: the pad and scheduler state once running
   return true;
 #else
   return false;
