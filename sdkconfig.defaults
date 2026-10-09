@@ -126,3 +126,6 @@ CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 # The UART console is a byte-at-a-time sink nobody reads (the capture is on
 # USB); at 115200 a game printf stalls its thread 87 us per character.
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+# Light heap poisoning: canaries around every block, so corruption is caught
+# by heap_caps_check_integrity_all() near its source.
+CONFIG_HEAP_POISONING_LIGHT=y

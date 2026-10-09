@@ -76,6 +76,7 @@ extern volatile const char *mgs_tick_phase;
 extern volatile int mgs_in_printf;     // port/psyz_port.c
 int Mgs_CurrentThread(void);
 void Mgs_ThreadsReport(const char *when);
+void Mgs_HeapCheck(const char *where);
 extern unsigned mts_ready_tasks_800C0DB4;
 extern unsigned char padbuf_800C1480[];
 extern int GV_PauseLevel;
@@ -163,6 +164,10 @@ int64_t g_hang_vbl_since{0}, g_hang_frame_since{0};
 void hang_check(void *) {
   if (!g_hang_enabled) {
     return;
+  }
+  if (!heap_caps_check_integrity_all(false)) {
+    esp_rom_printf("[heap] CORRUPT (periodic check, vbl %u)\n", mgs_vblank_count);
+    heap_caps_check_integrity_all(true);
   }
   if (g_report_after_resume > 0 && (g_report_after_resume -= 120) <= 0) {
     Mgs_ThreadsReport("2 s after resume");
@@ -309,6 +314,7 @@ bool init(const Config &config) {
   }
   g_initialized = true;
   start_hang_detector();
+  Mgs_HeapCheck("init: done");
   return true;
 #else
   logger.error("built without CONFIG_MGS_ENGINE");
@@ -445,6 +451,9 @@ bool load_state(const std::string &path) {
     }
   }
   Psyz_GpuSync();
+  // the one platform task that runs during a pause and reads this file's
+  // statics: parked until the image and this run's handles are in place
+  Mgs_CdHoldReadAhead();
   // this run's OS resources, out of the way of the memory image
   std::vector<std::vector<uint8_t>> kept;
   kept.reserve(g_preserve.size());
@@ -460,14 +469,17 @@ bool load_state(const std::string &path) {
     memcpy(g_preserve[i].first, kept[i].data(), kept[i].size());
   }
   if (!ok) {
+    Mgs_CdReleaseReadAhead();
     logger.error("load state: short read from {} -- the game memory is now inconsistent, reset", path);
     return false;
   }
   if (!Mgs_ThreadsRestore(h.threads, MGS_SNAPSHOT_THREADS)) {
+    Mgs_CdReleaseReadAhead();
     logger.error("load state: could not restore the game threads -- reset");
     return false;
   }
   Mgs_CdAfterRestore();
+  Mgs_CdReleaseReadAhead();
   Psyz_GpuAfterRestore();
   Mgs_PrintfAfterRestore();
   mgs_frame_seq++; // show the restored frame
@@ -494,13 +506,20 @@ extern "C" void Mgs_DumpVram(const char *path) {
   }
 }
 
+extern "C" void Mgs_HeapCheck(const char *where) {
+  const bool ok = heap_caps_check_integrity_all(true);
+  esp_rom_printf("[heap] %s: %s\n", where, ok ? "ok" : "CORRUPT");
+}
+
 void pause() {
 #if defined(CONFIG_MGS_ENGINE)
   if (!g_initialized || g_paused) {
     return;
   }
+  Mgs_HeapCheck("pause: before freeze");
   g_hang_enabled = false;
   freeze();
+  Mgs_HeapCheck("pause: after freeze");
   mgs_platform_audio_pause();
   g_paused = true;
   {
@@ -516,6 +535,7 @@ void pause() {
       logger.warn("VRAM dump: could not open /sdcard/mgs_vram.bin");
     }
   }
+  Mgs_HeapCheck("pause: after vram dump");
 #endif
 }
 
@@ -558,6 +578,7 @@ void deinit() {
   Mgs_CdDeinit();
   // the game is gone: its statics can be put back for the next launch
   reset_statics();
+  Mgs_HeapCheck("deinit: done");
   logger.info("stopped; internal free {} B, PSRAM free {} B", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
               heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
