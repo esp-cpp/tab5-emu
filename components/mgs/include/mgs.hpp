@@ -31,6 +31,11 @@ bool running();
 /// quiescent point (its scheduler idle) and every one of its tasks held.
 void pause();
 void resume();
+/// Save states: the whole game memory plus the game threads' contexts,
+/// taken and restored while paused. A state only loads into the build that
+/// wrote it.
+bool save_state(const std::string &path);
+bool load_state(const std::string &path);
 /// Size of the presented frame (the PSX's 320x240).
 std::pair<size_t, size_t> video_size();
 /// The last presented frame as RGB565, for screenshots.

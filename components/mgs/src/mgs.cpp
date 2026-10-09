@@ -7,9 +7,14 @@
 #include <cstring>
 #include <filesystem>
 
+#include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include <vector>
+
+#include "../mgs_reversing/port/mgs_snapshot.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -35,6 +40,13 @@ bool g_initialized{false};
 bool g_paused{false};
 std::atomic<bool> g_main_returned{false};
 TaskHandle_t g_main_task{nullptr};
+// The main game task's stack at a fixed address, so a save state can hold
+// its context (the mts "system" thread parks on this stack).
+constexpr size_t kMainStackBytes = 16 * 1024;
+EXT_RAM_BSS_ATTR StackType_t g_main_stack[kMainStackBytes / sizeof(StackType_t)];
+StaticTask_t g_main_tcb;
+// addresses inside the game regions that belong to this run, not to a state
+std::vector<std::pair<void *, size_t>> g_preserve;
 uint8_t *g_data_snapshot{nullptr}; // libmgs.a's .data as linked; survives relaunches
 } // namespace
 
@@ -226,6 +238,12 @@ bool init(const Config &config) {
   // caches the VRAM pointer in one of those statics
   reset_statics();
   Draw_Reset();
+  g_preserve.clear();
+  Mgs_ThreadsSnapshotSetup();
+  Mgs_CdSnapshotSetup();
+  Mgs_VblankSnapshotSetup();
+  Mgs_PrintfSnapshotSetup();
+  Psyz_GpuSnapshotSetup();
   g_main_returned = false;
   g_paused = false;
   // The game opens "cdrom:\MGS\NAME;1"; the translator maps that onto
@@ -252,7 +270,7 @@ bool init(const Config &config) {
   // why they must share a core); the scanout and the HAL's video task are
   // on core 1. Priority 5, the mts threads' own: the cart's poll loop runs
   // on this core at the main task's priority and must not starve it.
-  auto ok = xTaskCreatePinnedToCoreWithCaps(
+  g_main_task = xTaskCreateStaticPinnedToCore(
       [](void *) {
         logger.info("entering the game's main()");
         const int rc = mgs_main();
@@ -260,8 +278,8 @@ bool init(const Config &config) {
         g_main_returned = true;
         vTaskSuspend(nullptr);
       },
-      "mgs_main", 16 * 1024, nullptr, 5, &g_main_task, 0, MALLOC_CAP_SPIRAM);
-  if (ok != pdPASS) {
+      "mgs_main", kMainStackBytes / sizeof(StackType_t), nullptr, 5, g_main_stack, &g_main_tcb, 0);
+  if (!g_main_task) {
     logger.error("could not create the game task");
     Mgs_StopVblank();
     mgs_platform_audio_stop();
@@ -278,6 +296,167 @@ bool init(const Config &config) {
 }
 
 bool running() { return g_initialized && !g_main_returned.load(); }
+
+extern "C" void Mgs_SnapshotPreserve(void *p, size_t n) { g_preserve.emplace_back(p, n); }
+extern "C" void Mgs_MainTaskStack(void **base, size_t *size) {
+  *base = g_main_stack;
+  *size = sizeof g_main_stack;
+}
+
+namespace {
+struct SnapRegion {
+  uint32_t addr;
+  uint32_t size;
+};
+struct SnapHeader {
+  char magic[4];
+  uint32_t version;
+  uint8_t elf_sha[32];
+  uint32_t n_regions;
+  SnapRegion regions[5];
+  uint32_t n_threads;
+  MgsThreadSnap threads[MGS_SNAPSHOT_THREADS];
+};
+constexpr uint32_t kSnapVersion = 1;
+
+std::vector<SnapRegion> snapshot_regions() {
+  return {
+      {reinterpret_cast<uint32_t>(_mgs_bss_start), static_cast<uint32_t>(_mgs_bss_end - _mgs_bss_start)},
+      {reinterpret_cast<uint32_t>(_mgs_common_start),
+       static_cast<uint32_t>(_mgs_common_end - _mgs_common_start)},
+      {reinterpret_cast<uint32_t>(_mgs_xbss_start), static_cast<uint32_t>(_mgs_xbss_end - _mgs_xbss_start)},
+      {reinterpret_cast<uint32_t>(_mgs_data_start), static_cast<uint32_t>(_mgs_data_end - _mgs_data_start)},
+      {reinterpret_cast<uint32_t>(g_main_stack), static_cast<uint32_t>(sizeof g_main_stack)},
+  };
+}
+
+bool io_chunked(FILE *f, void *p, size_t n, bool writing) {
+  auto *b = static_cast<uint8_t *>(p);
+  while (n > 0) {
+    const size_t chunk = n > 65536 ? 65536 : n;
+    const size_t got = writing ? fwrite(b, 1, chunk, f) : fread(b, 1, chunk, f);
+    if (got != chunk) {
+      return false;
+    }
+    b += chunk;
+    n -= chunk;
+  }
+  return true;
+}
+} // namespace
+
+bool save_state(const std::string &path) {
+#if defined(CONFIG_MGS_ENGINE)
+  if (!g_initialized || !g_paused) {
+    logger.error("save state: the game must be paused");
+    return false;
+  }
+  const int64_t t0 = esp_timer_get_time();
+  Psyz_GpuSync();
+  SnapHeader h{};
+  memcpy(h.magic, "MGSS", 4);
+  h.version = kSnapVersion;
+  memcpy(h.elf_sha, esp_app_get_description()->app_elf_sha256, sizeof h.elf_sha);
+  const auto regions = snapshot_regions();
+  h.n_regions = regions.size();
+  for (size_t i = 0; i < regions.size(); i++) {
+    h.regions[i] = regions[i];
+  }
+  h.n_threads = MGS_SNAPSHOT_THREADS;
+  Mgs_ThreadsSnapshot(h.threads, MGS_SNAPSHOT_THREADS);
+  FILE *f = fopen(path.c_str(), "wb");
+  if (!f) {
+    logger.error("save state: cannot open {}", path);
+    return false;
+  }
+  bool ok = fwrite(&h, 1, sizeof h, f) == sizeof h;
+  size_t total = sizeof h;
+  for (const auto &r : regions) {
+    ok = ok && io_chunked(f, reinterpret_cast<void *>(r.addr), r.size, true);
+    total += r.size;
+  }
+  fclose(f);
+  logger.info("save state: {} {} ({} KB in {} ms)", ok ? "wrote" : "FAILED", path, total / 1024,
+              (esp_timer_get_time() - t0) / 1000);
+  return ok;
+#else
+  return false;
+#endif
+}
+
+bool load_state(const std::string &path) {
+#if defined(CONFIG_MGS_ENGINE)
+  if (!g_initialized || !g_paused) {
+    logger.error("load state: the game must be paused");
+    return false;
+  }
+  const int64_t t0 = esp_timer_get_time();
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) {
+    logger.error("load state: cannot open {}", path);
+    return false;
+  }
+  SnapHeader h{};
+  if (fread(&h, 1, sizeof h, f) != sizeof h || memcmp(h.magic, "MGSS", 4) != 0 || h.version != kSnapVersion) {
+    logger.error("load state: {} is not a save state of this format", path);
+    fclose(f);
+    return false;
+  }
+  if (memcmp(h.elf_sha, esp_app_get_description()->app_elf_sha256, sizeof h.elf_sha) != 0) {
+    logger.error("load state: {} was saved by a different build", path);
+    fclose(f);
+    return false;
+  }
+  const auto regions = snapshot_regions();
+  if (h.n_regions != regions.size() || h.n_threads != MGS_SNAPSHOT_THREADS) {
+    logger.error("load state: layout mismatch");
+    fclose(f);
+    return false;
+  }
+  for (size_t i = 0; i < regions.size(); i++) {
+    if (h.regions[i].addr != regions[i].addr || h.regions[i].size != regions[i].size) {
+      logger.error("load state: region {} differs (file {:#x}+{} vs {:#x}+{})", i, h.regions[i].addr,
+                   h.regions[i].size, regions[i].addr, regions[i].size);
+      fclose(f);
+      return false;
+    }
+  }
+  Psyz_GpuSync();
+  // this run's OS resources, out of the way of the memory image
+  std::vector<std::vector<uint8_t>> kept;
+  kept.reserve(g_preserve.size());
+  for (const auto &[p, n] : g_preserve) {
+    kept.emplace_back(static_cast<uint8_t *>(p), static_cast<uint8_t *>(p) + n);
+  }
+  bool ok = true;
+  for (const auto &r : regions) {
+    ok = ok && io_chunked(f, reinterpret_cast<void *>(r.addr), r.size, false);
+  }
+  fclose(f);
+  for (size_t i = 0; i < g_preserve.size(); i++) {
+    memcpy(g_preserve[i].first, kept[i].data(), kept[i].size());
+  }
+  if (!ok) {
+    logger.error("load state: short read from {} -- the game memory is now inconsistent, reset", path);
+    return false;
+  }
+  if (!Mgs_ThreadsRestore(h.threads, MGS_SNAPSHOT_THREADS)) {
+    logger.error("load state: could not restore the game threads -- reset");
+    return false;
+  }
+  Mgs_CdAfterRestore();
+  Psyz_GpuAfterRestore();
+  Mgs_PrintfAfterRestore();
+  mgs_frame_seq++; // show the restored frame
+  g_hang_vbl = mgs_vblank_count;
+  g_hang_frame = mgs_frame_seq;
+  g_hang_vbl_since = g_hang_frame_since = esp_timer_get_time();
+  logger.info("load state: {} restored in {} ms", path, (esp_timer_get_time() - t0) / 1000);
+  return true;
+#else
+  return false;
+#endif
+}
 
 extern "C" void Mgs_DumpVram(const char *path) {
   Psyz_GpuSync();
@@ -345,7 +524,7 @@ void deinit() {
   Mgs_StopVblank();
   Mgs_ThreadsStopAll();
   if (g_main_task) {
-    vTaskDeleteWithCaps(g_main_task);
+    vTaskDelete(g_main_task);
     g_main_task = nullptr;
   }
   // let the scheduler retire the deleted tasks before their memory goes away

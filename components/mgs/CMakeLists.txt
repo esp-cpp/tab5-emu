@@ -82,7 +82,7 @@ idf_component_register(
   INCLUDE_DIRS ${MGS_INCLUDE_DIRS}
   PRIV_INCLUDE_DIRS ${MGS_PRIV_INCLUDE_DIRS}
   REQUIRES tab5-emu
-  PRIV_REQUIRES esp_timer esp_system heap statistics
+  PRIV_REQUIRES esp_timer esp_system heap statistics esp_app_format
   LDFRAGMENTS "linker.lf"
 )
 

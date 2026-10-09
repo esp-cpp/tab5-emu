@@ -31,8 +31,6 @@ public:
 #endif
   }
 
-  // Memory-card saves are not implemented by the port; the menu's save / load
-  // do nothing beyond the base class bookkeeping.
   void reset() override {
     Cart::reset();
 #if defined(ENABLE_MGS)
@@ -42,8 +40,27 @@ public:
     }
 #endif
   }
-  void load() override { logger_.warn("load: the port has no memory card"); }
-  void save() override { logger_.warn("save: the port has no memory card"); }
+  // Save states: the game is paused while the menu is up (pre_menu), which
+  // is what the snapshot needs.
+  void load() override {
+#if defined(ENABLE_MGS)
+    const auto path = get_save_path();
+    if (path.empty()) {
+      logger_.warn("load: no state in slot {}", get_selected_save_slot());
+      return;
+    }
+    if (mgs::load_state(path)) {
+      Cart::load();
+    }
+#endif
+  }
+  void save() override {
+#if defined(ENABLE_MGS)
+    if (mgs::save_state(get_save_path(true))) {
+      Cart::save();
+    }
+#endif
+  }
 
   bool run() override {
 #if defined(ENABLE_MGS)
