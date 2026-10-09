@@ -167,14 +167,33 @@ int lcd_init(void) {
 // mask bit). The HAL wants RGB565, so convert into one of its two frame
 // buffers (alternating: the frame handed to push_frame() must stay valid until
 // the next one) and queue it; the HAL's video task scales it to the panel.
-void lcd_present(const unsigned short *src) {
+// `rows` is the display environment's height: 224 for the game (an NTSC
+// field; the 16 rows below the drawing area are VRAM the game never clears
+// and must not be shown -- a snow tile drawn there during a 256-line codec
+// call stayed on the panel forever) or 256 (centred, cropped to the panel).
+void lcd_present(const unsigned short *src, int rows) {
   auto *dst = reinterpret_cast<uint16_t *>(g_frames[g_frame_index]);
   if (!dst) {
     return;
   }
-  for (size_t y = 0; y < MGS_FRAME_H; y++) {
-    const uint16_t *row = src + y * 1024;
-    uint16_t *out = dst + y * MGS_FRAME_W;
+  if (rows <= 0 || rows > 512) {
+    rows = MGS_FRAME_H;
+  }
+  int src_skip = 0, dst_skip = 0, copy = rows;
+  if (rows > static_cast<int>(MGS_FRAME_H)) {
+    src_skip = (rows - MGS_FRAME_H) / 2;
+    copy = MGS_FRAME_H;
+  } else if (rows < static_cast<int>(MGS_FRAME_H)) {
+    dst_skip = (MGS_FRAME_H - rows) / 2;
+  }
+  if (dst_skip) {
+    memset(dst, 0, static_cast<size_t>(dst_skip) * MGS_FRAME_W * 2);
+    memset(dst + static_cast<size_t>(dst_skip + copy) * MGS_FRAME_W, 0,
+           static_cast<size_t>(MGS_FRAME_H - dst_skip - copy) * MGS_FRAME_W * 2);
+  }
+  for (int y = 0; y < copy; y++) {
+    const uint16_t *row = src + static_cast<size_t>(src_skip + y) * 1024;
+    uint16_t *out = dst + static_cast<size_t>(dst_skip + y) * MGS_FRAME_W;
     for (size_t x = 0; x < MGS_FRAME_W; x++) {
       const uint16_t v = row[x];
       const uint16_t r = v & 0x1F;
