@@ -1,0 +1,48 @@
+# Metal Gear Solid: where the game's statics live, and how to find them again.
+#
+# Everything the decompiled game, psyz, the PSY-Q libraries and the port keep
+# in .bss / COMMON goes to PSRAM (internal RAM is the Tab5's scarce memory);
+# their .data goes into .flash.rodata, which this build runs XIP from PSRAM
+# and is therefore writable (memory protection is off for it, see
+# sdkconfig.defaults) and arrives initialised and relocated by the normal
+# image load. The SURROUND symbols (_mgs_bss_start/_end, _mgs_common_*,
+# _mgs_xbss_*, _mgs_data_*) let src/mgs.cpp put every static back between
+# launches: the PSX booted from scratch every time and the game assumes it.
+# The decompilation marks many globals SECTION(".sbss") / SECTION(".sdata")
+# (the PSX's small-data areas). The stock `bss` and `data` types cover only
+# .bss and .data, so those landed in internal RAM, outside the reset and the
+# save states: a restored game came back with the player's status, the alert
+# mode and the pause level from before the load.
+[sections:mgs_sbss]
+entries:
+    .mgs.sbss+
+    .mgs.bss+
+
+[sections:mgs_sdata]
+entries:
+    .mgs.sdata+
+    .mgs.data+
+
+[scheme:mgs_statics]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    extram_bss -> extern_ram
+    mgs_sbss -> extern_ram
+    data -> flash_rodata
+    mgs_sdata -> flash_rodata
+
+[mapping:mgs]
+archive: libmgs.a
+entries:
+    * (mgs_statics);
+        bss -> extern_ram SURROUND(mgs_bss),
+        common -> extern_ram SURROUND(mgs_common),
+        extram_bss -> extern_ram SURROUND(mgs_xbss),
+        mgs_sbss -> extern_ram SURROUND(mgs_sbss),
+        data -> flash_rodata SURROUND(mgs_data),
+        mgs_sdata -> flash_rodata SURROUND(mgs_sdata)
+    # the cart-side glue owns the reset itself (the .data snapshot, the
+    # lifecycle state) and must survive it: default placement
+    mgs (default)
+    mgs_platform (default)

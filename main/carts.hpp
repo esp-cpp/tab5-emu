@@ -5,12 +5,16 @@
 #include "gba_cart.hpp"
 #include "genesis_cart.hpp"
 #include "jk_cart.hpp"
+#include "mgs_cart.hpp"
 #include "snes_cart.hpp"
 
 inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
   switch (info.platform) {
   case Emulator::JEDI_KNIGHT:
     return std::make_unique<JkCart>(Cart::Config{
+        .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::MGS:
+    return std::make_unique<MgsCart>(Cart::Config{
         .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
   case Emulator::GBA:
     return std::make_unique<GbaCart>(Cart::Config{

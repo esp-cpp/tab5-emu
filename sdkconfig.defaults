@@ -54,6 +54,11 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=131072
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 # the game engine's static state is mapped to PSRAM (components/jk/linker.lf)
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# The MGS core keeps the game's initialized data in the PSRAM-XIP .rodata
+# (tools/bss_to_psram.py --data); the PMP rules memory protection installs
+# make that range read-only and are locked, so protection is off. Nothing
+# untrusted runs here, and it is only the IRAM/DRAM W^X split that is lost.
+CONFIG_ESP_SYSTEM_MEMPROT=n
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
@@ -115,3 +120,12 @@ CONFIG_FATFS_USE_LABEL=y
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# NOT 400 MHz: this Tab5 (chip v1.3, eco2 ROM) boot-loops in the ROM clock setup
+# (Store/AMO fault at 0x50091000) with CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400.
+# The UART console is a byte-at-a-time sink nobody reads (the capture is on
+# USB); at 115200 a game printf stalls its thread 87 us per character.
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+# Light heap poisoning: canaries around every block, so corruption is caught
+# by heap_caps_check_integrity_all() near its source.
+CONFIG_HEAP_POISONING_LIGHT=y

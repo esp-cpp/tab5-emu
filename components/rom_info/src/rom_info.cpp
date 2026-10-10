@@ -71,6 +71,10 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 #if defined(ENABLE_GBA)
       platform = Emulator::GBA;
 #endif
+    } else if (endsWith(lp, "stage.dir") || endsWith(lp, ".mgs")) { // metal gear solid
+#if defined(ENABLE_MGS)
+      platform = Emulator::MGS;
+#endif
     }
     if (platform != Emulator::UNKNOWN) {
       infos.emplace_back(name, fs_prefix + boxart_path, fs_prefix + rom_path, platform);

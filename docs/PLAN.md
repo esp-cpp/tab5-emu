@@ -221,3 +221,37 @@ the pause menu's 600 KB screenshot buffers must be reserved before a game
 fills PSRAM (bad_alloc on pause in JK), and JK's small-object pool has to be
 permanent (the engine frees the previous session's strings at the next
 start).
+
+## Metal Gear Solid (2026-10-03)
+
+Native port, not emulation: the game's decompiled C
+(`components/mgs/mgs_reversing`, the S3 port's `esp32-port` branch) on psyz's
+PlayStation SDK + software GPU (`components/mgs/psyz`), following
+<https://velxio.dev/blog/posts/metal-gear-solid-on-esp32-s3/>. What differs
+from the S3 and why it should do better here: RISC-V at 360 MHz with a 256 KB
+L2 cache against the S3's 240 MHz Xtensa and 64 KB; 32 MB of PSRAM at 200 MHz;
+SDMMC for the disc data (the S3 shared one SPI bus between card and panel and
+read at ~95 KB/s); the HAL's PPA scaler for the 320x240 frame.
+
+Phases:
+
+1. **Build** (done): the component mirrors the upstream CMake; the private
+   shim is reconstructed (`shim/`); game statics to PSRAM; mts stacks in
+   PSRAM; the game's main() on its own task.
+2. **Platform layer** (done, untested on hardware): VRAM display area ->
+   RGB565 into the HAL's two frame buffers -> `push_frame()`; pads from the
+   HAL's merged gamepad (A/B/X/Y by position = cross/circle/square/triangle);
+   data root on the card; pause by stopping the vblank; quit = reboot.
+3. **Bring-up**: boot into s00a with the user's extracted disc files;
+   expected trouble spots: the first CD read (the virtual CD's async
+   contract), pad discovery, VRAM origin, colour order in the scanout.
+4. **Performance**: measure the rasterizer (`sotn_prim_cycles` telemetry is
+   in); the S3 sits at 8-15 fps bound by PSRAM latency on textured pixels.
+   Levers here: the L2 cache, `SOFT_RASTER_IRAM` placement, VRAM rows of the
+   drawing area in internal RAM if the budget ever allows.
+5. **Integration polish**: stage selection from the GUI, an in-place restart
+   (needs the game's statics re-initialised, which upstream never does), a
+   metadata/boxart entry, documentation of the data extraction.
+
+Open: the two submodules point at local branches (`esp32p4` in mgs_reversing
+for three platform hooks) until forks exist under esp-cpp to push them to.
