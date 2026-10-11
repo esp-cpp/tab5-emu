@@ -278,17 +278,20 @@ Where it stands:
 1. **Decomp ground** (done): splat split, byte-identical rebuild from
    `INCLUDE_ASM` stubs through PSY-Q 4.3's GCC 2.8.1 + maspsx; ~105 PSY-Q
    library objects named by signature; 823 game functions waiting.
-2. **Data path on the Tab5** (written, built, not run on hardware):
-   `components/tpm` reads `SLUS_008.84` + `FILE.000` from the card, resolves
-   names through the game's own file table, and shows the 44 load screens
-   (320x256 24-bit, cropped to 240 rows). Left / right steps through them.
-3. **Next**: name the engine's top level (main loop, task manager, file
-   layer, level loader), decompile the file layer first (its bottom half
-   becomes SD reads), then the renderer and the 16 hand-written GTE routines
-   (to C on psyz's GTE), then gameplay level by level.
+2. **The game runs, recompiled** (2026-10-11): tpm-decomp's static
+   recompiler translates the whole executable to C at build time and its
+   runtime emulates the machine around it (BIOS calls, interrupts, DMA,
+   CD-ROM over the `.bin`, GPU ports on psyz's rasterizer, psyz's GTE and
+   SPU). On the desktop it boots into the first level in 3D. Here it is
+   `CONFIG_TPM_ENGINE` (default on): CMake recompiles the user's
+   `SLUS_008.84` at configure time; the game, runtime and psyz pieces are
+   one relocatable object with only the runtime's API global (MGS links the
+   same psyz names). Built (7.9 MB image; app partition grown to 12 MB);
+   **not run on the Tab5 yet**.
+3. **Next**: the first run on the board, then performance (the MGS lessons:
+   the two-core rasterizer), MDEC movies, XA audio, memory card saves. The
+   decompilation continues in tpm-decomp; decompiled functions can replace
+   recompiled ones one at a time.
 
-The game C will join this component behind `CONFIG_TPM_ENGINE` (off), as a
-submodule like `components/mgs/mgs_reversing`, once the repo is published.
-Everything the MGS port learned applies: no hard-coded PSX / S3 address
-ranges, game statics in PSRAM via a linker fragment, the game task at the
-mts priority, the two-core rasteriser.
+The load-screen viewer remains the fallback (no executable at build time,
+or no `.bin` on the card).

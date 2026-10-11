@@ -1,13 +1,23 @@
 menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
 
     config TPM_ENGINE
-        bool "Build the decompiled game (not runnable yet)"
-        default n
+        bool "Build the game (static recompilation of your SLUS_008.84)"
+        default y
         help
-            Compile the decompiled C from tpm-decomp against psyz. Off until
-            enough of the game is decompiled to run; with it off the cart
-            shows the game's load screens from the SD card (the data and
-            display path).
+            Recompile the game's executable to C at configure time
+            (tpm-decomp/tools/recomp.py) and build it with tpm-decomp's
+            runtime on psyz. Needs the USA Rev 1 executable at
+            TPM_EXE_PATH; without it the build carries on and the cart shows
+            the game's load screens (the data and display path) instead.
+
+    config TPM_EXE_PATH
+        string "Path of SLUS_008.84 (USA Rev 1), relative to the project"
+        default "components/tpm/tpm-decomp/disks/us/SLUS_008.84"
+        depends on TPM_ENGINE
+        help
+            Your own copy of the game's executable, e.g. extracted with
+            tpm-decomp/tools/extract_disc.py. It is only read at build time;
+            nothing derived from it is committed.
 
     config TPM_SLIDE_SECONDS
         int "Seconds per load screen in the data viewer"

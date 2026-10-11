@@ -7,10 +7,10 @@
 
 /// Cart for Star Wars Episode I: The Phantom Menace (PSX), native.
 ///
-/// The "rom" is the directory of disc files from tpm-decomp's
-/// tools/extract_disc.py (SLUS_008.84, FILE.000 .. FILE.003): the metadata
-/// entry points at `<dir>/SLUS_008.84`. Until the decompilation runs, the core
-/// shows the game's load screens from that data (left / right to step).
+/// The metadata entry points at `<dir>/SLUS_008.84`; `<dir>` holds the disc
+/// image (.bin, raw sectors). The game itself is tpm-decomp's static
+/// recompilation of the executable (components/tpm). Without it, the core
+/// shows the game's load screens from extracted disc files.
 class TpmCart : public Cart {
 public:
   explicit TpmCart(const Cart::Config &config)

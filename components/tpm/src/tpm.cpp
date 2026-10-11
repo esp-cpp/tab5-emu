@@ -11,11 +11,15 @@
 #include "logger.hpp"
 #include "tab5-emu.hpp"
 #include "tpm_files.hpp"
+#if defined(TPM_HAVE_ENGINE)
+#include "tpm_engine.hpp"
+#endif
 
-// Until the decompiled game runs, the core is a viewer for the game's load
-// screens: the 44 .RGB files in FILE.000, 320x256 in the GPU's 24-bit mode.
-// Every one is found through the executable's own file table, so this
-// exercises the same name -> sector path the engine will use.
+// With the engine built (CONFIG_TPM_ENGINE and an executable to recompile at
+// configure time) and a disc image on the card, the game runs (tpm_engine).
+// Otherwise the core is a viewer for the game's load screens: the 44 .RGB
+// files in FILE.000, 320x256 in the GPU's 24-bit mode, each found through the
+// executable's own file table.
 
 namespace tpm {
 
@@ -40,6 +44,8 @@ bool running_{false};
 bool paused_{false};
 bool prev_left_{false}, prev_right_{false};
 Config config_;
+
+bool engine_{false}; // the game is running instead of the viewer
 
 bool show(size_t index) {
   const auto &entry = *screens_[index];
@@ -66,6 +72,14 @@ bool show(size_t index) {
 
 bool init(const Config &config) {
   config_ = config;
+#if defined(TPM_HAVE_ENGINE)
+  if (engine::init(config.data_dir)) {
+    engine_ = true;
+    running_ = true;
+    return true;
+  }
+  logger_.warn("the game cannot start; showing the load screens instead");
+#endif
   std::string error;
   if (!files_.open(config.data_dir, error)) {
     logger_.error("{}", error);
@@ -105,6 +119,12 @@ bool init(const Config &config) {
 }
 
 void deinit() {
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    engine::deinit();
+    engine_ = false;
+  }
+#endif
   running_ = false;
   files_.close();
   screens_.clear();
@@ -121,6 +141,12 @@ bool reset() {
 bool running() { return running_; }
 
 bool update() {
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    running_ = engine::running();
+    return running_;
+  }
+#endif
   if (!running_ || paused_) {
     return running_;
   }
@@ -143,10 +169,23 @@ bool update() {
   return running_;
 }
 
-void pause() { paused_ = true; }
+void pause() {
+  paused_ = true;
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    engine::pause();
+  }
+#endif
+}
 
 void resume() {
   paused_ = false;
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    engine::resume();
+    return;
+  }
+#endif
   shown_at_us_ = esp_timer_get_time();
   if (running_) {
     Tab5Emu::get().native_size(SCREEN_W, FRAME_H);
@@ -157,6 +196,11 @@ void resume() {
 std::pair<size_t, size_t> video_size() { return {SCREEN_W, FRAME_H}; }
 
 std::span<uint8_t> video_buffer_rgb565() {
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    return engine::last_frame();
+  }
+#endif
   auto *f = last_frame_.load();
   return f ? std::span<uint8_t>{f, SCREEN_W * FRAME_H * 2} : std::span<uint8_t>{};
 }

@@ -1,0 +1,434 @@
+// The game itself: tpm-decomp's static recompilation of SLUS_008.84 (built
+// from the user's own executable at configure time, see CMakeLists.txt) and
+// its runtime, on the Tab5.
+//
+// Threads:
+//   tpm_game  (core 0) the recompiled code; the runtime's hardware model runs
+//             inline at its loop back-edges (vblank, CD, SPU, interrupts)
+//   tpm_video (core 1) converts the PSX display area of VRAM to RGB565 and
+//             hands it to the HAL, woken by the game's vblanks
+//   tpm_audio (core 1) moves the SPU's samples to the HAL's audio queue
+//
+// The disc is a raw 2352-byte-sector image on the card (the .bin of a
+// bin/cue rip); the executable comes from the card if it is there as a file,
+// otherwise out of the image's ISO9660 directory.
+
+#include "tpm_engine.hpp"
+
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#include <esp_heap_caps.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+#include <freertos/idf_additions.h>
+
+#include "logger.hpp"
+#include "statistics.hpp"
+#include "tab5-emu.hpp"
+
+extern "C" {
+#include "rt_platform.h"
+}
+
+namespace tpm::engine {
+
+namespace {
+
+espp::Logger logger({.tag = "tpm", .level = espp::Logger::Verbosity::INFO});
+
+constexpr size_t FRAME_W = 320;
+constexpr size_t FRAME_H = 240;
+constexpr uint32_t AUDIO_RATE = 44100;
+
+FILE *g_disc{nullptr};
+uint32_t g_disc_sectors{0};
+std::vector<uint8_t> g_exe;
+
+TaskHandle_t g_game_task{nullptr};
+TaskHandle_t g_video_task{nullptr};
+TaskHandle_t g_audio_task{nullptr};
+std::atomic<bool> g_game_done{false};
+std::atomic<bool> g_stop{false};
+std::atomic<bool> g_paused{false};
+SemaphoreHandle_t g_resume{nullptr};
+
+uint8_t *g_frames[2]{};
+int g_frame_index{0};
+std::atomic<uint8_t *> g_last_frame{nullptr};
+std::atomic<bool> g_video_busy{false};
+RtDisplay g_display{};
+
+// SPU output: the game's thread writes, the audio task reads
+constexpr size_t RING_FRAMES = 8192; // ~186 ms
+int16_t *g_ring{nullptr};
+std::atomic<uint32_t> g_ring_w{0}, g_ring_r{0};
+
+// ---- the disc ----
+
+bool read_sector(uint32_t lba, uint8_t *out) {
+  if (!g_disc || lba >= g_disc_sectors) {
+    return false;
+  }
+  if (fseek(g_disc, static_cast<long>(lba) * 2352, SEEK_SET) != 0) {
+    return false;
+  }
+  return fread(out, 1, 2352, g_disc) == 2352;
+}
+
+// SLUS_008.84 out of the image's root directory (ISO9660, Mode 2 Form 1)
+bool exe_from_disc(std::vector<uint8_t> &exe) {
+  std::vector<uint8_t> sec(2352);
+  if (!read_sector(16, sec.data()) || memcmp(sec.data() + 24 + 1, "CD001", 5) != 0) {
+    return false;
+  }
+  const uint8_t *root = sec.data() + 24 + 156;
+  uint32_t lba = root[2] | (root[3] << 8) | (root[4] << 16) | (root[5] << 24);
+  uint32_t size = root[10] | (root[11] << 8) | (root[12] << 16) | (root[13] << 24);
+  for (uint32_t off = 0; off < size; off += 2048) {
+    if (!read_sector(lba + off / 2048, sec.data())) {
+      return false;
+    }
+    const uint8_t *d = sec.data() + 24;
+    for (size_t p = 0; p < 2048 && d[p];) {
+      const uint8_t len = d[p];
+      const uint8_t name_len = d[p + 32];
+      const std::string name(reinterpret_cast<const char *>(d + p + 33), name_len);
+      if (name.rfind("SLUS_008.84", 0) == 0) {
+        const uint32_t f_lba = d[p + 2] | (d[p + 3] << 8) | (d[p + 4] << 16) | (d[p + 5] << 24);
+        const uint32_t f_size = d[p + 10] | (d[p + 11] << 8) | (d[p + 12] << 16) | (d[p + 13] << 24);
+        exe.resize(f_size);
+        for (uint32_t o = 0; o < f_size; o += 2048) {
+          if (!read_sector(f_lba + o / 2048, sec.data())) {
+            return false;
+          }
+          memcpy(exe.data() + o, sec.data() + 24, std::min<uint32_t>(2048, f_size - o));
+        }
+        return true;
+      }
+      p += len;
+    }
+  }
+  return false;
+}
+
+// ---- tasks ----
+
+void video_task(void *) {
+  while (!g_stop.load()) {
+    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) == 0) {
+      continue;
+    }
+    const RtDisplay d = g_display;
+    auto *dst = reinterpret_cast<uint16_t *>(g_frames[g_frame_index]);
+    if (!d.enabled) {
+      memset(dst, 0, FRAME_W * FRAME_H * 2);
+    } else {
+      // centre narrower modes, sample wider ones; 480-line modes show every
+      // other line
+      const int w = d.w, h = d.h;
+      const int step_y = h > static_cast<int>(FRAME_H) ? 2 : 1;
+      const int x_pad = w < static_cast<int>(FRAME_W) ? (FRAME_W - w) / 2 : 0;
+      for (size_t y = 0; y < FRAME_H; y++) {
+        uint16_t *out = dst + y * FRAME_W;
+        const int vy = (d.y + static_cast<int>(y) * step_y) & 511;
+        if (static_cast<int>(y) * step_y >= h) {
+          memset(out, 0, FRAME_W * 2);
+          continue;
+        }
+        if (x_pad) {
+          memset(out, 0, x_pad * 2);
+          memset(out + FRAME_W - x_pad, 0, x_pad * 2);
+        }
+        const size_t n = std::min<size_t>(w, FRAME_W);
+        if (d.rgb24) {
+          const auto *row = reinterpret_cast<const uint8_t *>(&g_rt_vram[vy * 1024]);
+          for (size_t x = 0; x < n; x++) {
+            const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
+            const uint8_t *p = row + ((d.x * 2 + sx * 3) & 2047);
+            out[x_pad + x] = static_cast<uint16_t>(((p[0] & 0xF8) << 8) | ((p[1] & 0xFC) << 3) | (p[2] >> 3));
+          }
+        } else {
+          const uint16_t *row = &g_rt_vram[vy * 1024];
+          for (size_t x = 0; x < n; x++) {
+            const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
+            const uint16_t v = row[(d.x + sx) & 1023];
+            const uint16_t r = v & 0x1F, g = (v >> 5) & 0x1F, b = (v >> 10) & 0x1F;
+            out[x_pad + x] = static_cast<uint16_t>((r << 11) | (((g << 1) | (g >> 4)) << 5) | b);
+          }
+        }
+      }
+    }
+    g_last_frame = g_frames[g_frame_index];
+    Tab5Emu::get().push_frame(dst);
+    g_frame_index ^= 1;
+    static int64_t last_us = 0;
+    const int64_t now = esp_timer_get_time();
+    if (last_us) {
+      update_frame_time(static_cast<uint64_t>(now - last_us));
+    }
+    last_us = now;
+    g_video_busy = false;
+  }
+  vTaskDelete(nullptr);
+}
+
+void audio_task(void *) {
+  constexpr size_t CHUNK = 512;
+  static int16_t buf[CHUNK * 2];
+  auto &emu = Tab5Emu::get();
+  while (!g_stop.load()) {
+    const uint32_t r = g_ring_r.load(), w = g_ring_w.load(std::memory_order_acquire);
+    const uint32_t avail = w - r;
+    if (avail < CHUNK || g_paused.load()) {
+      vTaskDelay(pdMS_TO_TICKS(4));
+      continue;
+    }
+    for (size_t i = 0; i < CHUNK; i++) {
+      const size_t k = (r + i) % RING_FRAMES;
+      buf[2 * i] = g_ring[2 * k];
+      buf[2 * i + 1] = g_ring[2 * k + 1];
+    }
+    g_ring_r.store(r + CHUNK, std::memory_order_release);
+    emu.play_audio(reinterpret_cast<const uint8_t *>(buf), sizeof buf);
+  }
+  vTaskDelete(nullptr);
+}
+
+void game_task(void *) {
+  logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
+  rt_set_realtime(1);
+  rt_boot(g_exe.data(), static_cast<uint32_t>(g_exe.size()));
+  logger.info("game stopped");
+  g_game_done = true;
+  vTaskSuspend(nullptr);
+}
+
+std::string find_disc(const std::string &dir) {
+  std::error_code ec;
+  std::string best;
+  uintmax_t best_size = 0;
+  for (const auto &e : std::filesystem::directory_iterator(dir, ec)) {
+    auto ext = e.path().extension().string();
+    for (auto &c : ext) {
+      c = static_cast<char>(tolower(c));
+    }
+    if (ext != ".bin") {
+      continue;
+    }
+    const auto size = e.file_size(ec);
+    if (!ec && size > best_size) {
+      best = e.path().string();
+      best_size = size;
+    }
+  }
+  return best;
+}
+
+} // namespace
+
+bool init(const std::string &data_dir) {
+  const auto disc = find_disc(data_dir);
+  if (disc.empty()) {
+    logger.error("no disc image (.bin, raw 2352-byte sectors) in {}", data_dir);
+    return false;
+  }
+  g_disc = fopen(disc.c_str(), "rb");
+  if (!g_disc) {
+    logger.error("cannot open {}", disc);
+    return false;
+  }
+  setvbuf(g_disc, nullptr, _IOFBF, 4096);
+  fseek(g_disc, 0, SEEK_END);
+  g_disc_sectors = static_cast<uint32_t>(ftell(g_disc) / 2352);
+  logger.info("disc {}: {} sectors", disc, g_disc_sectors);
+
+  g_exe.clear();
+  if (FILE *f = fopen((data_dir + "/SLUS_008.84").c_str(), "rb")) {
+    fseek(f, 0, SEEK_END);
+    g_exe.resize(ftell(f));
+    fseek(f, 0, SEEK_SET);
+    if (fread(g_exe.data(), 1, g_exe.size(), f) != g_exe.size()) {
+      g_exe.clear();
+    }
+    fclose(f);
+  }
+  if (g_exe.empty() && !exe_from_disc(g_exe)) {
+    logger.error("SLUS_008.84 not found (neither in {} nor on the disc)", data_dir);
+    deinit();
+    return false;
+  }
+
+  auto &emu = Tab5Emu::get();
+  g_frames[0] = emu.frame_buffer0();
+  g_frames[1] = emu.frame_buffer1();
+  if (!g_frames[0] || !g_frames[1]) {
+    logger.error("no frame buffers");
+    deinit();
+    return false;
+  }
+  emu.palette(nullptr, 0);
+  emu.native_size(FRAME_W, FRAME_H);
+  emu.audio_sample_rate(AUDIO_RATE);
+  emu.audio_max_wait_ms(30);
+
+  g_ring = static_cast<int16_t *>(heap_caps_calloc(RING_FRAMES * 2, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+  g_resume = xSemaphoreCreateBinary();
+  g_stop = false;
+  g_paused = false;
+  g_game_done = false;
+  g_ring_w = g_ring_r = 0;
+
+  xTaskCreatePinnedToCore(video_task, "tpm_video", 4096, nullptr, 6, &g_video_task, 1);
+  xTaskCreatePinnedToCore(audio_task, "tpm_audio", 4096, nullptr, 7, &g_audio_task, 1);
+  // The recompiled code nests a C frame per guest call (<= 304 bytes on
+  // RV32, guest chains seen up to 25 deep including interrupts): 32 KB, in
+  // internal RAM since those frames are the guest's registers; PSRAM if the
+  // internal heap cannot spare it.
+  constexpr uint32_t STACK = 32 * 1024;
+  if (xTaskCreatePinnedToCore(game_task, "tpm_game", STACK, nullptr, 5, &g_game_task, 0) != pdPASS &&
+      xTaskCreatePinnedToCoreWithCaps(game_task, "tpm_game", STACK, nullptr, 5, &g_game_task, 0,
+                                      MALLOC_CAP_SPIRAM) != pdPASS) {
+    logger.error("could not create the game task");
+    deinit();
+    return false;
+  }
+  return true;
+}
+
+void deinit() {
+  if (g_game_task) {
+    rt_request_exit();
+    rt_pause(0);
+    if (g_resume) {
+      xSemaphoreGive(g_resume);
+    }
+    for (int i = 0; i < 200 && !g_game_done.load(); i++) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    vTaskDelete(g_game_task);
+    g_game_task = nullptr;
+  }
+  g_stop = true;
+  if (g_video_task) {
+    xTaskNotifyGive(g_video_task);
+  }
+  vTaskDelay(pdMS_TO_TICKS(150)); // the helpers notice g_stop and delete themselves
+  g_video_task = g_audio_task = nullptr;
+  if (g_disc) {
+    fclose(g_disc);
+    g_disc = nullptr;
+  }
+  heap_caps_free(g_ring);
+  g_ring = nullptr;
+  if (g_resume) {
+    vSemaphoreDelete(g_resume);
+    g_resume = nullptr;
+  }
+  g_last_frame = nullptr;
+  g_exe.clear();
+  g_exe.shrink_to_fit();
+}
+
+bool running() { return g_game_task && !g_game_done.load(); }
+
+void pause() {
+  g_paused = true;
+  rt_pause(1);
+}
+
+void resume() {
+  Tab5Emu::get().native_size(FRAME_W, FRAME_H);
+  g_paused = false;
+  rt_pause(0);
+  if (g_resume) {
+    xSemaphoreGive(g_resume);
+  }
+}
+
+std::span<uint8_t> last_frame() {
+  auto *f = g_last_frame.load();
+  return f ? std::span<uint8_t>{f, FRAME_W * FRAME_H * 2} : std::span<uint8_t>{};
+}
+
+} // namespace tpm::engine
+
+// ---- what the runtime needs from the board (rt_platform.h) ----
+
+extern "C" {
+
+int plat_read_sector(uint32_t lba, uint8_t *out) { return tpm::engine::read_sector(lba, out) ? 0 : -1; }
+uint32_t plat_disc_sectors(void) { return tpm::engine::g_disc_sectors; }
+
+void plat_vblank(void) {
+  using namespace tpm::engine;
+  // present every other vblank at most (the game runs at 30 or less), and
+  // never queue behind a conversion that is still running
+  static uint32_t n;
+  if ((++n & 1) || g_video_busy.load() || !g_video_task) {
+    return;
+  }
+  rt_gpu_display(&g_display);
+  g_video_busy = true;
+  xTaskNotifyGive(g_video_task);
+}
+
+uint16_t plat_pad_buttons(int port) {
+  if (port != 0) {
+    return 0;
+  }
+  const auto s = Tab5Emu::get().gamepad_state();
+  uint16_t b = 0;
+  if (s.select) b |= 1u << 0;
+  if (s.start) b |= 1u << 3;
+  if (s.up) b |= 1u << 4;
+  if (s.right) b |= 1u << 5;
+  if (s.down) b |= 1u << 6;
+  if (s.left) b |= 1u << 7;
+  if (s.l) b |= 1u << 10;  // L1
+  if (s.r) b |= 1u << 11;  // R1
+  if (s.y) b |= 1u << 12;  // triangle (north)
+  if (s.b) b |= 1u << 13;  // circle (east)
+  if (s.a) b |= 1u << 14;  // cross (south)
+  if (s.x) b |= 1u << 15;  // square (west)
+  return b;
+}
+
+void plat_audio(const int16_t *samples, int frames) {
+  using namespace tpm::engine;
+  if (!g_ring) {
+    return;
+  }
+  uint32_t w = g_ring_w.load();
+  const uint32_t r = g_ring_r.load(std::memory_order_acquire);
+  for (int i = 0; i < frames; i++) {
+    if (w - r >= RING_FRAMES) {
+      break; // the audio task is behind: drop
+    }
+    const size_t k = w % RING_FRAMES;
+    g_ring[2 * k] = samples[2 * i];
+    g_ring[2 * k + 1] = samples[2 * i + 1];
+    w++;
+  }
+  g_ring_w.store(w, std::memory_order_release);
+}
+
+uint64_t plat_time_us(void) { return static_cast<uint64_t>(esp_timer_get_time()); }
+
+void *plat_alloc(uint32_t size) { return heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM); }
+
+void plat_pause_wait(void) {
+  if (tpm::engine::g_resume) {
+    xSemaphoreTake(tpm::engine::g_resume, pdMS_TO_TICKS(100));
+  } else {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+} // extern "C"

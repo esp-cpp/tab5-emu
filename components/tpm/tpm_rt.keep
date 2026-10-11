@@ -1,0 +1,7 @@
+rt_boot
+rt_request_exit
+rt_pause
+rt_set_realtime
+rt_gpu_display
+rt_frame_count
+g_rt_vram
