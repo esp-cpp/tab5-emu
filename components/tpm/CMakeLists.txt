@@ -1,5 +1,5 @@
 # Star Wars Episode I: The Phantom Menace (PSX), natively: the tpm-decomp
-# decompilation (https://github.com/esp-cpp/tpm-decomp, not public yet) on
+# decompilation (https://github.com/esp-cpp/tpm-decomp, submodule tpm-decomp/) on
 # psyz, as components/mgs does for Metal Gear Solid. The game is not
 # decompiled yet: CONFIG_TPM_ENGINE is off by default and the component then
 # builds only the platform half (src/), which reads the disc files and shows

@@ -1,7 +1,8 @@
 # Star Wars Episode I: The Phantom Menace, natively (in progress)
 
 The PlayStation game (Big Ape Productions / LucasArts, 1999), USA Rev 1
-(`SLUS_008.84`), being decompiled in **tpm-decomp** so that it can run here
+(`SLUS_008.84`), being decompiled in [tpm-decomp](https://github.com/esp-cpp/tpm-decomp)
+(submodule `tpm-decomp/`) so that it can run here
 the way Metal Gear Solid does in `components/mgs`: the game's C compiled for
 the ESP32-P4 against psyz. No decompilation existed; that repo is building
 one (see its `docs/PLAN.md`).
@@ -17,7 +18,7 @@ Nothing derived from the game is in this repository. Pull the files out of
 **your own** disc image with tpm-decomp's script and copy them to the card:
 
 ```sh
-python3 tpm-decomp/tools/extract_disc.py "Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin" tpm/
+python3 components/tpm/tpm-decomp/tools/extract_disc.py "Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin" tpm/
 ```
 
 which gives `SLUS_008.84`, `FILE.000` (35 MB, all the game's data),

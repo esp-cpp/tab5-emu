@@ -268,7 +268,8 @@ The two submodules are esp-cpp forks (`esp32p4` branches).
 
 Same shape as the MGS port (decompiled C on psyz, natively), but there is no
 decompilation to start from: making one is the job. It lives in its own repo,
-`tpm-decomp` (local: `~/esp-cpp/tpm-decomp`; not on GitHub yet), target
+[tpm-decomp](https://github.com/esp-cpp/tpm-decomp) (submodule
+`components/tpm/tpm-decomp`), target
 `SLUS_008.84`, the USA **Rev 1** disc. Its `docs/LAYOUT.md` has what is known
 about the executable and the disc, `docs/PLAN.md` the road map.
 
