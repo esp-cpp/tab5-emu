@@ -1,0 +1,16 @@
+menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
+
+    config TPM_ENGINE
+        bool "Build the decompiled game (not runnable yet)"
+        default n
+        help
+            Compile the decompiled C from tpm-decomp against psyz. Off until
+            enough of the game is decompiled to run; with it off the cart
+            shows the game's load screens from the SD card (the data and
+            display path).
+
+    config TPM_SLIDE_SECONDS
+        int "Seconds per load screen in the data viewer"
+        default 4
+
+endmenu

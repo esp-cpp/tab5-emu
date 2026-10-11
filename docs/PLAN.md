@@ -263,3 +263,31 @@ Phases:
    game saves, full-motion video (MDEC).
 
 The two submodules are esp-cpp forks (`esp32p4` branches).
+
+## Star Wars Episode I: The Phantom Menace (2026-10-11)
+
+Same shape as the MGS port (decompiled C on psyz, natively), but there is no
+decompilation to start from: making one is the job. It lives in its own repo,
+`tpm-decomp` (local: `~/esp-cpp/tpm-decomp`; not on GitHub yet), target
+`SLUS_008.84`, the USA **Rev 1** disc. Its `docs/LAYOUT.md` has what is known
+about the executable and the disc, `docs/PLAN.md` the road map.
+
+Where it stands:
+
+1. **Decomp ground** (done): splat split, byte-identical rebuild from
+   `INCLUDE_ASM` stubs through PSY-Q 4.3's GCC 2.8.1 + maspsx; ~105 PSY-Q
+   library objects named by signature; 823 game functions waiting.
+2. **Data path on the Tab5** (written, built, not run on hardware):
+   `components/tpm` reads `SLUS_008.84` + `FILE.000` from the card, resolves
+   names through the game's own file table, and shows the 44 load screens
+   (320x256 24-bit, cropped to 240 rows). Left / right steps through them.
+3. **Next**: name the engine's top level (main loop, task manager, file
+   layer, level loader), decompile the file layer first (its bottom half
+   becomes SD reads), then the renderer and the 16 hand-written GTE routines
+   (to C on psyz's GTE), then gameplay level by level.
+
+The game C will join this component behind `CONFIG_TPM_ENGINE` (off), as a
+submodule like `components/mgs/mgs_reversing`, once the repo is published.
+Everything the MGS port learned applies: no hard-coded PSX / S3 address
+ranges, game statics in PSRAM via a linker fragment, the game task at the
+mts priority, the two-core rasteriser.
