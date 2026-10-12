@@ -65,6 +65,7 @@ if(CONFIG_MGS_ENGINE)
     ${MGS_ROOT}/port/esp32_threads.c
     ${MGS_ROOT}/port/esp32_vblank.c
     ${MGS_ROOT}/port/esp32_text.c
+    ${MGS_ROOT}/port/esp32_arena.c
     ${MGS_ROOT}/port/virtual_cd.c)
 
   list(APPEND MGS_SRCS ${SRC_GAME} ${SRC_OVERLAYS} ${SRC_PORT} ${SRC_PSYZ} ${SRC_PSYQ})
@@ -116,6 +117,9 @@ if(CONFIG_MGS_ENGINE)
   # still follows. libgpu/sys.c also takes printf's address without declaring
   # it, so <stdio.h> comes along -- here only, since the game's libsio/dummy.c
   # defines its own getchar() and cannot see it.
+  if(CONFIG_MGS_REPLAY_BENCH)
+    set_property(SOURCE ${MGS_C_SRCS} APPEND PROPERTY COMPILE_DEFINITIONS "MGS_REPLAY_BENCH=1")
+  endif()
   set_property(SOURCE ${SRC_PSYQ} APPEND PROPERTY COMPILE_OPTIONS
     "-include;${PSYZ}/include/common.h;-include;stdio.h")
 

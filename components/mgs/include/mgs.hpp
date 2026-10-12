@@ -23,6 +23,10 @@ struct Config {
 bool init(const Config &config);
 /// Stop the game and put its statics back as linked, so init() can run again.
 void deinit();
+/// Free the game's PSRAM arena (about 3.8 MB, kept across quits so save
+/// states keep their addresses). The launcher calls this before it starts
+/// any other cart. No-op while the game runs or if nothing is allocated.
+void release_arena();
 /// deinit() + init() with the same configuration.
 bool reset();
 /// Whether the game is alive (started, and its main() has not returned).

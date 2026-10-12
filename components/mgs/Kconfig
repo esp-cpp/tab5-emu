@@ -18,4 +18,13 @@ menu "Metal Gear Solid (mgs_reversing + psyz)"
             in port/stage_union.c's Mgs_PlayableStages works (a demo stage,
             dXXX, plays its cutscene).
 
+    config MGS_REPLAY_BENCH
+        bool "Frame recorder and replay benchmark (development)"
+        default n
+        help
+            Keep the last frames' GPU batches (768 KB of PSRAM, a copy per
+            frame); the pause menu writes them with the VRAM dump, and the
+            next cart start replays them pixel for pixel under each
+            rasterizer optimisation and times them. Off for play.
+
 endmenu

@@ -9,6 +9,9 @@
 #include "snes_cart.hpp"
 
 inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
+  if (info.platform != Emulator::MGS) {
+    mgs::release_arena(); // its 3.8 MB of PSRAM: Jedi Knight needs the room
+  }
   switch (info.platform) {
   case Emulator::JEDI_KNIGHT:
     return std::make_unique<JkCart>(Cart::Config{

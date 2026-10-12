@@ -60,8 +60,20 @@ void Mgs_PauseVblank(void);
 void Mgs_ResumeVblank(void);
 void Mgs_StopVblank(void);
 void Psyz_GpuSync(void);              // psyz libgpu.c: wait for the raster worker
-extern unsigned short g_RawVram[];    // psyz soft raster: 1024x512 RGB1555
-extern unsigned char mgs_main_ram[];  // port/psyz_port.c: the PSX's 2 MB, as laid out
+// The game's arena (port/esp32_arena.c): one PSRAM block for the PSX's RAM
+// image, the codec faces, VRAM, the SPU, the GPU queues and the thread
+// stacks. Defined here, outside the statics reset between launches, so the
+// block survives a quit (save states depend on its address) until the
+// launcher starts another cart.
+unsigned char *g_mgs_arena{nullptr};
+size_t g_mgs_arena_size{0};
+unsigned char *mgs_main_ram{nullptr};
+unsigned char *mgs_face_group{nullptr};
+unsigned short *g_RawVram{nullptr};
+int Mgs_ArenaAcquire(void);
+void Mgs_ArenaBind(void);
+void Mgs_ArenaRelease(void);
+unsigned char *Mgs_ArenaBase(size_t *size);
 void Mgs_ThreadsPause(void); // port/esp32_threads.c: the live PSX thread
 void Mgs_ThreadsResume(void);
 void Mgs_ThreadsStopAll(void);
@@ -261,9 +273,16 @@ bool init(const Config &config) {
 #if defined(CONFIG_MGS_ENGINE)
   logger.info("internal free {} B, PSRAM free {} B", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
               heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-  // a fresh machine for the game (see the top of this file); the rasterizer
+  // the big buffers (port/esp32_arena.c), zeroed, before anything binds them
+  if (!Mgs_ArenaAcquire()) {
+    logger.error("no PSRAM for the game's arena");
+    return false;
+  }
+  // a fresh machine for the game (see the top of this file), then the
+  // modules' pointers into the arena (the wipe took them); the rasterizer
   // caches the VRAM pointer in one of those statics
   reset_statics();
+  Mgs_ArenaBind();
   Draw_Reset();
   g_preserve.clear();
   Mgs_ThreadsSnapshotSetup();
@@ -341,12 +360,12 @@ struct SnapHeader {
   uint32_t version;
   uint8_t elf_sha[32];     // informational: which build wrote it
   uint32_t n_regions;
-  SnapRegion regions[7];
+  SnapRegion regions[8];
   uint32_t n_threads;
   MgsThreadSnap threads[MGS_SNAPSHOT_THREADS];
   uint32_t layout[12];     // what the state really depends on, see layout_signature()
 };
-constexpr uint32_t kSnapVersion = 3;
+constexpr uint32_t kSnapVersion = 4; // 4: the arena (main RAM, VRAM, SPU, queues, stacks) is a region
 
 // A state is raw memory full of absolute addresses: pointers into the game's
 // statics and into its code (actor callbacks, scheduler entries). It loads
@@ -372,13 +391,14 @@ void layout_signature(uint32_t out[12]) {
   out[5] = reinterpret_cast<uint32_t>(&OpenTh);
   out[6] = reinterpret_cast<uint32_t>(&mts_VSyncCallback);
   out[7] = reinterpret_cast<uint32_t>(&Psyz_SpuPullSamples);
-  out[8] = reinterpret_cast<uint32_t>(&mgs_main_ram);
+  out[8] = reinterpret_cast<uint32_t>(mgs_main_ram);
   out[9] = reinterpret_cast<uint32_t>(g_RawVram);
   out[10] = sizeof(SnapHeader);
   out[11] = MGS_SNAPSHOT_THREADS;
 }
 
 std::vector<SnapRegion> snapshot_regions() {
+  size_t arena_size = 0;
   return {
       {reinterpret_cast<uint32_t>(_mgs_bss_start), static_cast<uint32_t>(_mgs_bss_end - _mgs_bss_start)},
       {reinterpret_cast<uint32_t>(_mgs_common_start),
@@ -388,6 +408,7 @@ std::vector<SnapRegion> snapshot_regions() {
       {reinterpret_cast<uint32_t>(_mgs_sbss_start), static_cast<uint32_t>(_mgs_sbss_end - _mgs_sbss_start)},
       {reinterpret_cast<uint32_t>(_mgs_sdata_start), static_cast<uint32_t>(_mgs_sdata_end - _mgs_sdata_start)},
       {reinterpret_cast<uint32_t>(g_main_stack), static_cast<uint32_t>(sizeof g_main_stack)},
+      {reinterpret_cast<uint32_t>(Mgs_ArenaBase(&arena_size)), static_cast<uint32_t>(arena_size)},
   };
 }
 
@@ -536,6 +557,9 @@ bool load_state(const std::string &path) {
 }
 
 extern "C" void Psyz_GpuDumpFrame(const char *path);
+extern "C" void Mgs_ThreadsFreeTcbs(void);
+extern "C" void Mgs_LogShutdown(void);
+extern "C" void Mgs_TextShutdown(void);
 extern "C" void Mgs_DumpVram(const char *path) {
   Psyz_GpuSync();
   if (FILE *f = fopen(path, "wb")) {
@@ -618,13 +642,25 @@ void deinit() {
   }
   // let the scheduler retire the deleted tasks before their memory goes away
   vTaskDelay(pdMS_TO_TICKS(5));
+  Mgs_ThreadsFreeTcbs();
   mgs_platform_audio_stop(); // before the SPU state below is wiped
   Mgs_CdDeinit();
+  Mgs_LogShutdown();
+  Mgs_TextShutdown();
   // the game is gone: its statics can be put back for the next launch
   reset_statics();
   Mgs_HeapCheck("deinit: done");
   logger.info("stopped; internal free {} B, PSRAM free {} B", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
               heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+#endif
+}
+
+void release_arena() {
+#if defined(CONFIG_MGS_ENGINE)
+  if (g_initialized) {
+    return; // in use
+  }
+  Mgs_ArenaRelease();
 #endif
 }
 
