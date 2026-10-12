@@ -30,8 +30,18 @@ python3 components/mgs/mgs_reversing/port/extract_disc.py <your-disc.bin> <out-d
 then put the result in a directory called `MGS` on the card (any case: the
 game addresses its files as `cdrom:\MGS\NAME`), e.g. `/sdcard/mgs/STAGE.DIR`,
 `RADIO.DAT`, `FACE.DAT`, ... The full 71 MB `STAGE.DIR` is wanted: it is read
-sector by sector on demand, nothing is copied into RAM. The metadata entry
-points at the marker file:
+sector by sector on demand, nothing is copied into RAM.
+
+The script also writes `MGS/TEXT.DAT` (or only that, with `--text`): the item
+and weapon descriptions of the menus, pulled from the disc's executable. The
+decompilation targets MGS Integral and carries its Japanese descriptions as
+byte arrays, which through the US disc's font draw as garbage; with the file
+present the port patches in the disc's own English text at font load and
+switches the glyph lookup to the US executable's table layout (its font has
+no kana, so the button icons and the item-name brackets sit at different
+indices). Without the file the menus show the Integral text.
+
+The metadata entry points at the marker file:
 
 ```
 mgs/STAGE.DIR,boxart/mgs.jpg,Metal Gear Solid

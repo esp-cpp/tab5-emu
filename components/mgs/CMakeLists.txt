@@ -64,6 +64,7 @@ if(CONFIG_MGS_ENGINE)
     ${MGS_ROOT}/port/spu_compat.c
     ${MGS_ROOT}/port/esp32_threads.c
     ${MGS_ROOT}/port/esp32_vblank.c
+    ${MGS_ROOT}/port/esp32_text.c
     ${MGS_ROOT}/port/virtual_cd.c)
 
   list(APPEND MGS_SRCS ${SRC_GAME} ${SRC_OVERLAYS} ${SRC_PORT} ${SRC_PSYZ} ${SRC_PSYQ})
