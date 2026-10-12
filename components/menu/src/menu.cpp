@@ -69,6 +69,10 @@ void Menu::on_volume(const std::vector<uint8_t> &) {
 void Menu::update_shared_state() {
   auto &emu = Tab5Emu::get();
   lv_slider_set_value(volume_slider_, (int)emu.volume(), LV_ANIM_OFF);
+  if (emu.is_muted())
+    lv_obj_add_state(mute_switch_, LV_STATE_CHECKED);
+  else
+    lv_obj_remove_state(mute_switch_, LV_STATE_CHECKED);
   lv_slider_set_value(brightness_slider_, (int)emu.brightness(), LV_ANIM_OFF);
   lv_dropdown_set_selected(video_dropdown_, (int)emu.video_setting());
 }
@@ -205,6 +209,9 @@ void Menu::init_ui() {
   lv_obj_set_width(volume_slider_, lv_pct(90));
   lv_slider_set_range(volume_slider_, 0, 100);
   lv_obj_add_event_cb(volume_slider_, event_callback, LV_EVENT_VALUE_CHANGED, this);
+  make_label(LV_SYMBOL_MUTE "  Mute");
+  mute_switch_ = lv_switch_create(settings);
+  lv_obj_add_event_cb(mute_switch_, event_callback, LV_EVENT_VALUE_CHANGED, this);
   make_label(LV_SYMBOL_EYE_OPEN "  Brightness");
   brightness_slider_ = lv_slider_create(settings);
   lv_obj_set_width(brightness_slider_, lv_pct(90));
@@ -219,7 +226,7 @@ void Menu::init_ui() {
   // gamepad / keyboard focus order (see Tab5Emu::keypad_indev())
   group_ = lv_group_create();
   for (auto *o : {btn_resume_, btn_save_, btn_load_, btn_reset_, btn_quit_, btn_slot_prev_, btn_slot_next_, volume_slider_,
-                  brightness_slider_, video_dropdown_}) {
+                  mute_switch_, brightness_slider_, video_dropdown_}) {
     lv_group_add_obj(group_, o);
   }
   lv_group_set_wrap(group_, true);
@@ -267,6 +274,8 @@ void Menu::event_callback(lv_event_t *e) {
   } else if (code == LV_EVENT_VALUE_CHANGED) {
     if (target == menu->volume_slider_)
       emu.volume(lv_slider_get_value(menu->volume_slider_));
+    else if (target == menu->mute_switch_)
+      emu.mute(lv_obj_has_state(menu->mute_switch_, LV_STATE_CHECKED));
     else if (target == menu->brightness_slider_)
       emu.brightness(lv_slider_get_value(menu->brightness_slider_));
     else if (target == menu->video_dropdown_)

@@ -68,6 +68,7 @@ protected:
   lv_obj_t *slot_label_{nullptr};
   lv_obj_t *fps_label_{nullptr};
   lv_obj_t *volume_slider_{nullptr};
+  lv_obj_t *mute_switch_{nullptr};
   lv_obj_t *brightness_slider_{nullptr};
   lv_obj_t *video_dropdown_{nullptr};
   lv_obj_t *btn_resume_{nullptr};
