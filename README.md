@@ -1,21 +1,53 @@
 # tab5-emu
 
-Games on the [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5) (ESP32-P4),
-built with [ESPP](https://github.com/esp-cpp/espp). Sibling of
-[esp-box-emu](https://github.com/esp-cpp/esp-box-emu), with the same layout:
-a launcher GUI, a `Cart` per game / core, and a thin hardware abstraction
-layer around the espp board support package.
+Games on the [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5), an
+ESP32-P4 handheld with a 5" 1280x720 display, built with
+[ESPP](https://github.com/esp-cpp/espp). A launcher, a pause menu with save
+states, and a `Cart` per game or emulator core, in the same shape as
+[esp-box-emu](https://github.com/esp-cpp/esp-box-emu) so glue can move
+between the two.
 
-The first (and main) target is **Star Wars: Jedi Knight – Dark Forces II**,
-via [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2) (our fork:
-[esp-cpp/OpenJKDF2](https://github.com/esp-cpp/OpenJKDF2)). See
-[docs/PLAN.md](docs/PLAN.md) for the port plan and status.
+Two of the carts are not emulators. They are native ports of PC and
+PlayStation games, running the games' own C code on the two 360 MHz RISC-V
+cores with a software rasterizer.
 
-> Status: **bring-up.** The launcher, pause menu, HAL, PPA video path and the
-> full OpenJKDF2 engine (software rasterizer, ESP32 platform layer) compile
-> and link for the ESP32-P4; nothing has run on hardware yet. Turn
-> `CONFIG_JK_ENGINE` off in menuconfig to make the "Jedi Knight" cart show a
-> test pattern instead, for checking the video / input / audio paths.
+## Metal Gear Solid, natively
+
+<!-- VIDEO: upload mgs.mp4 as a GitHub attachment (drag it into a PR or issue
+     comment) and paste the resulting user-attachments URL on its own line
+     here; GitHub renders it as a player. -->
+
+The FoxdieTeam decompilation of the PlayStation game
+([mgs_reversing](https://github.com/FoxdieTeam/mgs_reversing)) compiled for
+the ESP32-P4, with [psyz](https://github.com/Xeeynamo/psyz) standing in for
+the PSY-Q SDK, the GPU, the GTE and the SPU. Both on `esp32p4` branches of
+esp-cpp forks. It boots the retail chain from the extracted US disc on the
+card: the title, the opening, the dock, the elevator, topside; cutscenes
+with the frame-buffer effects, codec calls, sound effects, music and
+speech. Gameplay runs at about 28 fps against the game's own 30 fps cap,
+drawn by two rasterizer workers, one per core, each taking a band of rows.
+Save and load states from the pause menu. See
+[components/mgs/README.md](components/mgs/README.md).
+
+## Star Wars: Jedi Knight – Dark Forces II
+
+<!-- VIDEO: paste the jk.mp4 attachment URL on its own line here. -->
+
+The 1997 PC game through [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2)
+(our fork: [esp-cpp/OpenJKDF2](https://github.com/esp-cpp/OpenJKDF2),
+branch `esp32p4`): the engine's software rasterizer draws the world at a
+low internal resolution and the P4's 2D accelerator scales it to the panel,
+with the HUD composited at full resolution. Playable on hardware with
+sound, music, saves, and a USB keyboard and mouse or a gamepad. The port
+plan and its history are in [docs/PLAN.md](docs/PLAN.md).
+
+## Emulators
+
+| Core | Source | Status |
+|---|---|---|
+| Genesis / Mega Drive | gwenesis (shared with esp-box-emu) | full speed |
+| SNES | snes9x2005 | full speed |
+| Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
 
 ## Hardware
 
@@ -40,7 +72,9 @@ components/
   rom_info/         metadata.csv parsing
   statistics/       frame timing
   jk/               OpenJKDF2 port: engine submodule + ESP32 platform layer + glue
-docs/PLAN.md        the plan
+  mgs/              Metal Gear Solid: mgs_reversing + psyz submodules + the Tab5 platform layer
+  gba/ genesis/ snes/   the emulator cores and their glue
+docs/PLAN.md        the Jedi Knight plan and history
 ```
 
 ## SD card layout
@@ -48,7 +82,7 @@ docs/PLAN.md        the plan
 ```
 /sdcard/
   metadata.csv                # rom_path, boxart_path, name
-  boxart/jk.jpg               # baseline JPEG, ~400x400
+  boxart/*.jpg                # baseline JPEG, ~400x400
   jk/                         # your Jedi Knight install (copy from CD / GOG)
     jk.cd                     # (any marker file; metadata points here)
     episode/JK1.gob JK1CTF.gob JK1MP.gob
@@ -59,29 +93,36 @@ docs/PLAN.md        the plan
                               # MUSIC folder (IMA ADPCM; the .ogg originals also
                               # play, but Vorbis decoding costs ~75% of a core)
     player/                   # saves / settings (created)
-  saves/                      # tab5-emu save-slot screenshots
+  mgs/                        # Metal Gear Solid, extracted from your own US disc
+    STAGE.DIR RADIO.DAT FACE.DAT ZMOVIE.STR VOX.DAT DEMO.DAT BRF.DAT
+                              # (components/mgs/mgs_reversing/port/extract_disc.py)
+  saves/                      # save states and their screenshots
 ```
 
 Example `metadata.csv` (one line per game: rom path, boxart, name; the
-platform comes from the extension: `.md`/`.gen` Genesis, `.sfc`/`.smc` SNES,
-`.gba` Game Boy Advance, `jk.cd` Jedi Knight):
+platform comes from the path: `.md`/`.gen` Genesis, `.sfc`/`.smc` SNES,
+`.gba` Game Boy Advance, `jk.cd` Jedi Knight, `STAGE.DIR` Metal Gear Solid):
 
 ```
 jk/jk.cd, boxart/jk.jpg, Star Wars: Jedi Knight - Dark Forces II
+mgs/STAGE.DIR, boxart/mgs.jpg, Metal Gear Solid
 genesis/sonic.md, boxart/sonic.jpg, Sonic the Hedgehog
 snes/smw.sfc, boxart/smw.jpg, Super Mario World
 gba/mk.gba, boxart/mk.jpg, Mario Kart: Super Circuit
 ```
 
-A real `gba_bios.bin` next to a GBA ROM is used when present; otherwise the
-open-source BIOS built into gpSP is used.
+No game data is included. A real `gba_bios.bin` next to a GBA ROM is used
+when present; otherwise the open-source BIOS built into gpSP is used.
 
 ## Build
 
 Requires ESP-IDF v6.x.
 
 ```
-git clone --recurse-submodules=components/jk/OpenJKDF2 https://github.com/esp-cpp/tab5-emu
+git clone --recurse-submodules=components/jk/OpenJKDF2 \
+          --recurse-submodules=components/mgs/mgs_reversing \
+          --recurse-submodules=components/mgs/psyz \
+          https://github.com/esp-cpp/tab5-emu
 cd tab5-emu
 idf.py set-target esp32p4
 idf.py build flash monitor
@@ -103,14 +144,22 @@ USB keyboard / mouse / gamepad on the USB-A port (directly or through a
 hub; the host runs at full speed so hubs work). Devices are decoded from
 their HID report descriptors (espp `hid-rp` report map), so any standard HID
 gamepad works: face buttons by position (A = east, B = south, X = north,
-Y = west), shoulders / triggers = L / R, select / start (also the Consumer
-"back" / "menu" controls of mobile pads), d-pad / hat / left stick = d-pad,
-select+start or the home button = pause menu. Known layouts: Xbox-style and
-DirectInput / DualShock numbering, Backbone Pro quirks. Keyboards: arrows,
-Z/X/A/S, Enter, Shift/Backspace, Q/W map to the gamepad for the emulators.
+Y = west), shoulders and triggers = L / R (the triggers are also reported on
+their own as L2 / R2), select / start (also the Consumer "back" / "menu"
+controls of mobile pads), d-pad / hat / left stick = d-pad, select+start or
+the home button = pause menu. Known layouts: Xbox-style and DirectInput /
+DualShock numbering, Backbone Pro quirks. Keyboards: arrows, Z/X/A/S, Enter,
+Shift/Backspace, Q/W (L/R) and E/R (L2/R2) map to the gamepad for the
+emulators.
+
 Jedi Knight gets the full keyboard and mouse look; on a gamepad the left
 stick strafes, the right stick looks, R = fire, L = secondary fire, A =
 activate, B = jump, X = crouch, Y = use item.
+
+Metal Gear Solid uses the PlayStation layout by position: face buttons as
+Cross / Circle / Square / Triangle, L1 / R1 on the shoulders, L2 / R2 on the
+triggers for the item and weapon menus, so a pad with triggers (or the
+keyboard's E / R) is needed for those.
 
 New controllers: the console prints each device's decoded buttons on change
 (debug level in `usb_hid.cpp`); a wrong mapping is a quirk-table entry in
@@ -142,5 +191,6 @@ device controller share) and the launcher cannot start games; switch it off
 
 ## License
 
-MIT (this project). OpenJKDF2 is under its own permissive license; the game
-data is not included and must come from your own copy of the game.
+MIT (this project). OpenJKDF2, mgs_reversing and psyz are under their own
+licenses; the game data is not included and must come from your own copies
+of the games.

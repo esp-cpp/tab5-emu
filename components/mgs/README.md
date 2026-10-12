@@ -39,14 +39,34 @@ mgs/STAGE.DIR,boxart/mgs.jpg,Metal Gear Solid
 
 ## Status
 
-- Builds (the whole game, 1 100-odd translation units, with the RISC-V
-  toolchain: only `-std=gnu17`, `-fno-strict-aliasing` and the PSY-Q-era
-  diagnostic opt-outs, no Xtensa-specific flags).
-- Boots into `CONFIG_MGS_START_STAGE` (default `s00a`, the dock). Upstream
-  status applies: no audio (no SPU), no memory card (no saves), codec and
-  FMV declined, 56 of the 96 stages have decompiled actors.
-- The game cannot be restarted in place (its statics are laid out once by
-  its `main()`); leaving the cart reboots the board.
+- The whole game builds (1 100-odd translation units, RISC-V toolchain:
+  `-std=gnu17`, `-fno-strict-aliasing` and the PSY-Q-era diagnostic
+  opt-outs, no Xtensa-specific flags).
+- Boots the retail chain from the US disc: title, opening cutscene, the
+  dock, the elevator, topside. Cutscenes play with their cameras and the
+  frame-buffer feedback effects (zoom blur, underwater refraction); codec
+  calls with portraits and text; sound effects, music and streamed speech.
+- About 28 fps at the dock against the game's own 30 fps cap. Two
+  rasterizer workers, one per core, draw bands of rows of the same command
+  stream; the split adapts to the two cores' load. Workers rendezvous before
+  a primitive that samples the frame buffer and around VRAM block moves.
+- Save and load states from the pause menu (the game's static regions,
+  every thread's stack and context), keyed on the memory layout so a
+  rebuild that leaves the game code in place keeps old states loadable.
+- Pause, reset, relaunch and quit in place.
+- Not done: memory-card game saves (use states), full-motion video (MDEC,
+  movies are skipped). 56 of the 96 stages have decompiled actors upstream.
+
+## Measuring
+
+The pause menu writes the last five frames' GPU batches to the card next
+to a VRAM dump (`/sdcard/mgs_gpu_frame.bin`, `/sdcard/mgs_vram.bin`). At
+the next cart start the rasterizer replays them before the game runs: each
+frame rendered by the exact single-worker path to `mgs_cmp_f*.bin`, the
+newest compared pixel for pixel under every optimisation (`[cmp]` lines),
+then timed with two workers and with one (`[bench] frame replay`). The
+serial telemetry every 120 frames covers both workers' raster time, the
+split row, the display-list walk and the audio and CD counters.
 
 ## Where things are decided
 
