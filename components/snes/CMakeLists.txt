@@ -8,7 +8,7 @@ idf_component_register(
   SRCS ${SNES_CORE_SRCS} "src/snes_glue.c" "src/snes.cpp"
   INCLUDE_DIRS "include"
   PRIV_INCLUDE_DIRS "${SNES_CORE}" "snes9x2005/libretro-common/include" "src"
-  REQUIRES tab5-emu statistics
+  REQUIRES tab5-emu statistics shared_memory
 )
 target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_BLARGG_APU LOAD_FROM_MEMORY LAGFIX __LIBRETRO__ SNES_HOST_ROM_ALLOC)
 # the core's ~700 KB of static state lives in PSRAM (its .bss is renamed to the

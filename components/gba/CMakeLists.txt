@@ -16,7 +16,7 @@ idf_component_register(
     "src/gba.cpp"
   INCLUDE_DIRS "include"
   PRIV_INCLUDE_DIRS "${GPSP}" "${GPSP}/libretro" "${GPSP_COMMON}/include" "src"
-  REQUIRES tab5-emu statistics
+  REQUIRES tab5-emu statistics shared_memory
   LDFRAGMENTS "linker.lf"
 )
 # ROM cache: 1 MB blocks in PSRAM, enough for a 16 MB ROM (larger ones page

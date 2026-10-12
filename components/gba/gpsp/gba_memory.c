@@ -357,7 +357,7 @@ const u32 def_seq_cycles[16][2] =
 u8 bios_rom[1024 * 16];
 
 // Up to 128kb, store SRAM, flash ROM, or EEPROM here.
-u8 gamepak_backup[1024 * 128];
+u8 *gamepak_backup; /* shared-memory allocation, see gba_memory.h */
 
 u32 dma_bus_val;
 dma_transfer_type dma[4];
@@ -2421,9 +2421,9 @@ void init_memory(void)
   memset(io_registers, 0, sizeof(io_registers));
   memset(oam_ram, 0, sizeof(oam_ram));
   memset(palette_ram, 0, sizeof(palette_ram));
-  memset(iwram, 0, sizeof(iwram));
-  memset(ewram, 0, sizeof(ewram));
-  memset(vram, 0, sizeof(vram));
+  memset(iwram, 0, GBA_IWRAM_SIZE);
+  memset(ewram, 0, GBA_EWRAM_SIZE);
+  memset(vram, 0, GBA_VRAM_SIZE);
 
   write_ioreg(REG_DISPCNT, 0x80);
   write_ioreg(REG_P1, 0x3FF);
@@ -2539,7 +2539,7 @@ bool memory_read_savestate(const u8 *src)
   if (!(
     bson_read_bytes(memdoc, "iwram", &iwram[0x8000], 0x8000) &&
     bson_read_bytes(memdoc, "ewram", ewram, 0x40000) &&
-    bson_read_bytes(memdoc, "vram", vram, sizeof(vram)) &&
+    bson_read_bytes(memdoc, "vram", vram, GBA_VRAM_SIZE) &&
     bson_read_bytes(memdoc, "oamram", oam_ram, sizeof(oam_ram)) &&
     bson_read_bytes(memdoc, "palram", palette_ram, sizeof(palette_ram)) &&
     bson_read_bytes(memdoc, "ioregs", io_registers, sizeof(io_registers)) &&
@@ -2610,7 +2610,7 @@ unsigned memory_write_savestate(u8 *dst)
   bson_start_document(dst, "memory", wbptr);
   bson_write_bytes(dst, "iwram", &iwram[0x8000], 0x8000);
   bson_write_bytes(dst, "ewram", ewram, 0x40000);
-  bson_write_bytes(dst, "vram", vram, sizeof(vram));
+  bson_write_bytes(dst, "vram", vram, GBA_VRAM_SIZE);
   bson_write_bytes(dst, "oamram", oam_ram, sizeof(oam_ram));
   bson_write_bytes(dst, "palram", palette_ram, sizeof(palette_ram));
   bson_write_bytes(dst, "ioregs", io_registers, sizeof(io_registers));

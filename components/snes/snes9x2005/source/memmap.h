@@ -133,7 +133,10 @@ typedef struct
 
 void ResetSpeedMap(void);
 
-extern CMemory Memory;
+/* shared-memory allocation made by the glue at init (snes_shared_alloc);
+ * the macro keeps the core's Memory.xxx spelling */
+extern CMemory *Memory_p;
+#define Memory (*Memory_p)
 void S9xDeinterleaveMode2(void);
 
 uint8_t S9xGetByte(uint32_t Address);

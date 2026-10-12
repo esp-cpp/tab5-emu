@@ -33,7 +33,8 @@ u32 sound_on;
  * Historically this was an s16 buffer at 12-bit scale with a x16 shift at
  * readout, which quantized every channel to a 12-bit grid before mixing and
  * left the bottom 4 bits of the libretro output permanently zero. */
-static s32 sound_buffer[BUFFER_SIZE];
+s32 *sound_buffer; /* shared-memory allocation made by the cart, see gba_memory.h */
+size_t gpsp_sound_buffer_bytes(void) { return (size_t)BUFFER_SIZE * sizeof(s32); }
 static u32 sound_buffer_base;
 
 static fixed16_16 gbc_sound_tick_step;
@@ -567,7 +568,7 @@ void reset_sound(void)
 
   sound_on = 0;
   sound_buffer_base = 0;
-  memset(sound_buffer, 0, sizeof(sound_buffer));
+  memset(sound_buffer, 0, (size_t)BUFFER_SIZE * sizeof(s32));
 
   for(i = 0; i < 2; i++, ds++)
   {
@@ -684,7 +685,7 @@ bool sound_read_savestate(const u8 *src)
    * time decodes as silence after load instead of random pre-load mix.
    * This makes audio output deterministic across save/load at the cost of
    * up to one frame of silence at the load point. */
-  memset(sound_buffer, 0, sizeof(sound_buffer));
+  memset(sound_buffer, 0, (size_t)BUFFER_SIZE * sizeof(s32));
 
   if (!(
     bson_read_int32(snddoc, "on", &sound_on) &&
@@ -872,7 +873,7 @@ u32 sound_read_samples(s16 *out, u32 frames)
  * while the ring refills; deterministic. */
 void sound_flush_ring(void)
 {
-   memset(sound_buffer, 0, sizeof(sound_buffer));
+   memset(sound_buffer, 0, (size_t)BUFFER_SIZE * sizeof(s32));
    sound_buffer_base = gbc_sound_buffer_index;
    direct_sound_channel[0].buffer_index = gbc_sound_buffer_index;
    direct_sound_channel[1].buffer_index = gbc_sound_buffer_index;

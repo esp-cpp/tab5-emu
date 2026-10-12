@@ -1275,7 +1275,7 @@ bool retro_load_game(const struct retro_game_info* info)
      memcpy(bios_rom, open_gba_bios_rom, sizeof(bios_rom));
    }
 
-   memset(gamepak_backup, 0xff, sizeof(gamepak_backup));
+   memset(gamepak_backup, 0xff, GBA_GAMEPAK_BACKUP_SIZE);
    if (load_gamepak(info, info->path, rtc_mode, rumble_mode, serial_setting) != 0)
    {
       error_msg("Could not load the game file.");

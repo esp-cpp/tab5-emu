@@ -6,7 +6,8 @@
 #include "cheats.h"
 #include "memmap.h"
 
-extern SCheatData Cheat;
+extern SCheatData *Cheat_p;
+#define Cheat (*Cheat_p)
 
 void S9xInitCheatData(void)
 {
