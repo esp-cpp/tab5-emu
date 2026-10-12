@@ -398,6 +398,10 @@ int jk_esp_park_point(void) {
   }
   g_parked = true;
   while (g_paused && !g_engine_stop && !jk_esp_quit_requested) {
+    // the pause menu's save / load / reset arrive while parked here: serve
+    // them, or request() times out and the menu shows a state that was
+    // never written (the loop above only looks between frames)
+    run_pending_request();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
   g_parked = false;
