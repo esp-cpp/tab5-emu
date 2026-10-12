@@ -417,7 +417,8 @@ GamepadState Tab5Emu::gamepad_state() {
     state = touch_gamepad_.state;
   }
   // USB keyboard as a gamepad: arrows = d-pad, Z/X/A/S = A/B/X/Y (also
-  // Ctrl/Alt), Enter = start, Shift / Backspace = select
+  // Ctrl/Alt), Enter = start, Shift / Backspace = select, Q/W = L/R, E/R =
+  // L2/R2
   if (usb_keyboard_present()) {
     const auto kb = keyboard_state();
     auto key = [&](int usage) { return (kb.keys[usage >> 3] >> (usage & 7)) & 1; };
@@ -433,6 +434,8 @@ GamepadState Tab5Emu::gamepad_state() {
     state.select |= key(0xE1) | key(42) | key(0xE5); // shift, backspace
     state.l |= key(20);                // q
     state.r |= key(26);                // w
+    state.l2 |= key(8);                // e
+    state.r2 |= key(21);               // r
   }
   if (usb_gamepad_present()) {
     std::lock_guard<std::mutex> lk(hid_mutex_);

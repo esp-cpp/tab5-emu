@@ -240,7 +240,9 @@ const char *Mgs_SdRoot(void) { return g_sd_root.c_str(); }
 // The HAL's merged gamepad (touch zones, USB pad, keyboard) is sampled by the
 // vblank tick through Mgs_PadsUpdate(). Face buttons map by position: A
 // (south) = CROSS, B (east) = CIRCLE, X (west) = SQUARE, Y (north) = TRIANGLE,
-// which is where they sit on a DualShock.
+// which is where they sit on a DualShock. The HAL folds a USB pad's trigger
+// into its shoulder bit (l = L1 or L2) and reports the trigger on its own as
+// l2, so L1 is "l without l2": MGS opens the item and weapon menus on L2/R2.
 // ---------------------------------------------------------------------------
 
 void PadInitDirect(unsigned char *pad1, unsigned char *pad2) {
@@ -292,8 +294,10 @@ void Mgs_PadsUpdate(void) {
   if (s.a) pressed |= 0x0040; // CROSS
   if (s.b) pressed |= 0x0020; // CIRCLE
   if (s.y) pressed |= 0x0010; // TRIANGLE
-  if (s.r) pressed |= 0x0008; // R1
-  if (s.l) pressed |= 0x0004; // L1
+  if (s.r && !s.r2) pressed |= 0x0008; // R1
+  if (s.l && !s.l2) pressed |= 0x0004; // L1
+  if (s.r2) pressed |= 0x0002;         // R2: weapon menu
+  if (s.l2) pressed |= 0x0001;         // L2: item menu
   g_pad_buf[0][0] = 0x00;
   g_pad_buf[0][1] = 0x41;
   g_pad_buf[0][2] = static_cast<unsigned char>(~(pressed >> 8) & 0xFF);
