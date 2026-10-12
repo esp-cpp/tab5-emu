@@ -111,7 +111,7 @@ constexpr int MTS_TASK_IDLE = 11;
 
 // Put every static of libmgs.a back to its as-linked value. Only valid while
 // none of the game's tasks exist.
-void reset_statics() {
+bool reset_statics() {
   const size_t data_size = _mgs_data_end - _mgs_data_start;
   const size_t sdata_size = _mgs_sdata_end - _mgs_sdata_start;
   if (!g_data_snapshot) {
@@ -126,7 +126,7 @@ void reset_statics() {
                 _mgs_bss_end - _mgs_bss_start, _mgs_common_end - _mgs_common_start,
                 _mgs_xbss_end - _mgs_xbss_start, _mgs_sbss_end - _mgs_sbss_start, data_size, sdata_size,
                 g_data_snapshot ? "ok" : "FAILED");
-    return;
+    return g_data_snapshot != nullptr;
   }
   memset(_mgs_bss_start, 0, _mgs_bss_end - _mgs_bss_start);
   memset(_mgs_common_start, 0, _mgs_common_end - _mgs_common_start);
@@ -134,6 +134,7 @@ void reset_statics() {
   memset(_mgs_sbss_start, 0, _mgs_sbss_end - _mgs_sbss_start);
   memcpy(_mgs_data_start, g_data_snapshot, data_size);
   memcpy(_mgs_sdata_start, g_data_snapshot + data_size, sdata_size);
+  return true;
 }
 
 // Wait (up to max_ms) for the mts scheduler to reach its idle task outside a
@@ -152,10 +153,13 @@ bool wait_for_idle(int max_ms) {
 // Freeze the game at a quiescent point: hold the vblank tick first (nothing
 // can wake an mts thread without it), then the running thread.
 void freeze() {
-  const bool idle = wait_for_idle(500);
+  wait_for_idle(500);
   Mgs_PauseVblank();
-  if (!idle && !(mts_active_task_800C0DB0 == MTS_TASK_IDLE && psyz_critical_depth == 0)) {
-    // the tick is held now; give the running thread a last chance to park
+  // the observation above could have been undone by the tick before it was
+  // held (it may have woken a game thread in the gap): look again now that
+  // nothing wakes a thread any more, and give a running one a last chance
+  // to park
+  if (!(mts_active_task_800C0DB0 == MTS_TASK_IDLE && psyz_critical_depth == 0)) {
     wait_for_idle(200);
   }
   Mgs_ThreadsPause();
@@ -170,7 +174,7 @@ void freeze() {
 // state through esp_rom_printf (which bypasses the stdio locks a wedged
 // printf would hold).
 esp_timer_handle_t g_hang_timer{nullptr};
-volatile bool g_hang_enabled{false};
+std::atomic<bool> g_hang_enabled{false}; // written by the cart task, read by the timer callback
 unsigned g_hang_vbl{0}, g_hang_frame{0};
 int64_t g_hang_vbl_since{0}, g_hang_frame_since{0};
 
@@ -281,7 +285,12 @@ bool init(const Config &config) {
   // a fresh machine for the game (see the top of this file), then the
   // modules' pointers into the arena (the wipe took them); the rasterizer
   // caches the VRAM pointer in one of those statics
-  reset_statics();
+  if (!reset_statics()) {
+    // without the snapshot a later launch would restore an already-mutated
+    // .data as if it were pristine: refuse to start instead
+    logger.error("no PSRAM for the statics snapshot; the game cannot start");
+    return false;
+  }
   Mgs_ArenaBind();
   Draw_Reset();
   g_preserve.clear();
@@ -308,7 +317,11 @@ bool init(const Config &config) {
   // the vblank the PSX gave for free: mts blocks on it during boot, and it
   // drives the scanout, so VRAM reaches the screen continuously
   Mgs_CdInit();
-  mgs_platform_audio_start();
+  if (!mgs_platform_audio_start()) {
+    logger.error("could not start the audio mixer task");
+    Mgs_CdDeinit();
+    return false;
+  }
   Mgs_StartVblank();
   // The game's main(): it builds the mts scheduler, opens its threads and
   // hands over to them, so this task mostly sleeps suspended afterwards.
@@ -561,6 +574,7 @@ extern "C" void Mgs_ThreadsFreeTcbs(void);
 extern "C" void Mgs_LogShutdown(void);
 extern "C" void Mgs_TextShutdown(void);
 extern "C" void Mgs_DumpVram(const char *path) {
+#if defined(CONFIG_MGS_ENGINE)
   Psyz_GpuSync();
   if (FILE *f = fopen(path, "wb")) {
     const size_t n = fwrite(g_RawVram, 2, 1024u * 512u, f);
@@ -569,6 +583,9 @@ extern "C" void Mgs_DumpVram(const char *path) {
   } else {
     logger.warn("VRAM dump: could not open {}", path);
   }
+#else
+  (void)path;
+#endif
 }
 
 extern "C" void Mgs_HeapCheck(const char *where) {
@@ -587,23 +604,15 @@ void pause() {
   Mgs_HeapCheck("pause: after freeze");
   mgs_platform_audio_pause();
   g_paused = true;
-  {
-    // Debug: the whole 1024x512x16 VRAM to the card, so what the textures and
-    // the font areas actually hold can be inspected on a PC (raw RGB1555,
-    // little-endian, row stride 1024 pixels).
-    Psyz_GpuSync();
-    if (FILE *f = fopen("/sdcard/mgs_vram.bin", "wb")) {
-      const size_t n = fwrite(g_RawVram, 2, 1024u * 512u, f);
-      fclose(f);
-      logger.info("VRAM dump: /sdcard/mgs_vram.bin ({} px)", n);
-    } else {
-      logger.warn("VRAM dump: could not open /sdcard/mgs_vram.bin");
-    }
-    // ...and the last complete frame's GPU batches: replayed at the next cart
-    // start as a fixed raster benchmark
-    Psyz_GpuDumpFrame("/sdcard/mgs_gpu_frame.bin");
-  }
+#if defined(CONFIG_MGS_REPLAY_BENCH)
+  // Development option: the whole 1024x512x16 VRAM to the card (raw RGB1555,
+  // row stride 1024 pixels) and the last complete frames' GPU batches, which
+  // the next cart start replays as a fixed raster benchmark. A 1 MB write on
+  // every pause, so not for play builds.
+  Mgs_DumpVram("/sdcard/mgs_vram.bin");
+  Psyz_GpuDumpFrame("/sdcard/mgs_gpu_frame.bin");
   Mgs_HeapCheck("pause: after vram dump");
+#endif
 #endif
 }
 

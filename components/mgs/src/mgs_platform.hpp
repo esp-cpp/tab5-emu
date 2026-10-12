@@ -13,7 +13,7 @@ void mgs_platform_init(const char *data_dir);
 /// The last frame handed to the display, RGB565, MGS_FRAME_W x MGS_FRAME_H.
 std::span<uint8_t> mgs_platform_last_frame();
 /// The SPU mixer pull into the HAL's audio queue (src/mgs_platform.cpp).
-void mgs_platform_audio_start();
+bool mgs_platform_audio_start(); // false: the mixer task could not be created
 void mgs_platform_audio_stop();
 void mgs_platform_audio_pause();
 void mgs_platform_audio_resume();

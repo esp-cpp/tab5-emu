@@ -98,9 +98,9 @@ void audio_task(void *) {
 }
 } // namespace
 
-void mgs_platform_audio_start() {
+bool mgs_platform_audio_start() {
   if (g_audio_task) {
-    return;
+    return true; // already running
   }
   Psyz_SpuInit();
   auto &emu = Tab5Emu::get();
@@ -110,7 +110,11 @@ void mgs_platform_audio_start() {
   g_audio_done = false;
   // Core 0: the game core has slack while it waits for the rasterizer on
   // core 1, and the mixer (13-30% of a core) was eating into drawing time.
-  xTaskCreatePinnedToCore(audio_task, "mgs_audio", 4096, nullptr, 7, &g_audio_task, 0);
+  if (xTaskCreatePinnedToCore(audio_task, "mgs_audio", 4096, nullptr, 7, &g_audio_task, 0) != pdPASS) {
+    g_audio_task = nullptr;
+    return false;
+  }
+  return true;
 }
 
 void mgs_platform_audio_stop() {

@@ -238,20 +238,28 @@ Phases:
 1. **Build** (done): the component mirrors the upstream CMake; the private
    shim is reconstructed (`shim/`); game statics to PSRAM; mts stacks in
    PSRAM; the game's main() on its own task.
-2. **Platform layer** (done, untested on hardware): VRAM display area ->
-   RGB565 into the HAL's two frame buffers -> `push_frame()`; pads from the
-   HAL's merged gamepad (A/B/X/Y by position = cross/circle/square/triangle);
-   data root on the card; pause by stopping the vblank; quit = reboot.
-3. **Bring-up**: boot into s00a with the user's extracted disc files;
-   expected trouble spots: the first CD read (the virtual CD's async
-   contract), pad discovery, VRAM origin, colour order in the scanout.
-4. **Performance**: measure the rasterizer (`sotn_prim_cycles` telemetry is
-   in); the S3 sits at 8-15 fps bound by PSRAM latency on textured pixels.
-   Levers here: the L2 cache, `SOFT_RASTER_IRAM` placement, VRAM rows of the
-   drawing area in internal RAM if the budget ever allows.
-5. **Integration polish**: stage selection from the GUI, an in-place restart
-   (needs the game's statics re-initialised, which upstream never does), a
-   metadata/boxart entry, documentation of the data extraction.
+2. **Platform layer** (done, on hardware): the scanout presents the rows the
+   display environment declares (224 centred, 256 cropped) as RGB565 through
+   the HAL's frame buffers; pads from the HAL's merged gamepad (face buttons
+   by position, L1/R1 on the shoulders, L2/R2 on the triggers for the item
+   and weapon menus); data root on the card; pause by parking the game
+   threads at an idle point with the vblank held; reset, relaunch and quit in
+   place (the game's statics are put back between launches, its big buffers
+   live in a PSRAM arena acquired at launch).
+3. **Bring-up** (done): the retail boot chain from the US disc (title,
+   opening, dock, elevator, topside), cutscenes with the frame-buffer
+   effects, codec calls, sound effects, music and streamed speech; the virtual
+   CD reads the card sector by sector with a read-ahead task.
+4. **Performance** (done to the game's cap): two rasterizer workers, one per
+   core, each drawing a band of rows of the same command stream, with FPU
+   gradients corrected to the exact integer quotient, DDA edges and a
+   modulation table; about 28 fps at the dock against the game's 30. Measured
+   with a replay benchmark (`CONFIG_MGS_REPLAY_BENCH`): the pause menu records
+   frames, the next start replays and compares them pixel for pixel.
+5. **Integration polish** (done): metadata/boxart entry, save states from the
+   pause menu (version 4: the statics, the arena, every thread's stack and
+   context), the disc's own English menu text (`TEXT.DAT` from the
+   executable), documentation of the data extraction. Not done: memory-card
+   game saves, full-motion video (MDEC).
 
-Open: the two submodules point at local branches (`esp32p4` in mgs_reversing
-for three platform hooks) until forks exist under esp-cpp to push them to.
+The two submodules are esp-cpp forks (`esp32p4` branches).
