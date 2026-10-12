@@ -13,9 +13,11 @@ cores with a software rasterizer.
 
 ## Metal Gear Solid, natively
 
-<!-- VIDEO: upload mgs.mp4 as a GitHub attachment (drag it into a PR or issue
-     comment) and paste the resulting user-attachments URL on its own line
-     here; GitHub renders it as a player. -->
+https://github.com/user-attachments/assets/24d01f38-ea30-4a68-a6e2-731dbd7e1fb0
+
+<p>
+<img src="docs/images/mgs-opening.jpg" width="32%"> <img src="docs/images/mgs-codec.jpg" width="32%"> <img src="docs/images/mgs-item-menu.jpg" width="32%">
+</p>
 
 The FoxdieTeam decompilation of the PlayStation game
 ([mgs_reversing](https://github.com/FoxdieTeam/mgs_reversing)) compiled for
@@ -31,7 +33,11 @@ Save and load states from the pause menu. See
 
 ## Star Wars: Jedi Knight – Dark Forces II
 
-<!-- VIDEO: paste the jk.mp4 attachment URL on its own line here. -->
+https://github.com/user-attachments/assets/2e6b5173-f53a-4591-8347-96aa53e222f2
+
+<p>
+<img src="docs/images/jk-corridor.jpg" width="32%"> <img src="docs/images/jk-explosion.jpg" width="32%"> <img src="docs/images/jk-catwalk.jpg" width="32%">
+</p>
 
 The 1997 PC game through [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2)
 (our fork: [esp-cpp/OpenJKDF2](https://github.com/esp-cpp/OpenJKDF2),
@@ -48,6 +54,12 @@ plan and its history are in [docs/PLAN.md](docs/PLAN.md).
 | Genesis / Mega Drive | gwenesis (shared with esp-box-emu) | full speed |
 | SNES | snes9x2005 | full speed |
 | Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
+
+https://github.com/user-attachments/assets/641a64b0-b3af-429b-8582-a38fc9a5cdad
+
+<p>
+<img src="docs/images/gba-title.jpg" width="32%"> <img src="docs/images/gba-town.jpg" width="32%">
+</p>
 
 ## Hardware
 
