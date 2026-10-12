@@ -2,6 +2,11 @@
 
 #include <chrono>
 #include <cxxabi.h>
+#include <map>
+#include <string>
+#if CONFIG_HEAP_TRACING_STANDALONE
+#include "esp_heap_trace.h"
+#endif
 #include <new>
 #include "esp_rom_sys.h"
 #include <exception>
@@ -141,6 +146,19 @@ extern "C" void app_main(void) {
   // set the task priority (for main) to high
   vTaskPrioritySet(nullptr, 20);
 
+#if CONFIG_HEAP_TRACING_STANDALONE
+  // DIAGNOSTIC: what ends up inside the ROM arena's hole while a cart that
+  // released it runs. Trace every allocation from here; when the arena cannot
+  // be reserved again after a cart, list the live allocations in its range.
+  static heap_trace_record_t *trace_records =
+      static_cast<heap_trace_record_t *>(heap_caps_calloc(12000, sizeof(heap_trace_record_t), MALLOC_CAP_SPIRAM));
+  const uint8_t *hole_base = static_cast<const uint8_t *>(emu.rom_arena(1));
+  if (trace_records) {
+    heap_trace_init_standalone(trace_records, 12000);
+    heap_trace_start(HEAP_TRACE_LEAKS);
+  }
+#endif
+
   // main loop
   while (true) {
     // reset gui ready to play
@@ -179,6 +197,39 @@ extern "C" void app_main(void) {
       }
     } else {
       logger.error("Invalid rom selected!");
+    }
+
+    // The cart is gone, and with it its pause menu and the screenshots LVGL
+    // cached for it: the PSRAM heap is as clean as it gets. Reserve the ROM
+    // arena again now (a no-op when it is still held) -- a cart that released
+    // it for its own level data (Jedi Knight) cannot do this early enough,
+    // its destructor runs before the base's menu is torn down -- and before
+    // the GUI decodes boxart into the hole.
+    if (!Tab5Emu::get().reserve_rom_arena()) {
+#if CONFIG_HEAP_TRACING_STANDALONE
+      if (trace_records && hole_base) {
+        const size_t n = heap_trace_get_count();
+        std::map<std::string, std::pair<size_t, size_t>> by_caller;
+        size_t in_hole = 0, bytes = 0;
+        for (size_t i = 0; i < n; i++) {
+          heap_trace_record_t rec;
+          if (heap_trace_get(i, &rec) != ESP_OK) continue;
+          const auto *p = static_cast<const uint8_t *>(rec.address);
+          if (p < hole_base || p >= hole_base + 6324736) continue;
+          in_hole++;
+          bytes += rec.size;
+          const auto key = fmt::format("{} {} {} {}", fmt::ptr(rec.alloced_by[0]), fmt::ptr(rec.alloced_by[1]),
+                                       fmt::ptr(rec.alloced_by[2]), fmt::ptr(rec.alloced_by[3]));
+          auto &e = by_caller[key];
+          e.first++;
+          e.second += rec.size;
+        }
+        logger.warn("hole: {} live allocations, {} bytes, of {} traced", in_hole, bytes, n);
+        for (const auto &[k, v] : by_caller) {
+          if (v.second >= 2048) logger.warn("  {} x{} {} bytes", k, v.first, v.second);
+        }
+      }
+#endif
     }
 
     // print the frame statistics from the previous run
