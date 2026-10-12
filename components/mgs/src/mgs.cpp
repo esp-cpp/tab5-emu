@@ -535,6 +535,7 @@ bool load_state(const std::string &path) {
 #endif
 }
 
+extern "C" void Psyz_GpuDumpFrame(const char *path);
 extern "C" void Mgs_DumpVram(const char *path) {
   Psyz_GpuSync();
   if (FILE *f = fopen(path, "wb")) {
@@ -574,6 +575,9 @@ void pause() {
     } else {
       logger.warn("VRAM dump: could not open /sdcard/mgs_vram.bin");
     }
+    // ...and the last complete frame's GPU batches: replayed at the next cart
+    // start as a fixed raster benchmark
+    Psyz_GpuDumpFrame("/sdcard/mgs_gpu_frame.bin");
   }
   Mgs_HeapCheck("pause: after vram dump");
 #endif
