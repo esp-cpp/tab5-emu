@@ -225,11 +225,14 @@ static void snes_shared_free(void) {
 }
 
 void snes_glue_deinit(void) {
-  if (Settings.SPC7110) Del7110Gfx();
-  S9xDeinitGFX();
-  deinit_display();
-  S9xDeinitAPU();
-  S9xDeinitMemory();
+  // the core was only initialised if its shared memory was allocated
+  if (Memory_p) {
+    if (Settings.SPC7110) Del7110Gfx();
+    S9xDeinitGFX();
+    deinit_display();
+    S9xDeinitAPU();
+    S9xDeinitMemory();
+  }
   snes_shared_free();
   free(audio_buffer);
   audio_buffer = NULL;

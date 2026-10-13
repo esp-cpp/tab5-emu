@@ -434,8 +434,10 @@ GamepadState Tab5Emu::gamepad_state() {
     state.select |= key(0xE1) | key(42) | key(0xE5); // shift, backspace
     state.l |= key(20);                // q
     state.r |= key(26);                // w
-    state.l2 |= key(8);                // e
+    state.l2 |= key(8);                // e: a trigger counts as a shoulder too (the USB rule)
     state.r2 |= key(21);               // r
+    state.l |= state.l2;
+    state.r |= state.r2;
   }
   if (usb_gamepad_present()) {
     std::lock_guard<std::mutex> lk(hid_mutex_);

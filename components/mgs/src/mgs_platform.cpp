@@ -32,7 +32,8 @@ void mgs_platform_init(const char *data_dir) { g_sd_root = data_dir ? data_dir :
 // ---------------------------------------------------------------------------
 // Audio: psyz emulates the SPU (24 ADPCM voices, the game's own driver talks
 // to it through the PSY-Q libspu); its mixer is pull-based at the PSX's
-// 44.1 kHz. A task on core 1 pulls ~10 ms at a time into the HAL's queue,
+// 44.1 kHz. A task on core 0 (the game core has slack while it waits for the
+// rasterizer) pulls 221 frames, about 5 ms, at a time into the HAL's queue,
 // paced by the DAC (play_audio waits for room), and sits suspended while the
 // menu is up.
 // ---------------------------------------------------------------------------
@@ -244,7 +245,10 @@ const char *Mgs_SdRoot(void) { return g_sd_root.c_str(); }
 // The HAL's merged gamepad (touch zones, USB pad, keyboard) is sampled by the
 // vblank tick through Mgs_PadsUpdate(). Face buttons map by position: A
 // (south) = CROSS, B (east) = CIRCLE, X (west) = SQUARE, Y (north) = TRIANGLE,
-// which is where they sit on a DualShock. The HAL folds a USB pad's trigger
+// which is where they sit on a DualShock: the HAL normalises a pad's face
+// buttons by position as A = east, B = south, X = north, Y = west (see
+// usb_hid.cpp), so B is Cross, A Circle, Y Square and X Triangle. The HAL
+// folds a USB pad's trigger
 // into its shoulder bit (l = L1 or L2) and reports the trigger on its own as
 // l2, so L1 is "l without l2": MGS opens the item and weapon menus on L2/R2.
 // ---------------------------------------------------------------------------
@@ -294,10 +298,10 @@ void Mgs_PadsUpdate(void) {
   if (s.up) pressed |= 0x1000;
   if (s.start) pressed |= 0x0800;
   if (s.select) pressed |= 0x0100;
-  if (s.x) pressed |= 0x0080; // SQUARE
-  if (s.a) pressed |= 0x0040; // CROSS
-  if (s.b) pressed |= 0x0020; // CIRCLE
-  if (s.y) pressed |= 0x0010; // TRIANGLE
+  if (s.y) pressed |= 0x0080; // SQUARE (west)
+  if (s.b) pressed |= 0x0040; // CROSS (south)
+  if (s.a) pressed |= 0x0020; // CIRCLE (east)
+  if (s.x) pressed |= 0x0010; // TRIANGLE (north)
   if (s.r && !s.r2) pressed |= 0x0008; // R1
   if (s.l && !s.l2) pressed |= 0x0004; // L1
   if (s.r2) pressed |= 0x0002;         // R2: weapon menu

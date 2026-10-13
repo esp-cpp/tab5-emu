@@ -36,8 +36,10 @@ bool running();
 void pause();
 void resume();
 /// Save states: the whole game memory plus the game threads' contexts,
-/// taken and restored while paused. A state only loads into the build that
-/// wrote it.
+/// taken and restored while paused. A state loads into any build in which
+/// the game's statics, its PSRAM arena and a sample of its functions sit at
+/// the addresses they had when it was written (a layout signature in the
+/// header); other builds are refused with a message.
 bool save_state(const std::string &path);
 bool load_state(const std::string &path);
 /// Size of the presented frame (the PSX's 320x240).

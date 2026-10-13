@@ -523,6 +523,23 @@ bool load_state(const std::string &path) {
       return false;
     }
   }
+  {
+    // the whole payload must be there before the first region is overwritten:
+    // a truncated file would leave the game memory half restored
+    size_t expected = sizeof h;
+    for (const auto &r : regions) {
+      expected += r.size;
+    }
+    fseek(f, 0, SEEK_END);
+    const long actual = ftell(f);
+    fseek(f, sizeof h, SEEK_SET);
+    if (actual < 0 || static_cast<size_t>(actual) != expected) {
+      logger.error("load state: {} is {} bytes, expected {}: truncated or corrupt, not loaded", path, actual,
+                   expected);
+      fclose(f);
+      return false;
+    }
+  }
   Psyz_GpuSync();
   // the one platform task that runs during a pause and reads this file's
   // statics: parked until the image and this run's handles are in place
