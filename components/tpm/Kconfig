@@ -42,4 +42,16 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
             ("TPMFB ..."), for tools/serial_screenshots.py to turn into
             PNGs.
 
+    config TPM_SERIAL_FULL_SHOT_VBLANK
+        int "Test: print all of VRAM (half resolution) once, at this vblank (0 = off)"
+        default 0
+        depends on TPM_SERIAL_SCREENSHOT_SECONDS > 0
+
+    config TPM_GPU_TRACE_VBLANK
+        int "Test: log the GPU state commands of this frame (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Compare with the desktop runner's --gpu-trace N.
+
 endmenu

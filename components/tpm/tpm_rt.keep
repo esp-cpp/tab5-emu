@@ -5,3 +5,9 @@ rt_set_realtime
 rt_gpu_display
 rt_frame_count
 g_rt_vram
+rt_shutdown
+_tpm_bss_start
+_tpm_bss_end
+_tpm_data_start
+_tpm_data_end
+rt_set_gpu_trace

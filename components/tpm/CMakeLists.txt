@@ -57,7 +57,7 @@ idf_component_register(
   INCLUDE_DIRS "include"
   PRIV_INCLUDE_DIRS "src" "${TPM_DECOMP}/recomp/runtime"
   REQUIRES tab5-emu
-  PRIV_REQUIRES esp_timer heap statistics
+  PRIV_REQUIRES esp_timer heap statistics shared_memory
 )
 
 if(TPM_ENGINE_READY)
@@ -86,18 +86,22 @@ if(TPM_ENGINE_READY)
   #   -msmall-data-limit=0  nothing in PSRAM may be addressed gp-relative
   target_compile_options(tpm_rt PRIVATE -O2 -w -fno-strict-aliasing -msmall-data-limit=0
                                         -Wno-error)
-  # the rasterizer's inner loops decide the frame rate
+  # the rasterizer's inner loops decide the frame rate; they run from
+  # PSRAM-XIP, not IRAM (the runtime's default, as in the MGS port: internal
+  # RAM is what the boot-time DMA reserve and the HAL need)
   set_property(SOURCE ${rt}/rt_gpu.c APPEND PROPERTY COMPILE_OPTIONS "-O3;-fomit-frame-pointer")
 
   # ---- hide it: components/mgs links its own psyz, with the same names ----
   # One relocatable object with only the runtime's API left global.
   set(bundle ${CMAKE_CURRENT_BINARY_DIR}/tpm_rt_bundle.o)
+  # tpm_rt.ld gathers the statics: .bss to PSRAM, both bracketed for the
+  # reset between launches (-d: COMMON symbols get their space here)
   add_custom_command(OUTPUT ${bundle}
-    COMMAND ${CMAKE_C_COMPILER} -nostdlib -r -Wl,--whole-archive $<TARGET_FILE:tpm_rt>
-            -Wl,--no-whole-archive -o ${bundle}.r.o
+    COMMAND ${CMAKE_C_COMPILER} -nostdlib -r -Wl,-d -Wl,-T,${CMAKE_CURRENT_LIST_DIR}/tpm_rt.ld
+            -Wl,--whole-archive $<TARGET_FILE:tpm_rt> -Wl,--no-whole-archive -o ${bundle}.r.o
     COMMAND ${CMAKE_OBJCOPY} --keep-global-symbols=${CMAKE_CURRENT_LIST_DIR}/tpm_rt.keep
             ${bundle}.r.o ${bundle}
-    DEPENDS tpm_rt ${CMAKE_CURRENT_LIST_DIR}/tpm_rt.keep
+    DEPENDS tpm_rt ${CMAKE_CURRENT_LIST_DIR}/tpm_rt.keep ${CMAKE_CURRENT_LIST_DIR}/tpm_rt.ld
     VERBATIM)
   add_custom_target(tpm_rt_bundle DEPENDS ${bundle})
   add_dependencies(${COMPONENT_LIB} tpm_rt_bundle)

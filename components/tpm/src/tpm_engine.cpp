@@ -15,6 +15,7 @@
 
 #include "tpm_engine.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +39,9 @@
 
 extern "C" {
 #include "rt_platform.h"
+#include "shared_memory.h"
+// tpm_rt.ld: the runtime's statics, for the reset between launches
+extern uint8_t _tpm_bss_start[], _tpm_bss_end[], _tpm_data_start[], _tpm_data_end[];
 }
 
 namespace tpm::engine {
@@ -67,11 +71,39 @@ int g_frame_index{0};
 std::atomic<uint8_t *> g_last_frame{nullptr};
 std::atomic<bool> g_video_busy{false};
 RtDisplay g_display{};
+std::atomic<uint32_t> g_flips{0}; // display-area moves: the game's frames
+// The displayed rows, copied out of VRAM at the vblank on the game's thread
+// (same layout as VRAM, only the displayed span of each row filled): the
+// rasterizer draws synchronously on that thread, so read later from the video
+// task VRAM may already hold half of the next frame.
+uint16_t *g_snap{nullptr};
+constexpr size_t SNAP_ROWS = FRAME_H;
 
 // SPU output: the game's thread writes, the audio task reads
 constexpr size_t RING_FRAMES = 8192; // ~186 ms
 int16_t *g_ring{nullptr};
 std::atomic<uint32_t> g_ring_w{0}, g_ring_r{0};
+
+// ---- a fresh machine for every launch ----
+//
+// The runtime's statics are put back before each boot, as the MGS port does
+// with the game's: .bss (in PSRAM, tpm_rt.ld) zeroed, .data restored from a
+// copy taken before the first launch. Its big buffers (guest RAM, VRAM, SPU,
+// transfers) come from the shared-memory pool (plat_alloc) and go back to it
+// when the cart quits.
+std::vector<uint8_t> g_data_snapshot;
+
+void reset_statics() {
+  const size_t data_size = _tpm_data_end - _tpm_data_start;
+  if (g_data_snapshot.empty()) {
+    g_data_snapshot.assign(_tpm_data_start, _tpm_data_end);
+  } else {
+    memcpy(_tpm_data_start, g_data_snapshot.data(), data_size);
+  }
+  memset(_tpm_bss_start, 0, _tpm_bss_end - _tpm_bss_start);
+  logger.info("statics: {} B .bss (PSRAM), {} B .data", static_cast<size_t>(_tpm_bss_end - _tpm_bss_start),
+              data_size);
+}
 
 // ---- bring-up aids (Kconfig "Test:" options) ----
 
@@ -119,14 +151,21 @@ uint16_t scripted_buttons(uint32_t vblank) {
   return b;
 }
 
-// the frame as base64 lines on the console
-void print_screenshot(const uint16_t *px, uint32_t vblank) {
+// the frame, at half resolution, as base64 lines on the console (the
+// USB-serial console moves ~10 KB/s: a full frame would take 20 s)
+constexpr size_t SHOT_W = FRAME_W / 2, SHOT_H = FRAME_H / 2;
+uint16_t *g_shot{nullptr};
+size_t g_shot_w{SHOT_W}, g_shot_h{SHOT_H};
+uint32_t g_shot_vblank{0};
+TaskHandle_t g_shot_task{nullptr};
+
+void print_screenshot(const uint16_t *px, size_t w, size_t h, uint32_t vblank) {
   static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   const auto *b = reinterpret_cast<const uint8_t *>(px);
-  constexpr size_t N = FRAME_W * FRAME_H * 2;
+  const size_t N = w * h * 2;
   constexpr size_t CHUNK = 960; // bytes per line, a multiple of 3
   char line[CHUNK / 3 * 4 + 1];
-  printf("TPMFB begin %u %u %u\n", static_cast<unsigned>(FRAME_W), static_cast<unsigned>(FRAME_H),
+  printf("TPMFB begin %u %u %u\n", static_cast<unsigned>(w), static_cast<unsigned>(h),
          static_cast<unsigned>(vblank));
   for (size_t off = 0; off < N; off += CHUNK) {
     const size_t n = std::min(CHUNK, N - off);
@@ -143,6 +182,16 @@ void print_screenshot(const uint16_t *px, uint32_t vblank) {
   }
   printf("TPMFB end\n");
   fflush(stdout);
+}
+
+void shot_task(void *) {
+  while (!g_stop.load()) {
+    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) != 0) {
+      print_screenshot(g_shot, g_shot_w, g_shot_h, g_shot_vblank);
+    }
+  }
+  g_shot_task = nullptr;
+  vTaskDelete(nullptr);
 }
 
 // ---- the disc ----
@@ -201,6 +250,10 @@ void video_task(void *) {
       continue;
     }
     const RtDisplay d = g_display;
+    if (!g_snap) {
+      g_video_busy = false;
+      continue;
+    }
     auto *dst = reinterpret_cast<uint16_t *>(g_frames[g_frame_index]);
     if (!d.enabled) {
       memset(dst, 0, FRAME_W * FRAME_H * 2);
@@ -212,7 +265,6 @@ void video_task(void *) {
       const int x_pad = w < static_cast<int>(FRAME_W) ? (FRAME_W - w) / 2 : 0;
       for (size_t y = 0; y < FRAME_H; y++) {
         uint16_t *out = dst + y * FRAME_W;
-        const int vy = (d.y + static_cast<int>(y) * step_y) & 511;
         if (static_cast<int>(y) * step_y >= h) {
           memset(out, 0, FRAME_W * 2);
           continue;
@@ -223,14 +275,14 @@ void video_task(void *) {
         }
         const size_t n = std::min<size_t>(w, FRAME_W);
         if (d.rgb24) {
-          const auto *row = reinterpret_cast<const uint8_t *>(&g_rt_vram[vy * 1024]);
+          const auto *row = reinterpret_cast<const uint8_t *>(&g_snap[y * 1024]);
           for (size_t x = 0; x < n; x++) {
             const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
             const uint8_t *p = row + ((d.x * 2 + sx * 3) & 2047);
             out[x_pad + x] = static_cast<uint16_t>(((p[0] & 0xF8) << 8) | ((p[1] & 0xFC) << 3) | (p[2] >> 3));
           }
         } else {
-          const uint16_t *row = &g_rt_vram[vy * 1024];
+          const uint16_t *row = &g_snap[y * 1024];
           for (size_t x = 0; x < n; x++) {
             const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
             const uint16_t v = row[(d.x + sx) & 1023];
@@ -253,13 +305,43 @@ void video_task(void *) {
     static uint32_t presented = 0;
     presented++;
     if (now - last_status_us >= 5000000) {
-      logger.info("vblank {} | presented {} | {}x{} at ({},{}){}{}", rt_frame_count(), presented, d.w, d.h, d.x,
-                  d.y, d.rgb24 ? " 24-bit" : "", d.enabled ? "" : " (display off)");
+      static uint32_t last_flips = 0;
+      const uint32_t flips = g_flips.load();
+      logger.info("vblank {} | presented {} | game {:.1f} fps | {}x{} at ({},{}){}{}", rt_frame_count(), presented,
+                  (flips - last_flips) * 1e6f / (now - last_status_us), d.w, d.h, d.x, d.y, d.rgb24 ? " 24-bit" : "",
+                  d.enabled ? "" : " (display off)");
+      last_flips = flips;
       last_status_us = now;
     }
 #if CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS > 0
-    if (now - last_shot_us >= CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS * 1000000LL) {
-      print_screenshot(dst, rt_frame_count());
+    static bool full_done = CONFIG_TPM_SERIAL_FULL_SHOT_VBLANK == 0;
+    if (g_shot && g_shot_task && !full_done &&
+        rt_frame_count() + 1 > static_cast<uint32_t>(CONFIG_TPM_SERIAL_FULL_SHOT_VBLANK)) {
+      // once, at full resolution
+      // once: all of VRAM at half resolution (as RGB565)
+      full_done = true;
+      for (size_t y = 0; y < 256; y++) {
+        for (size_t x = 0; x < 512; x++) {
+          const uint16_t v = g_rt_vram[(2 * y) * 1024 + 2 * x];
+          const uint16_t r = v & 0x1F, g = (v >> 5) & 0x1F, b = (v >> 10) & 0x1F;
+          g_shot[y * 512 + x] = static_cast<uint16_t>((r << 11) | (((g << 1) | (g >> 4)) << 5) | b);
+        }
+      }
+      g_shot_w = 512;
+      g_shot_h = 256;
+      g_shot_vblank = rt_frame_count();
+      xTaskNotifyGive(g_shot_task);
+      last_shot_us = now + 30000000; // the console is busy for a while
+    } else if (g_shot && g_shot_task && now - last_shot_us >= CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS * 1000000LL) {
+      g_shot_w = SHOT_W;
+      g_shot_h = SHOT_H;
+      for (size_t y = 0; y < SHOT_H; y++) {
+        for (size_t x = 0; x < SHOT_W; x++) {
+          g_shot[y * SHOT_W + x] = dst[2 * y * FRAME_W + 2 * x];
+        }
+      }
+      g_shot_vblank = rt_frame_count();
+      xTaskNotifyGive(g_shot_task);
       last_shot_us = now;
     }
 #endif
@@ -294,7 +376,11 @@ void audio_task(void *) {
 void game_task(void *) {
   logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
   rt_set_realtime(1);
+#if CONFIG_TPM_GPU_TRACE_VBLANK > 0
+  rt_set_gpu_trace(CONFIG_TPM_GPU_TRACE_VBLANK);
+#endif
   rt_boot(g_exe.data(), static_cast<uint32_t>(g_exe.size()));
+  rt_shutdown();
   logger.info("game stopped");
   g_game_done = true;
   vTaskSuspend(nullptr);
@@ -369,14 +455,24 @@ bool init(const std::string &data_dir) {
   emu.audio_max_wait_ms(30);
 
   g_ring = static_cast<int16_t *>(heap_caps_calloc(RING_FRAMES * 2, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+  g_snap = static_cast<uint16_t *>(heap_caps_calloc(SNAP_ROWS * 1024, sizeof(uint16_t), MALLOC_CAP_SPIRAM));
   g_resume = xSemaphoreCreateBinary();
   g_stop = false;
   g_paused = false;
   g_game_done = false;
   g_ring_w = g_ring_r = 0;
+  reset_statics();
+  logger.info("internal free {} B, PSRAM free {} B (largest {})", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+              heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
   parse_presses(CONFIG_TPM_AUTOPRESS);
 
   xTaskCreatePinnedToCore(video_task, "tpm_video", 4096, nullptr, 6, &g_video_task, 1);
+#if CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS > 0
+  if (!g_shot) {
+    g_shot = static_cast<uint16_t *>(heap_caps_malloc(512 * 256 * 2, MALLOC_CAP_SPIRAM));
+  }
+  xTaskCreatePinnedToCore(shot_task, "tpm_shot", 4096, nullptr, 1, &g_shot_task, 1);
+#endif
   xTaskCreatePinnedToCore(audio_task, "tpm_audio", 4096, nullptr, 7, &g_audio_task, 1);
   // The recompiled code nests a C frame per guest call (<= 304 bytes on
   // RV32, guest chains seen up to 25 deep including interrupts): 32 KB, in
@@ -418,11 +514,16 @@ void deinit() {
   }
   heap_caps_free(g_ring);
   g_ring = nullptr;
+  heap_caps_free(g_snap);
+  g_snap = nullptr;
   if (g_resume) {
     vSemaphoreDelete(g_resume);
     g_resume = nullptr;
   }
   g_last_frame = nullptr;
+  // the runtime's buffers (rt_shutdown dropped its pointers if the game got
+  // to return; the next launch resets the statics either way)
+  shared_mem_clear();
   g_exe.clear();
   g_exe.shrink_to_fit();
 }
@@ -462,10 +563,35 @@ void plat_vblank(void) {
   // present every other vblank at most (the game runs at 30 or less), and
   // never queue behind a conversion that is still running
   static uint32_t n;
-  if ((++n & 1) || g_video_busy.load() || !g_video_task) {
+  static int last_x = -1, last_y = -1;
+  RtDisplay d;
+  rt_gpu_display(&d);
+  if (d.x != last_x || d.y != last_y) {
+    g_flips++;
+    last_x = d.x;
+    last_y = d.y;
+  }
+  if ((++n & 1) || g_video_busy.load() || !g_video_task || !g_snap || !g_rt_vram) {
     return;
   }
-  rt_gpu_display(&g_display);
+  g_display = d;
+  if (d.enabled) {
+    // the displayed span of each displayed row (bytes, wrapping at the row's
+    // 2 KB like the hardware)
+    const int step_y = d.h > static_cast<int>(FRAME_H) ? 2 : 1;
+    const int bytes = std::min(d.rgb24 ? d.w * 3 : d.w * 2, 2048);
+    const int x0 = (d.x * 2) & 2047;
+    for (size_t y = 0; y < SNAP_ROWS && static_cast<int>(y) * step_y < d.h; y++) {
+      const int vy = (d.y + static_cast<int>(y) * step_y) & 511;
+      const auto *src = reinterpret_cast<const uint8_t *>(&g_rt_vram[vy * 1024]);
+      auto *out = reinterpret_cast<uint8_t *>(&g_snap[y * 1024]);
+      const int first = std::min(bytes, 2048 - x0);
+      memcpy(out + x0, src + x0, first);
+      if (first < bytes) {
+        memcpy(out, src, bytes - first);
+      }
+    }
+  }
   g_video_busy = true;
   xTaskNotifyGive(g_video_task);
 }
@@ -512,7 +638,21 @@ void plat_audio(const int16_t *samples, int frames) {
 
 uint64_t plat_time_us(void) { return static_cast<uint64_t>(esp_timer_get_time()); }
 
-void *plat_alloc(uint32_t size) { return heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM); }
+void *plat_alloc(uint32_t size) {
+  shared_mem_request_t req{.size = size, .region = SHARED_MEM_CACHE_LINE, .storage = SHARED_MEM_PSRAM};
+  void *p = shared_mem_allocate(&req); // zeroed
+  if (!p) {
+    tpm::engine::logger.error("no PSRAM for {} bytes", size);
+  }
+  return p;
+}
+
+void plat_free(void *) {} // the pool is cleared when the cart quits
+
+void plat_sleep_us(uint32_t us) {
+  // the game is ahead of real time: give the core away for a tick or more
+  vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(us / 1000)));
+}
 
 void plat_pause_wait(void) {
   if (tpm::engine::g_resume) {
