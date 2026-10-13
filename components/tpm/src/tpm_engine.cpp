@@ -234,6 +234,33 @@ void prof_task(void *arg) {
 }
 #endif
 
+#if CONFIG_TPM_TEST_PAUSE_VBLANK > 0
+void pause_test_task(void *) {
+  while (!g_stop.load() && rt_frame_count() < CONFIG_TPM_TEST_PAUSE_VBLANK) {
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+  for (int round = 0; round < 3 && !g_stop.load(); round++) {
+    pause();
+    const auto f = last_frame();
+    const auto *px = reinterpret_cast<const uint16_t *>(f.data());
+    std::string rows;
+    size_t lit_total = 0;
+    for (size_t y = 0; px && y < FRAME_H; y++) {
+      size_t lit = 0;
+      for (size_t x = 0; x < FRAME_W; x++) lit += px[y * FRAME_W + x] != 0;
+      lit_total += lit;
+      if (y % 24 == 0) rows += fmt::format(" {}", lit);
+    }
+    logger.warn("pause test {}: last frame {} (buffers {} {}), {} lit pixels; per 24th row:{}", round,
+                fmt::ptr(px), fmt::ptr(g_frames[0]), fmt::ptr(g_frames[1]), lit_total, rows);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    resume();
+    vTaskDelay(pdMS_TO_TICKS(3000));
+  }
+  vTaskDelete(nullptr);
+}
+#endif
+
 // ---- the disc ----
 
 // Read-ahead: the game streams the disc sequentially, and on the card every
@@ -669,6 +696,9 @@ bool init(const std::string &data_dir) {
   xTaskCreatePinnedToCore(prof_task, "tpm_profg", 4096, reinterpret_cast<void *>(1), 10, nullptr, 1);
 #endif
   xTaskCreatePinnedToCore(audio_task, "tpm_audio", 4096, nullptr, 7, &g_audio_task, 1);
+#if CONFIG_TPM_TEST_PAUSE_VBLANK > 0
+  xTaskCreatePinnedToCore(pause_test_task, "tpm_ptest", 4096, nullptr, 5, nullptr, 0);
+#endif
   // The recompiled code nests a C frame per guest call (<= 304 bytes on
   // RV32, guest chains seen up to 25 deep including interrupts): 32 KB, in
   // internal RAM since those frames are the guest's registers; PSRAM if the

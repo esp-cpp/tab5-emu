@@ -43,6 +43,15 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
             core 1 when the cart starts, printing "TPMBENCH <us> us per
             vblank". Only for measuring the rasterizer.
 
+    config TPM_TEST_PAUSE_VBLANK
+        int "Test: pause at this vblank and log the paused frame (0: off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: does what the emulator's pause menu does to the
+            engine (pause, read the last frame for the screenshot), logs how
+            much of that frame is not black, and resumes.
+
     config TPM_AUTOPRESS
         string "Test: scripted button presses (vblank:button,...)"
         default ""
