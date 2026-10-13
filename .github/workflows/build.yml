@@ -21,8 +21,8 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    - name: Checkout the engine submodule (without its desktop-only nested submodules)
-      run: git submodule update --init components/jk/OpenJKDF2
+    - name: Checkout the game submodules (without their desktop-only nested submodules)
+      run: git submodule update --init components/jk/OpenJKDF2 components/mgs/mgs_reversing components/mgs/psyz
 
     - name: Build
       uses: espressif/esp-idf-ci-action@v1
