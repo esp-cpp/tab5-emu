@@ -67,6 +67,7 @@ TaskHandle_t g_video_task{nullptr};
 TaskHandle_t g_gpu_task{nullptr};  // core 1: the GPU's command stream, top band
 TaskHandle_t g_gpu0_task{nullptr}; // core 0: the bottom band, in the game's idle time
 volatile int g_gpu_stop{0};
+volatile bool g_gpu_done[2]{};
 TaskHandle_t g_audio_task{nullptr};
 std::atomic<bool> g_game_done{false};
 std::atomic<bool> g_stop{false};
@@ -537,12 +538,8 @@ void audio_task(void *) {
 void gpu_task(void *arg) {
   const int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
   rt_gpu_worker_n(&g_gpu_stop, idx);
-  if (idx == 1) {
-    g_gpu_task = nullptr;
-  } else {
-    g_gpu0_task = nullptr;
-  }
-  vTaskDelete(nullptr);
+  g_gpu_done[idx] = true;
+  vTaskSuspend(nullptr); // deinit deletes it (its stack is in PSRAM)
 }
 
 #if TPM_GPU_BENCH
@@ -554,8 +551,9 @@ void bench_task(void *arg) {
     memcpy(rec, _binary_gpubench_bin_start, n);
     static const char *const modes[] = {"all", "no span pixels", "setup only", "no triangles",
                                         "span pixels to internal RAM", "all, per-row dispatch",
-                                        "all, no pre-modulated palettes"};
-    for (int mode = 0; mode < 7; mode++) {
+                                        "all, no pre-modulated palettes",
+                                        "per-row dispatch, texels from internal RAM"};
+    for (int mode = 0; mode < 8; mode++) {
       rt_gpu_bench_mode(mode);
       const uint32_t us = rt_gpu_bench(rec, static_cast<uint32_t>(n / 4), 3);
       printf("TPMBENCH %u us per vblank (%s)\n", static_cast<unsigned>(us), modes[mode]);
@@ -564,14 +562,18 @@ void bench_task(void *arg) {
     heap_caps_free(rec);
   }
   xTaskNotifyGive(static_cast<TaskHandle_t>(arg));
-  vTaskDelete(nullptr);
+  vTaskSuspend(nullptr);
 }
 #endif
 
 void game_task(void *) {
 #if TPM_GPU_BENCH
-  xTaskCreatePinnedToCore(bench_task, "tpm_bench", 8192, xTaskGetCurrentTaskHandle(), 4, nullptr, 1);
+  TaskHandle_t bench = nullptr;
+  xTaskCreatePinnedToCoreWithCaps(bench_task, "tpm_bench", 8192, xTaskGetCurrentTaskHandle(), 4, &bench, 1,
+                                  MALLOC_CAP_SPIRAM);
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+  vTaskDelay(1);
+  vTaskDeleteWithCaps(bench);
 #endif
   logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
   rt_set_realtime(1);
@@ -679,12 +681,18 @@ bool init(const std::string &data_dir) {
   // the rasterizer, on the other core (below the video and audio tasks there:
   // they are short and must not wait behind a frame's drawing)
   g_gpu_stop = 0;
-  if (xTaskCreatePinnedToCore(gpu_task, "tpm_gpu", 8192, reinterpret_cast<void *>(1), 4, &g_gpu_task, 1) !=
-      pdPASS) {
+  g_gpu_done[0] = false;
+  g_gpu_done[1] = false;
+  // stacks in PSRAM: on the P4 the cores reach internal RAM more slowly than
+  // cached PSRAM, and these stacks are hot (the recompiled code spills guest
+  // registers to its stack all the time)
+  if (xTaskCreatePinnedToCoreWithCaps(gpu_task, "tpm_gpu", 8192, reinterpret_cast<void *>(1), 4, &g_gpu_task, 1,
+                                      MALLOC_CAP_SPIRAM) != pdPASS) {
     g_gpu_task = nullptr;
     logger.warn("no GPU worker: drawing on the game's thread");
-  } else if (CONFIG_TPM_GPU_WORKERS > 1 && xTaskCreatePinnedToCore(gpu_task, "tpm_gpu0", 8192, reinterpret_cast<void *>(0), 4, &g_gpu0_task,
-                                     0) != pdPASS) {
+  } else if (CONFIG_TPM_GPU_WORKERS > 1 &&
+             xTaskCreatePinnedToCoreWithCaps(gpu_task, "tpm_gpu0", 8192, reinterpret_cast<void *>(0), 4, &g_gpu0_task,
+                                             0, MALLOC_CAP_SPIRAM) != pdPASS) {
     // the second worker sits above the game (5) on its core: the drawing is
     // the bottleneck, and at the rendezvous (VRAM moves, the vblank) worker 1
     // waits for it; it sleeps whenever it has nothing to draw
@@ -704,8 +712,7 @@ bool init(const std::string &data_dir) {
   // internal RAM since those frames are the guest's registers; PSRAM if the
   // internal heap cannot spare it.
   constexpr uint32_t STACK = 32 * 1024;
-  if (xTaskCreatePinnedToCore(game_task, "tpm_game", STACK, nullptr, 5, &g_game_task, 0) != pdPASS &&
-      xTaskCreatePinnedToCoreWithCaps(game_task, "tpm_game", STACK, nullptr, 5, &g_game_task, 0,
+  if (xTaskCreatePinnedToCoreWithCaps(game_task, "tpm_game", STACK, nullptr, 5, &g_game_task, 0,
                                       MALLOC_CAP_SPIRAM) != pdPASS) {
     logger.error("could not create the game task");
     deinit();
@@ -724,16 +731,19 @@ void deinit() {
     for (int i = 0; i < 200 && !g_game_done.load(); i++) {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
-    vTaskDelete(g_game_task);
+    vTaskDeleteWithCaps(g_game_task);
     g_game_task = nullptr;
   }
   if (g_gpu_task || g_gpu0_task) {
     g_gpu_stop = 1;
-    for (int i = 0; i < 100 && (g_gpu_task || g_gpu0_task); i++) {
+    for (int i = 0; i < 100 && ((g_gpu_task && !g_gpu_done[1]) || (g_gpu0_task && !g_gpu_done[0])); i++) {
       if (g_gpu_task) xTaskNotifyGive(g_gpu_task);
       if (g_gpu0_task) xTaskNotifyGive(g_gpu0_task);
       vTaskDelay(pdMS_TO_TICKS(10));
     }
+    if (g_gpu_task) vTaskDeleteWithCaps(g_gpu_task);
+    if (g_gpu0_task) vTaskDeleteWithCaps(g_gpu0_task);
+    g_gpu_task = g_gpu0_task = nullptr;
   }
   g_stop = true;
   if (g_video_task) {
