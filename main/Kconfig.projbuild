@@ -7,6 +7,13 @@ menu "tab5-emu"
             Bring-up aid: launch the first entry of metadata.csv automatically
             a little after boot, as if Play had been pressed.
 
+    config TAB5_EMU_AUTOSTART_MATCH
+        string "Auto-start the first game whose name or path contains this"
+        default ""
+        depends on TAB5_EMU_AUTOSTART_DELAY_MS > 0
+        help
+            Empty: the first entry of metadata.csv.
+
     config TAB5_EMU_USB_MSC_AT_BOOT
         bool "Test: turn the USB drive on right after boot"
         default n

@@ -23,4 +23,23 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
         int "Seconds per load screen in the data viewer"
         default 4
 
+    config TPM_AUTOPRESS
+        string "Test: scripted button presses (vblank:button,...)"
+        default ""
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: press pad buttons at given vblanks without anyone
+            at the board, e.g. "300:cross,600:cross,900:start". Each press
+            is held for 8 vblanks. Buttons: cross circle square triangle
+            start select up down left right l1 r1 l2 r2.
+
+    config TPM_SERIAL_SCREENSHOT_SECONDS
+        int "Test: print the screen on the console every N seconds (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: the presented 320x240 RGB565 frame as base64 lines
+            ("TPMFB ..."), for tools/serial_screenshots.py to turn into
+            PNGs.
+
 endmenu

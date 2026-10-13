@@ -240,6 +240,18 @@ void Gui::update_rom_list() {
   }
 }
 
+bool Gui::select_rom_matching(std::string_view text) {
+  std::lock_guard<std::recursive_mutex> lk(mutex_);
+  for (size_t i = 0; i < rom_infos_.size(); i++) {
+    const auto &rom = rom_infos_[i];
+    if (rom.name.find(text) != std::string::npos || rom.rom_path.find(text) != std::string::npos) {
+      select_rom(i);
+      return true;
+    }
+  }
+  return false;
+}
+
 void Gui::select_rom(int index) {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
   if (index < 0 || index >= (int)rom_infos_.size()) {

@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -28,6 +29,8 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <freertos/idf_additions.h>
+
+#include "sdkconfig.h"
 
 #include "logger.hpp"
 #include "statistics.hpp"
@@ -69,6 +72,78 @@ RtDisplay g_display{};
 constexpr size_t RING_FRAMES = 8192; // ~186 ms
 int16_t *g_ring{nullptr};
 std::atomic<uint32_t> g_ring_w{0}, g_ring_r{0};
+
+// ---- bring-up aids (Kconfig "Test:" options) ----
+
+struct Press {
+  uint32_t vblank;
+  uint16_t bits;
+};
+std::vector<Press> g_presses;
+constexpr uint32_t PRESS_HOLD = 8;
+
+void parse_presses(const char *spec) {
+  static const struct {
+    const char *name;
+    int bit;
+  } names[] = {{"select", 0}, {"start", 3}, {"up", 4},  {"right", 5}, {"down", 6},      {"left", 7},     {"l2", 8},
+               {"r2", 9},     {"l1", 10},   {"r1", 11}, {"triangle", 12}, {"circle", 13}, {"cross", 14}, {"square", 15}};
+  g_presses.clear();
+  std::string all(spec);
+  size_t pos = 0;
+  while (pos < all.size()) {
+    size_t end = all.find(',', pos);
+    if (end == std::string::npos) end = all.size();
+    const std::string item = all.substr(pos, end - pos);
+    pos = end + 1;
+    const size_t colon = item.find(':');
+    if (colon == std::string::npos) continue;
+    const auto when = static_cast<uint32_t>(strtoul(item.c_str(), nullptr, 10));
+    const std::string button = item.substr(colon + 1);
+    for (const auto &n : names) {
+      if (button == n.name) {
+        g_presses.push_back({when, static_cast<uint16_t>(1u << n.bit)});
+      }
+    }
+  }
+  if (!g_presses.empty()) {
+    logger.warn("scripted presses: {}", spec);
+  }
+}
+
+uint16_t scripted_buttons(uint32_t vblank) {
+  uint16_t b = 0;
+  for (const auto &p : g_presses) {
+    if (vblank >= p.vblank && vblank < p.vblank + PRESS_HOLD) b |= p.bits;
+  }
+  return b;
+}
+
+// the frame as base64 lines on the console
+void print_screenshot(const uint16_t *px, uint32_t vblank) {
+  static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const auto *b = reinterpret_cast<const uint8_t *>(px);
+  constexpr size_t N = FRAME_W * FRAME_H * 2;
+  constexpr size_t CHUNK = 960; // bytes per line, a multiple of 3
+  char line[CHUNK / 3 * 4 + 1];
+  printf("TPMFB begin %u %u %u\n", static_cast<unsigned>(FRAME_W), static_cast<unsigned>(FRAME_H),
+         static_cast<unsigned>(vblank));
+  for (size_t off = 0; off < N; off += CHUNK) {
+    const size_t n = std::min(CHUNK, N - off);
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+      const uint32_t v = (b[off + i] << 16) | ((i + 1 < n ? b[off + i + 1] : 0) << 8) | (i + 2 < n ? b[off + i + 2] : 0);
+      line[o++] = tbl[(v >> 18) & 63];
+      line[o++] = tbl[(v >> 12) & 63];
+      line[o++] = i + 1 < n ? tbl[(v >> 6) & 63] : '=';
+      line[o++] = i + 2 < n ? tbl[v & 63] : '=';
+    }
+    line[o] = 0;
+    printf("TPMFB %s\n", line);
+  }
+  printf("TPMFB end\n");
+  fflush(stdout);
+}
 
 // ---- the disc ----
 
@@ -174,6 +249,21 @@ void video_task(void *) {
       update_frame_time(static_cast<uint64_t>(now - last_us));
     }
     last_us = now;
+    static int64_t last_status_us = 0, last_shot_us = 0;
+    static uint32_t presented = 0;
+    presented++;
+    if (now - last_status_us >= 5000000) {
+      logger.info("vblank {} | presented {} | {}x{} at ({},{}){}{}", rt_frame_count(), presented, d.w, d.h, d.x,
+                  d.y, d.rgb24 ? " 24-bit" : "", d.enabled ? "" : " (display off)");
+      last_status_us = now;
+    }
+#if CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS > 0
+    if (now - last_shot_us >= CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS * 1000000LL) {
+      print_screenshot(dst, rt_frame_count());
+      last_shot_us = now;
+    }
+#endif
+    (void)last_shot_us;
     g_video_busy = false;
   }
   vTaskDelete(nullptr);
@@ -284,6 +374,7 @@ bool init(const std::string &data_dir) {
   g_paused = false;
   g_game_done = false;
   g_ring_w = g_ring_r = 0;
+  parse_presses(CONFIG_TPM_AUTOPRESS);
 
   xTaskCreatePinnedToCore(video_task, "tpm_video", 4096, nullptr, 6, &g_video_task, 1);
   xTaskCreatePinnedToCore(audio_task, "tpm_audio", 4096, nullptr, 7, &g_audio_task, 1);
@@ -397,7 +488,7 @@ uint16_t plat_pad_buttons(int port) {
   if (s.b) b |= 1u << 13;  // circle (east)
   if (s.a) b |= 1u << 14;  // cross (south)
   if (s.x) b |= 1u << 15;  // square (west)
-  return b;
+  return b | tpm::engine::scripted_buttons(rt_frame_count());
 }
 
 void plat_audio(const int16_t *samples, int frames) {
