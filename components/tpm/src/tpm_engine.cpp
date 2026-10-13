@@ -405,6 +405,10 @@ void video_task(void *) {
     }
     const RtDisplay d = g_display;
     auto *dst = reinterpret_cast<uint16_t *>(g_frames[g_frame_index]);
+    if (g_paused.load()) { // converted just before the pause: keep the menu
+      g_video_busy = false;
+      continue;
+    }
     g_last_frame = g_frames[g_frame_index];
     Tab5Emu::get().push_frame(dst);
     g_frame_index ^= 1;
@@ -652,7 +656,7 @@ bool init(const std::string &data_dir) {
       pdPASS) {
     g_gpu_task = nullptr;
     logger.warn("no GPU worker: drawing on the game's thread");
-  } else if (CONFIG_TPM_GPU_WORKERS > 1 && xTaskCreatePinnedToCore(gpu_task, "tpm_gpu0", 8192, reinterpret_cast<void *>(0), 6, &g_gpu0_task,
+  } else if (CONFIG_TPM_GPU_WORKERS > 1 && xTaskCreatePinnedToCore(gpu_task, "tpm_gpu0", 8192, reinterpret_cast<void *>(0), 4, &g_gpu0_task,
                                      0) != pdPASS) {
     // the second worker sits above the game (5) on its core: the drawing is
     // the bottleneck, and at the rendezvous (VRAM moves, the vblank) worker 1
@@ -773,12 +777,24 @@ void plat_vblank(void) {
 // On the GPU worker (core 1), after the drawing queued before the vblank.
 void plat_display_ready(const RtDisplay *dp) {
   using namespace tpm::engine;
-  // present every other vblank at most (the game runs at 30 or less), and
-  // never queue behind a conversion that is still running
-  static uint32_t n;
-  if ((++n & 1) || g_video_busy.load() || !g_video_task || !g_rt_vram) {
+  // present when the game shows a new frame (the display moved to the other
+  // buffer), at most every other vblank (it runs at 30 or less), and every
+  // fourth anyway for screens drawn in place; a conversion is a tenth of the
+  // GPU worker's time, so not repeating the same frame matters. Never queue
+  // behind a conversion that is still running, and nothing while the
+  // emulator's pause menu is up (the GPU worker still works through what the
+  // game queued before it stopped, and its frames would cover the menu).
+  static uint32_t since;
+  static int shown_x = -1, shown_y = -1;
+  since++;
+  const bool flipped = dp->x != shown_x || dp->y != shown_y;
+  if (!((flipped && since >= 2) || since >= 4) || g_paused.load() || g_video_busy.load() || !g_video_task ||
+      !g_rt_vram) {
     return;
   }
+  since = 0;
+  shown_x = dp->x;
+  shown_y = dp->y;
   g_display = *dp;
   convert_frame(g_display, reinterpret_cast<uint16_t *>(g_frames[g_frame_index]));
   g_video_busy = true;
