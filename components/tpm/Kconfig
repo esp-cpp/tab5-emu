@@ -23,6 +23,16 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
         int "Seconds per load screen in the data viewer"
         default 4
 
+    config TPM_GPU_WORKERS
+        int "GPU workers (1: core 1 draws; 2: both cores, a band of rows each)"
+        default 1
+        range 1 2
+        depends on TPM_ENGINE
+        help
+            With 2 the second worker runs on the game's core above it. On
+            this board it measured slower: both cores then contend for PSRAM
+            and the cache with the game's recompiled code.
+
     config TPM_AUTOPRESS
         string "Test: scripted button presses (vblank:button,...)"
         default ""

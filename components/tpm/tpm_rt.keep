@@ -14,3 +14,7 @@ rt_set_gpu_trace
 g_rt_prof
 rt_gpu_set_async
 rt_gpu_worker
+rt_gpu_worker_n
+g_rt_gpu_split
+g_rt_gpu_barriers
+g_rt_gpu_wait_us

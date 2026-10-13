@@ -61,7 +61,8 @@ std::vector<uint8_t> g_exe;
 
 TaskHandle_t g_game_task{nullptr};
 TaskHandle_t g_video_task{nullptr};
-TaskHandle_t g_gpu_task{nullptr};
+TaskHandle_t g_gpu_task{nullptr};  // core 1: the GPU's command stream, top band
+TaskHandle_t g_gpu0_task{nullptr}; // core 0: the bottom band, in the game's idle time
 volatile int g_gpu_stop{0};
 TaskHandle_t g_audio_task{nullptr};
 std::atomic<bool> g_game_done{false};
@@ -197,13 +198,16 @@ void shot_task(void *) {
   vTaskDelete(nullptr);
 }
 
-// A sampling profiler for the game thread (CONFIG_TPM_PROFILE_VBLANK): a
-// task above it on its core wakes every tick; the game task is then
-// preempted, its register frame on its stack, the TCB's first word pointing
-// at it (mepc, ra, sp, ...). The samples go to the console as "TPMPROF pc ra"
-// for addr2line on the desktop.
+// A sampling profiler for the game thread and the GPU worker
+// (CONFIG_TPM_PROFILE_VBLANK): a task above the sampled one on its core
+// wakes every tick; the sampled task is then preempted, its register frame
+// on its stack, the TCB's first word pointing at it (mepc, ra, sp, ...). The
+// samples go to the console as "TPMPROF pc ra" (game) / "TPMPROFG pc ra"
+// (GPU) for addr2line on the desktop.
 #if CONFIG_TPM_PROFILE_VBLANK > 0
-void prof_task(void *) {
+void prof_task(void *arg) {
+  const bool gpu = arg != nullptr;
+  const char *tag = gpu ? "TPMPROFG" : "TPMPROF";
   constexpr int N = 8000;
   auto *pcs = static_cast<uint32_t *>(heap_caps_malloc(N * 2 * sizeof(uint32_t), MALLOC_CAP_SPIRAM));
   while (!g_stop.load() && rt_frame_count() < CONFIG_TPM_PROFILE_VBLANK) {
@@ -212,18 +216,22 @@ void prof_task(void *) {
   int n = 0;
   while (!g_stop.load() && pcs && n < N) {
     vTaskDelay(1);
-    if (g_game_task && eTaskGetState(g_game_task) == eReady) {
-      const uint32_t *top = *reinterpret_cast<uint32_t *const *>(g_game_task);
+    TaskHandle_t t = gpu ? g_gpu_task : g_game_task;
+    if (t && eTaskGetState(t) == eReady) {
+      const uint32_t *top = *reinterpret_cast<uint32_t *const *>(t);
       pcs[2 * n] = top[0];
       pcs[2 * n + 1] = top[1];
       n++;
     }
   }
+  if (gpu) {
+    vTaskDelay(pdMS_TO_TICKS(1500)); // after the game's
+  }
   for (int i = 0; i < n; i++) {
-    printf("TPMPROF %08x %08x\n", static_cast<unsigned>(pcs[2 * i]), static_cast<unsigned>(pcs[2 * i + 1]));
+    printf("%s %08x %08x\n", tag, static_cast<unsigned>(pcs[2 * i]), static_cast<unsigned>(pcs[2 * i + 1]));
     if ((i & 63) == 63) vTaskDelay(1);
   }
-  printf("TPMPROF end %d\n", n);
+  printf("%s end %d\n", tag, n);
   heap_caps_free(pcs);
   vTaskDelete(nullptr);
 }
@@ -300,6 +308,36 @@ bool exe_from_disc(std::vector<uint8_t> &exe) {
 
 // ---- tasks ----
 
+// Each task's share of its core since the last call (FreeRTOS run-time
+// stats): where the board's two cores go
+void log_task_load() {
+  static std::vector<TaskStatus_t> st;
+  static std::vector<std::pair<TaskHandle_t, configRUN_TIME_COUNTER_TYPE>> last;
+  static configRUN_TIME_COUNTER_TYPE last_total = 0;
+  st.resize(uxTaskGetNumberOfTasks() + 4);
+  configRUN_TIME_COUNTER_TYPE total = 0;
+  const UBaseType_t n = uxTaskGetSystemState(st.data(), st.size(), &total);
+  const auto window = static_cast<float>(total - last_total);
+  std::string line;
+  for (UBaseType_t i = 0; i < n; i++) {
+    const auto &t = st[i];
+    configRUN_TIME_COUNTER_TYPE prev = 0;
+    for (auto &l : last) {
+      if (l.first == t.xHandle) prev = l.second;
+    }
+    const float pct = window > 0 ? 100.0f * static_cast<float>(t.ulRunTimeCounter - prev) / window : 0;
+    if (pct >= 2.0f) {
+      line += fmt::format(" {} {:.0f}%", t.pcTaskName, pct);
+    }
+  }
+  last.clear();
+  for (UBaseType_t i = 0; i < n; i++) {
+    last.emplace_back(st[i].xHandle, st[i].ulRunTimeCounter);
+  }
+  last_total = total;
+  logger.info("  cores:{}", line);
+}
+
 void video_task(void *) {
   while (!g_stop.load()) {
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) == 0) {
@@ -321,7 +359,10 @@ void video_task(void *) {
       const int x_pad = w < static_cast<int>(FRAME_W) ? (FRAME_W - w) / 2 : 0;
       for (size_t y = 0; y < FRAME_H; y++) {
         uint16_t *out = dst + y * FRAME_W;
-        if (static_cast<int>(y) * step_y >= h) {
+        const int line = static_cast<int>(y) * step_y;
+        if (line >= h || line < d.top || line >= d.top + d.lines) {
+          // below the mode's height, or outside the vertical display range
+          // (the letterbox of the cutscenes)
           memset(out, 0, FRAME_W * 2);
           continue;
         }
@@ -336,6 +377,16 @@ void video_task(void *) {
             const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
             const uint8_t *p = row + ((d.x * 2 + sx * 3) & 2047);
             out[x_pad + x] = static_cast<uint16_t>(((p[0] & 0xF8) << 8) | ((p[1] & 0xFC) << 3) | (p[2] >> 3));
+          }
+        } else if (w == static_cast<int>(FRAME_W) && (d.x & 1) == 0 && d.x + w <= 1024) {
+          // the usual case: two pixels per word, BGR555 -> RGB565 with the
+          // top green bit repeated into the low one
+          const auto *src = reinterpret_cast<const uint32_t *>(&g_snap[y * 1024 + d.x]);
+          auto *o = reinterpret_cast<uint32_t *>(out);
+          for (size_t x = 0; x < FRAME_W / 2; x++) {
+            const uint32_t v = src[x];
+            o[x] = ((v & 0x001F001Fu) << 11) | ((v & 0x03E003E0u) << 1) | ((v & 0x02000200u) >> 4) |
+                   ((v >> 10) & 0x001F001Fu);
           }
         } else {
           const uint16_t *row = &g_snap[y * 1024];
@@ -371,10 +422,17 @@ void video_task(void *) {
       static RtProf last_prof{};
       const RtProf p = g_rt_prof;
       const float win = static_cast<float>(now - last_status_us) / 100.0f; // -> percent
-      logger.info("  game thread: gpu {:.0f}% spu {:.0f}% cd {:.0f}% vblank {:.0f}% sleep {:.0f}% (rest: the game)",
-                  (p.gpu - last_prof.gpu) / win, (p.spu - last_prof.spu) / win, (p.cd - last_prof.cd) / win,
-                  (p.vblank - last_prof.vblank) / win, (p.sleep - last_prof.sleep) / win);
+      logger.info("  gpu worker (core 1) {:.0f}% busy, band split row {}; game thread: spu {:.0f}% cd {:.0f}% "
+                  "sleep {:.0f}%",
+                  (p.gpu - last_prof.gpu) / win, g_rt_gpu_split, (p.spu - last_prof.spu) / win,
+                  (p.cd - last_prof.cd) / win, (p.sleep - last_prof.sleep) / win);
       last_prof = p;
+      static uint64_t last_wait[2];
+      logger.info("  rendezvous waits: worker 1 {:.0f}%, worker 0 {:.0f}%",
+                  (g_rt_gpu_wait_us[1] - last_wait[1]) / win, (g_rt_gpu_wait_us[0] - last_wait[0]) / win);
+      last_wait[0] = g_rt_gpu_wait_us[0];
+      last_wait[1] = g_rt_gpu_wait_us[1];
+      log_task_load();
       last_status_us = now;
     }
 #if CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS > 0
@@ -437,17 +495,23 @@ void audio_task(void *) {
   vTaskDelete(nullptr);
 }
 
-// the PSX GPU's command stream, behind the game's back (rt_gpu_set_async)
-void gpu_task(void *) {
-  rt_gpu_worker(&g_gpu_stop);
-  g_gpu_task = nullptr;
+// the PSX GPU's command stream, behind the game's back (rt_gpu_set_async):
+// worker 1 on core 1, worker 0 on core 0; each draws a band of rows
+void gpu_task(void *arg) {
+  const int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  rt_gpu_worker_n(&g_gpu_stop, idx);
+  if (idx == 1) {
+    g_gpu_task = nullptr;
+  } else {
+    g_gpu0_task = nullptr;
+  }
   vTaskDelete(nullptr);
 }
 
 void game_task(void *) {
   logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
   rt_set_realtime(1);
-  rt_gpu_set_async(g_gpu_task != nullptr);
+  rt_gpu_set_async(g_gpu_task ? (g_gpu0_task ? 2 : 1) : 0);
 #if CONFIG_TPM_GPU_TRACE_VBLANK > 0
   rt_set_gpu_trace(CONFIG_TPM_GPU_TRACE_VBLANK);
 #endif
@@ -540,7 +604,7 @@ bool init(const std::string &data_dir) {
               heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
   parse_presses(CONFIG_TPM_AUTOPRESS);
 
-  xTaskCreatePinnedToCore(video_task, "tpm_video", 4096, nullptr, 6, &g_video_task, 1);
+  xTaskCreatePinnedToCore(video_task, "tpm_video", 8192, nullptr, 6, &g_video_task, 1);
 #if CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS > 0
   if (!g_shot) {
     g_shot = static_cast<uint16_t *>(heap_caps_malloc(512 * 256 * 2, MALLOC_CAP_SPIRAM));
@@ -551,12 +615,21 @@ bool init(const std::string &data_dir) {
   // the rasterizer, on the other core (below the video and audio tasks there:
   // they are short and must not wait behind a frame's drawing)
   g_gpu_stop = 0;
-  if (xTaskCreatePinnedToCore(gpu_task, "tpm_gpu", 8192, nullptr, 4, &g_gpu_task, 1) != pdPASS) {
+  if (xTaskCreatePinnedToCore(gpu_task, "tpm_gpu", 8192, reinterpret_cast<void *>(1), 4, &g_gpu_task, 1) !=
+      pdPASS) {
     g_gpu_task = nullptr;
     logger.warn("no GPU worker: drawing on the game's thread");
+  } else if (CONFIG_TPM_GPU_WORKERS > 1 && xTaskCreatePinnedToCore(gpu_task, "tpm_gpu0", 8192, reinterpret_cast<void *>(0), 6, &g_gpu0_task,
+                                     0) != pdPASS) {
+    // the second worker sits above the game (5) on its core: the drawing is
+    // the bottleneck, and at the rendezvous (VRAM moves, the vblank) worker 1
+    // waits for it; it sleeps whenever it has nothing to draw
+    g_gpu0_task = nullptr;
+    logger.warn("no second GPU worker: core 1 draws everything");
   }
 #if CONFIG_TPM_PROFILE_VBLANK > 0
   xTaskCreatePinnedToCore(prof_task, "tpm_prof", 4096, nullptr, 10, nullptr, 0);
+  xTaskCreatePinnedToCore(prof_task, "tpm_profg", 4096, reinterpret_cast<void *>(1), 10, nullptr, 1);
 #endif
   xTaskCreatePinnedToCore(audio_task, "tpm_audio", 4096, nullptr, 7, &g_audio_task, 1);
   // The recompiled code nests a C frame per guest call (<= 304 bytes on
@@ -587,10 +660,11 @@ void deinit() {
     vTaskDelete(g_game_task);
     g_game_task = nullptr;
   }
-  if (g_gpu_task) {
+  if (g_gpu_task || g_gpu0_task) {
     g_gpu_stop = 1;
-    xTaskNotifyGive(g_gpu_task);
-    for (int i = 0; i < 100 && g_gpu_task; i++) {
+    for (int i = 0; i < 100 && (g_gpu_task || g_gpu0_task); i++) {
+      if (g_gpu_task) xTaskNotifyGive(g_gpu_task);
+      if (g_gpu0_task) xTaskNotifyGive(g_gpu0_task);
       vTaskDelay(pdMS_TO_TICKS(10));
     }
   }
@@ -683,7 +757,12 @@ void plat_display_ready(const RtDisplay *dp) {
     const int bytes = std::min(d.rgb24 ? d.w * 3 : d.w * 2, 2048);
     const int x0 = (d.x * 2) & 2047;
     for (size_t y = 0; y < SNAP_ROWS && static_cast<int>(y) * step_y < d.h; y++) {
-      const int vy = (d.y + static_cast<int>(y) * step_y) & 511;
+      const int line = static_cast<int>(y) * step_y;
+      if (line < d.top || line >= d.top + d.lines) {
+        continue; // black (the video task fills it)
+      }
+      // the display area's first row shows on the range's first line
+      const int vy = (d.y + line - d.top) & 511;
       const auto *src = reinterpret_cast<const uint8_t *>(&g_rt_vram[vy * 1024]);
       auto *out = reinterpret_cast<uint8_t *>(&g_snap[y * 1024]);
       const int first = std::min(bytes, 2048 - x0);
@@ -701,14 +780,19 @@ void plat_gpu_kick(void) {
   if (tpm::engine::g_gpu_task) {
     xTaskNotifyGive(tpm::engine::g_gpu_task);
   }
+  if (tpm::engine::g_gpu0_task) {
+    xTaskNotifyGive(tpm::engine::g_gpu0_task);
+  }
 }
 
-void plat_gpu_idle(void) {
-  using namespace tpm::engine;
-  if (xTaskGetCurrentTaskHandle() == g_gpu_task) {
-    ulTaskNotifyTake(pdTRUE, 1); // the worker: until kicked (or a tick)
-  } else {
-    esp_rom_delay_us(20); // the game's thread: the worker is on the other core
+// A worker sleeps until kicked; the game's thread, waiting for room in the
+// queue, sleeps until a worker made some (it must not spin: the second
+// worker shares its core)
+void plat_gpu_idle(void) { ulTaskNotifyTake(pdTRUE, 1); }
+
+void plat_gpu_wake_producer(void) {
+  if (tpm::engine::g_game_task) {
+    xTaskNotifyGive(tpm::engine::g_game_task);
   }
 }
 
