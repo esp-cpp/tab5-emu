@@ -33,6 +33,16 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
             this board it measured slower: both cores then contend for PSRAM
             and the cache with the game's recompiled code.
 
+    config TPM_GPU_BENCH_FILE
+        string "Test: GPU benchmark recording to embed (rt_gpu_record file)"
+        default ""
+        depends on TPM_ENGINE
+        help
+            A recording made by tpm-decomp's desktop runner (--gpu-record):
+            embedded in the firmware and replayed through the rasterizer on
+            core 1 when the cart starts, printing "TPMBENCH <us> us per
+            vblank". Only for measuring the rasterizer.
+
     config TPM_AUTOPRESS
         string "Test: scripted button presses (vblank:button,...)"
         default ""

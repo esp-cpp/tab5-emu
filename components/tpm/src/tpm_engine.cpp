@@ -5,8 +5,8 @@
 // Threads:
 //   tpm_game  (core 0) the recompiled code; the runtime's hardware model runs
 //             inline at its loop back-edges (vblank, CD, SPU, interrupts)
-//   tpm_video (core 1) converts the PSX display area of VRAM to RGB565 and
-//             hands it to the HAL, woken by the game's vblanks
+//   tpm_video (core 1) hands the frame the GPU worker converted at the
+//             vblank to the HAL
 //   tpm_audio (core 1) moves the SPU's samples to the HAL's audio queue
 //
 // The disc is a raw 2352-byte-sector image on the card (the .bin of a
@@ -43,6 +43,9 @@ extern "C" {
 #include "shared_memory.h"
 // tpm_rt.ld: the runtime's statics, for the reset between launches
 extern uint8_t _tpm_bss_start[], _tpm_bss_end[], _tpm_data_start[], _tpm_data_end[];
+#if TPM_GPU_BENCH
+extern const uint8_t _binary_gpubench_bin_start[], _binary_gpubench_bin_end[];
+#endif
 }
 
 namespace tpm::engine {
@@ -76,12 +79,6 @@ std::atomic<uint8_t *> g_last_frame{nullptr};
 std::atomic<bool> g_video_busy{false};
 RtDisplay g_display{};
 std::atomic<uint32_t> g_flips{0}; // display-area moves: the game's frames
-// The displayed rows, copied out of VRAM at the vblank on the game's thread
-// (same layout as VRAM, only the displayed span of each row filled): the
-// rasterizer draws synchronously on that thread, so read later from the video
-// task VRAM may already hold half of the next frame.
-uint16_t *g_snap{nullptr};
-constexpr size_t SNAP_ROWS = FRAME_H;
 
 // SPU output: the game's thread writes, the audio task reads
 constexpr size_t RING_FRAMES = 8192; // ~186 ms
@@ -240,33 +237,36 @@ void prof_task(void *arg) {
 // ---- the disc ----
 
 // Read-ahead: the game streams the disc sequentially, and on the card every
-// separate read pays the SD's latency; 32 sectors (75 KB) per read.
-constexpr uint32_t RA_SECTORS = 32;
+// separate read pays the SD's latency. The window is read at 512-byte file
+// offsets into a 128-byte-aligned PSRAM buffer, so FATFS hands the SD driver
+// whole sectors at a DMA-able address: an unaligned read makes the driver
+// bounce through internal DMA memory, which the Tab5 does not have to spare
+// (reads failed outright once it ran out, and the game stalled on the disc).
+constexpr uint32_t RA_BYTES = 64 * 1024;
 uint8_t *g_ra{nullptr};
-uint32_t g_ra_lba{0}, g_ra_count{0};
+uint64_t g_ra_off{0};
+uint32_t g_ra_len{0};
 
 bool read_sector(uint32_t lba, uint8_t *out) {
   if (!g_disc || lba >= g_disc_sectors) {
     return false;
   }
-  if (g_ra && lba >= g_ra_lba && lba < g_ra_lba + g_ra_count) {
-    memcpy(out, g_ra + (lba - g_ra_lba) * 2352, 2352);
-    return true;
+  const uint64_t off = static_cast<uint64_t>(lba) * 2352;
+  if (!g_ra || off < g_ra_off || off + 2352 > g_ra_off + g_ra_len) {
+    if (!g_ra) {
+      return fseek(g_disc, static_cast<long>(off), SEEK_SET) == 0 && fread(out, 1, 2352, g_disc) == 2352;
+    }
+    g_ra_off = off & ~static_cast<uint64_t>(511);
+    g_ra_len = 0;
+    if (fseek(g_disc, static_cast<long>(g_ra_off), SEEK_SET) != 0) {
+      return false;
+    }
+    g_ra_len = static_cast<uint32_t>(fread(g_ra, 1, RA_BYTES, g_disc));
+    if (off + 2352 > g_ra_off + g_ra_len) {
+      return false;
+    }
   }
-  if (fseek(g_disc, static_cast<long>(lba) * 2352, SEEK_SET) != 0) {
-    return false;
-  }
-  if (!g_ra) {
-    return fread(out, 1, 2352, g_disc) == 2352;
-  }
-  const uint32_t n = std::min(RA_SECTORS, g_disc_sectors - lba);
-  const size_t got = fread(g_ra, 2352, n, g_disc);
-  g_ra_lba = lba;
-  g_ra_count = static_cast<uint32_t>(got);
-  if (got == 0) {
-    return false;
-  }
-  memcpy(out, g_ra, 2352);
+  memcpy(out, g_ra + (off - g_ra_off), 2352);
   return true;
 }
 
@@ -338,67 +338,73 @@ void log_task_load() {
   logger.info("  cores:{}", line);
 }
 
+// The displayed part of VRAM as the panel's RGB565 frame, one pass from VRAM.
+// On the GPU worker at the vblank marker, so it sees exactly the drawing
+// queued before it: converted later from another core, the glass in the first
+// room and the pause menu came out wrong (the game draws into the frame on
+// display at times).
+void convert_frame(const RtDisplay &d, uint16_t *dst) {
+  if (!d.enabled) {
+    memset(dst, 0, FRAME_W * FRAME_H * 2);
+  } else {
+    // centre narrower modes, sample wider ones; 480-line modes show every
+    // other line
+    const int w = d.w, h = d.h;
+    const int step_y = h > static_cast<int>(FRAME_H) ? 2 : 1;
+    const int x_pad = w < static_cast<int>(FRAME_W) ? (FRAME_W - w) / 2 : 0;
+    for (size_t y = 0; y < FRAME_H; y++) {
+      uint16_t *out = dst + y * FRAME_W;
+      const int line = static_cast<int>(y) * step_y;
+      if (line >= h || line < d.top || line >= d.top + d.lines) {
+        // below the mode's height, or outside the vertical display range
+        // (the letterbox of the cutscenes)
+        memset(out, 0, FRAME_W * 2);
+        continue;
+      }
+      if (x_pad) {
+        memset(out, 0, x_pad * 2);
+        memset(out + FRAME_W - x_pad, 0, x_pad * 2);
+      }
+      const size_t n = std::min<size_t>(w, FRAME_W);
+      // the display area's first row shows on the range's first line
+      const uint16_t *vrow = &g_rt_vram[((d.y + line - d.top) & 511) * 1024];
+      if (d.rgb24) {
+        const auto *row = reinterpret_cast<const uint8_t *>(vrow);
+        for (size_t x = 0; x < n; x++) {
+          const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
+          const uint8_t *p = row + ((d.x * 2 + sx * 3) & 2047);
+          out[x_pad + x] = static_cast<uint16_t>(((p[0] & 0xF8) << 8) | ((p[1] & 0xFC) << 3) | (p[2] >> 3));
+        }
+      } else if (w == static_cast<int>(FRAME_W) && (d.x & 1) == 0 && d.x + w <= 1024) {
+        // the usual case: two pixels per word, BGR555 -> RGB565 with the
+        // top green bit repeated into the low one
+        const auto *src = reinterpret_cast<const uint32_t *>(vrow + d.x);
+        auto *o = reinterpret_cast<uint32_t *>(out);
+        for (size_t x = 0; x < FRAME_W / 2; x++) {
+          const uint32_t v = src[x];
+          o[x] = ((v & 0x001F001Fu) << 11) | ((v & 0x03E003E0u) << 1) | ((v & 0x02000200u) >> 4) |
+                 ((v >> 10) & 0x001F001Fu);
+        }
+      } else {
+        const uint16_t *row = vrow;
+        for (size_t x = 0; x < n; x++) {
+          const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
+          const uint16_t v = row[(d.x + sx) & 1023];
+          const uint16_t r = v & 0x1F, g = (v >> 5) & 0x1F, b = (v >> 10) & 0x1F;
+          out[x_pad + x] = static_cast<uint16_t>((r << 11) | (((g << 1) | (g >> 4)) << 5) | b);
+        }
+      }
+    }
+  }
+}
+
 void video_task(void *) {
   while (!g_stop.load()) {
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) == 0) {
       continue;
     }
     const RtDisplay d = g_display;
-    if (!g_snap) {
-      g_video_busy = false;
-      continue;
-    }
     auto *dst = reinterpret_cast<uint16_t *>(g_frames[g_frame_index]);
-    if (!d.enabled) {
-      memset(dst, 0, FRAME_W * FRAME_H * 2);
-    } else {
-      // centre narrower modes, sample wider ones; 480-line modes show every
-      // other line
-      const int w = d.w, h = d.h;
-      const int step_y = h > static_cast<int>(FRAME_H) ? 2 : 1;
-      const int x_pad = w < static_cast<int>(FRAME_W) ? (FRAME_W - w) / 2 : 0;
-      for (size_t y = 0; y < FRAME_H; y++) {
-        uint16_t *out = dst + y * FRAME_W;
-        const int line = static_cast<int>(y) * step_y;
-        if (line >= h || line < d.top || line >= d.top + d.lines) {
-          // below the mode's height, or outside the vertical display range
-          // (the letterbox of the cutscenes)
-          memset(out, 0, FRAME_W * 2);
-          continue;
-        }
-        if (x_pad) {
-          memset(out, 0, x_pad * 2);
-          memset(out + FRAME_W - x_pad, 0, x_pad * 2);
-        }
-        const size_t n = std::min<size_t>(w, FRAME_W);
-        if (d.rgb24) {
-          const auto *row = reinterpret_cast<const uint8_t *>(&g_snap[y * 1024]);
-          for (size_t x = 0; x < n; x++) {
-            const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
-            const uint8_t *p = row + ((d.x * 2 + sx * 3) & 2047);
-            out[x_pad + x] = static_cast<uint16_t>(((p[0] & 0xF8) << 8) | ((p[1] & 0xFC) << 3) | (p[2] >> 3));
-          }
-        } else if (w == static_cast<int>(FRAME_W) && (d.x & 1) == 0 && d.x + w <= 1024) {
-          // the usual case: two pixels per word, BGR555 -> RGB565 with the
-          // top green bit repeated into the low one
-          const auto *src = reinterpret_cast<const uint32_t *>(&g_snap[y * 1024 + d.x]);
-          auto *o = reinterpret_cast<uint32_t *>(out);
-          for (size_t x = 0; x < FRAME_W / 2; x++) {
-            const uint32_t v = src[x];
-            o[x] = ((v & 0x001F001Fu) << 11) | ((v & 0x03E003E0u) << 1) | ((v & 0x02000200u) >> 4) |
-                   ((v >> 10) & 0x001F001Fu);
-          }
-        } else {
-          const uint16_t *row = &g_snap[y * 1024];
-          for (size_t x = 0; x < n; x++) {
-            const size_t sx = w > static_cast<int>(FRAME_W) ? x * w / FRAME_W : x;
-            const uint16_t v = row[(d.x + sx) & 1023];
-            const uint16_t r = v & 0x1F, g = (v >> 5) & 0x1F, b = (v >> 10) & 0x1F;
-            out[x_pad + x] = static_cast<uint16_t>((r << 11) | (((g << 1) | (g >> 4)) << 5) | b);
-          }
-        }
-      }
-    }
     g_last_frame = g_frames[g_frame_index];
     Tab5Emu::get().push_frame(dst);
     g_frame_index ^= 1;
@@ -508,7 +514,34 @@ void gpu_task(void *arg) {
   vTaskDelete(nullptr);
 }
 
+#if TPM_GPU_BENCH
+// the embedded recording through the rasterizer, on the GPU worker's core
+void bench_task(void *arg) {
+  const size_t n = _binary_gpubench_bin_end - _binary_gpubench_bin_start;
+  auto *rec = static_cast<uint32_t *>(heap_caps_malloc(n, MALLOC_CAP_SPIRAM));
+  if (rec) {
+    memcpy(rec, _binary_gpubench_bin_start, n);
+    static const char *const modes[] = {"all", "no span pixels", "setup only", "no triangles",
+                                        "span pixels to internal RAM", "all, per-row dispatch",
+                                        "all, no pre-modulated palettes"};
+    for (int mode = 0; mode < 7; mode++) {
+      rt_gpu_bench_mode(mode);
+      const uint32_t us = rt_gpu_bench(rec, static_cast<uint32_t>(n / 4), 3);
+      printf("TPMBENCH %u us per vblank (%s)\n", static_cast<unsigned>(us), modes[mode]);
+    }
+    rt_gpu_bench_mode(0);
+    heap_caps_free(rec);
+  }
+  xTaskNotifyGive(static_cast<TaskHandle_t>(arg));
+  vTaskDelete(nullptr);
+}
+#endif
+
 void game_task(void *) {
+#if TPM_GPU_BENCH
+  xTaskCreatePinnedToCore(bench_task, "tpm_bench", 8192, xTaskGetCurrentTaskHandle(), 4, nullptr, 1);
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#endif
   logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
   rt_set_realtime(1);
   rt_gpu_set_async(g_gpu_task ? (g_gpu0_task ? 2 : 1) : 0);
@@ -557,8 +590,8 @@ bool init(const std::string &data_dir) {
     return false;
   }
   setvbuf(g_disc, nullptr, _IONBF, 0); // the read-ahead buffers instead
-  g_ra = static_cast<uint8_t *>(heap_caps_malloc(RA_SECTORS * 2352, MALLOC_CAP_SPIRAM));
-  g_ra_count = 0;
+  g_ra = static_cast<uint8_t *>(heap_caps_aligned_alloc(128, RA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA));
+  g_ra_len = 0;
   fseek(g_disc, 0, SEEK_END);
   g_disc_sectors = static_cast<uint32_t>(ftell(g_disc) / 2352);
   logger.info("disc {}: {} sectors", disc, g_disc_sectors);
@@ -593,14 +626,14 @@ bool init(const std::string &data_dir) {
   emu.audio_max_wait_ms(30);
 
   g_ring = static_cast<int16_t *>(heap_caps_calloc(RING_FRAMES * 2, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-  g_snap = static_cast<uint16_t *>(heap_caps_calloc(SNAP_ROWS * 1024, sizeof(uint16_t), MALLOC_CAP_SPIRAM));
   g_resume = xSemaphoreCreateBinary();
   g_stop = false;
   g_paused = false;
   g_game_done = false;
   g_ring_w = g_ring_r = 0;
   reset_statics();
-  logger.info("internal free {} B, PSRAM free {} B (largest {})", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+  logger.info("internal free {} B (DMA-capable {} B), PSRAM free {} B (largest {})",
+              heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
               heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
   parse_presses(CONFIG_TPM_AUTOPRESS);
 
@@ -680,11 +713,9 @@ void deinit() {
   }
   heap_caps_free(g_ra);
   g_ra = nullptr;
-  g_ra_count = 0;
+  g_ra_len = 0;
   heap_caps_free(g_ring);
   g_ring = nullptr;
-  heap_caps_free(g_snap);
-  g_snap = nullptr;
   if (g_resume) {
     vSemaphoreDelete(g_resume);
     g_resume = nullptr;
@@ -745,33 +776,11 @@ void plat_display_ready(const RtDisplay *dp) {
   // present every other vblank at most (the game runs at 30 or less), and
   // never queue behind a conversion that is still running
   static uint32_t n;
-  if ((++n & 1) || g_video_busy.load() || !g_video_task || !g_snap || !g_rt_vram) {
+  if ((++n & 1) || g_video_busy.load() || !g_video_task || !g_rt_vram) {
     return;
   }
-  const RtDisplay d = *dp;
-  g_display = d;
-  if (d.enabled) {
-    // the displayed span of each displayed row (bytes, wrapping at the row's
-    // 2 KB like the hardware)
-    const int step_y = d.h > static_cast<int>(FRAME_H) ? 2 : 1;
-    const int bytes = std::min(d.rgb24 ? d.w * 3 : d.w * 2, 2048);
-    const int x0 = (d.x * 2) & 2047;
-    for (size_t y = 0; y < SNAP_ROWS && static_cast<int>(y) * step_y < d.h; y++) {
-      const int line = static_cast<int>(y) * step_y;
-      if (line < d.top || line >= d.top + d.lines) {
-        continue; // black (the video task fills it)
-      }
-      // the display area's first row shows on the range's first line
-      const int vy = (d.y + line - d.top) & 511;
-      const auto *src = reinterpret_cast<const uint8_t *>(&g_rt_vram[vy * 1024]);
-      auto *out = reinterpret_cast<uint8_t *>(&g_snap[y * 1024]);
-      const int first = std::min(bytes, 2048 - x0);
-      memcpy(out + x0, src + x0, first);
-      if (first < bytes) {
-        memcpy(out, src, bytes - first);
-      }
-    }
-  }
+  g_display = *dp;
+  convert_frame(g_display, reinterpret_cast<uint16_t *>(g_frames[g_frame_index]));
   g_video_busy = true;
   xTaskNotifyGive(g_video_task);
 }
@@ -796,24 +805,42 @@ void plat_gpu_wake_producer(void) {
   }
 }
 
+// The HAL's merged gamepad (touch zones, USB HID pad, keyboard) as a PSX
+// digital pad. Face buttons by position, as in the MGS port: the HAL
+// normalises a pad's face buttons to A = east, B = south, X = north,
+// Y = west, so B is Cross, A Circle, Y Square and X Triangle. A USB pad's
+// trigger is folded into its shoulder bit and also reported alone (l2 / r2),
+// so L1 is "l without l2". The left stick drives the d-pad.
 uint16_t plat_pad_buttons(int port) {
   if (port != 0) {
     return 0;
   }
-  const auto s = Tab5Emu::get().gamepad_state();
+  auto &emu = Tab5Emu::get();
+  const auto s = emu.gamepad_state();
+  bool up = s.up, down = s.down, left = s.left, right = s.right;
+  if (emu.usb_gamepad_present()) {
+    constexpr int DEAD = 32767 * 4 / 10;
+    const auto ax = emu.gamepad_axes();
+    left |= ax.lx < -DEAD;
+    right |= ax.lx > DEAD;
+    up |= ax.ly < -DEAD;
+    down |= ax.ly > DEAD;
+  }
   uint16_t b = 0;
   if (s.select) b |= 1u << 0;
   if (s.start) b |= 1u << 3;
-  if (s.up) b |= 1u << 4;
-  if (s.right) b |= 1u << 5;
-  if (s.down) b |= 1u << 6;
-  if (s.left) b |= 1u << 7;
-  if (s.l) b |= 1u << 10;  // L1
-  if (s.r) b |= 1u << 11;  // R1
-  if (s.y) b |= 1u << 12;  // triangle (north)
-  if (s.b) b |= 1u << 13;  // circle (east)
-  if (s.a) b |= 1u << 14;  // cross (south)
-  if (s.x) b |= 1u << 15;  // square (west)
+  if (up) b |= 1u << 4;
+  if (right) b |= 1u << 5;
+  if (down) b |= 1u << 6;
+  if (left) b |= 1u << 7;
+  if (s.l2) b |= 1u << 8;            // L2
+  if (s.r2) b |= 1u << 9;            // R2
+  if (s.l && !s.l2) b |= 1u << 10;   // L1
+  if (s.r && !s.r2) b |= 1u << 11;   // R1
+  if (s.x) b |= 1u << 12;            // triangle (north)
+  if (s.a) b |= 1u << 13;            // circle (east)
+  if (s.b) b |= 1u << 14;            // cross (south)
+  if (s.y) b |= 1u << 15;            // square (west)
   return b | tpm::engine::scripted_buttons(rt_frame_count());
 }
 

@@ -18,3 +18,5 @@ rt_gpu_worker_n
 g_rt_gpu_split
 g_rt_gpu_barriers
 g_rt_gpu_wait_us
+rt_gpu_bench
+rt_gpu_bench_mode
