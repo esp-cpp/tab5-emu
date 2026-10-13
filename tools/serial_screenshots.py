@@ -4,8 +4,8 @@
     tools/serial_screenshots.py session.log out_dir/
 
 The Tab5 prints them with CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS: a "begin W H
-vblank" line, base64 lines of the RGB565 frame, an "end" line. Incomplete
-frames (lines lost or interleaved) are skipped.
+vblank" line, numbered base64 lines of the RGB565 frame ("TPMFB <n> <data>",
+960 bytes each), an "end" line. Lines other output broke are left black.
 """
 import base64
 import os
@@ -45,10 +45,14 @@ def main():
                 continue
             body = line[i + 6:]
             if body.startswith("begin "):
-                w, h, vb = (int(x) for x in body.split()[1:4])
-                frame = (w, h, vb, bytearray())
+                try:
+                    w, h, vb = (int(x) for x in body.split()[1:4])
+                except ValueError:
+                    frame = None
+                    continue
+                frame = (w, h, vb, bytearray(w * h * 2))
             elif body == "end":
-                if frame and len(frame[3]) == frame[0] * frame[1] * 2:
+                if frame:
                     w, h, vb, data = frame
                     path = os.path.join(out, "vblank%06d.png" % vb)
                     write_png(path, w, h, struct.unpack("<%dH" % (w * h), data))
@@ -57,9 +61,12 @@ def main():
                 frame = None
             elif frame is not None:
                 try:
-                    frame[3].extend(base64.b64decode(body))
+                    idx, b64 = body.split(" ", 1)
+                    chunk = base64.b64decode(b64, validate=True)
+                    off = int(idx) * 960
+                    frame[3][off:off + len(chunk)] = chunk[:max(0, len(frame[3]) - off)]
                 except Exception:
-                    frame = None
+                    pass  # a line other output broke
     print("%d frames" % n, file=sys.stderr)
 
 

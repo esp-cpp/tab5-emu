@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <esp_heap_caps.h>
+#include <esp_rom_sys.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -60,6 +61,8 @@ std::vector<uint8_t> g_exe;
 
 TaskHandle_t g_game_task{nullptr};
 TaskHandle_t g_video_task{nullptr};
+TaskHandle_t g_gpu_task{nullptr};
+volatile int g_gpu_stop{0};
 TaskHandle_t g_audio_task{nullptr};
 std::atomic<bool> g_game_done{false};
 std::atomic<bool> g_stop{false};
@@ -178,7 +181,7 @@ void print_screenshot(const uint16_t *px, size_t w, size_t h, uint32_t vblank) {
       line[o++] = i + 2 < n ? tbl[v & 63] : '=';
     }
     line[o] = 0;
-    printf("TPMFB %s\n", line);
+    printf("TPMFB %u %s\n", static_cast<unsigned>(off / CHUNK), line);
   }
   printf("TPMFB end\n");
   fflush(stdout);
@@ -194,16 +197,69 @@ void shot_task(void *) {
   vTaskDelete(nullptr);
 }
 
+// A sampling profiler for the game thread (CONFIG_TPM_PROFILE_VBLANK): a
+// task above it on its core wakes every tick; the game task is then
+// preempted, its register frame on its stack, the TCB's first word pointing
+// at it (mepc, ra, sp, ...). The samples go to the console as "TPMPROF pc ra"
+// for addr2line on the desktop.
+#if CONFIG_TPM_PROFILE_VBLANK > 0
+void prof_task(void *) {
+  constexpr int N = 8000;
+  auto *pcs = static_cast<uint32_t *>(heap_caps_malloc(N * 2 * sizeof(uint32_t), MALLOC_CAP_SPIRAM));
+  while (!g_stop.load() && rt_frame_count() < CONFIG_TPM_PROFILE_VBLANK) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  int n = 0;
+  while (!g_stop.load() && pcs && n < N) {
+    vTaskDelay(1);
+    if (g_game_task && eTaskGetState(g_game_task) == eReady) {
+      const uint32_t *top = *reinterpret_cast<uint32_t *const *>(g_game_task);
+      pcs[2 * n] = top[0];
+      pcs[2 * n + 1] = top[1];
+      n++;
+    }
+  }
+  for (int i = 0; i < n; i++) {
+    printf("TPMPROF %08x %08x\n", static_cast<unsigned>(pcs[2 * i]), static_cast<unsigned>(pcs[2 * i + 1]));
+    if ((i & 63) == 63) vTaskDelay(1);
+  }
+  printf("TPMPROF end %d\n", n);
+  heap_caps_free(pcs);
+  vTaskDelete(nullptr);
+}
+#endif
+
 // ---- the disc ----
+
+// Read-ahead: the game streams the disc sequentially, and on the card every
+// separate read pays the SD's latency; 32 sectors (75 KB) per read.
+constexpr uint32_t RA_SECTORS = 32;
+uint8_t *g_ra{nullptr};
+uint32_t g_ra_lba{0}, g_ra_count{0};
 
 bool read_sector(uint32_t lba, uint8_t *out) {
   if (!g_disc || lba >= g_disc_sectors) {
     return false;
   }
+  if (g_ra && lba >= g_ra_lba && lba < g_ra_lba + g_ra_count) {
+    memcpy(out, g_ra + (lba - g_ra_lba) * 2352, 2352);
+    return true;
+  }
   if (fseek(g_disc, static_cast<long>(lba) * 2352, SEEK_SET) != 0) {
     return false;
   }
-  return fread(out, 1, 2352, g_disc) == 2352;
+  if (!g_ra) {
+    return fread(out, 1, 2352, g_disc) == 2352;
+  }
+  const uint32_t n = std::min(RA_SECTORS, g_disc_sectors - lba);
+  const size_t got = fread(g_ra, 2352, n, g_disc);
+  g_ra_lba = lba;
+  g_ra_count = static_cast<uint32_t>(got);
+  if (got == 0) {
+    return false;
+  }
+  memcpy(out, g_ra, 2352);
+  return true;
 }
 
 // SLUS_008.84 out of the image's root directory (ISO9660, Mode 2 Form 1)
@@ -311,6 +367,14 @@ void video_task(void *) {
                   (flips - last_flips) * 1e6f / (now - last_status_us), d.w, d.h, d.x, d.y, d.rgb24 ? " 24-bit" : "",
                   d.enabled ? "" : " (display off)");
       last_flips = flips;
+      // the game thread's time over the same window
+      static RtProf last_prof{};
+      const RtProf p = g_rt_prof;
+      const float win = static_cast<float>(now - last_status_us) / 100.0f; // -> percent
+      logger.info("  game thread: gpu {:.0f}% spu {:.0f}% cd {:.0f}% vblank {:.0f}% sleep {:.0f}% (rest: the game)",
+                  (p.gpu - last_prof.gpu) / win, (p.spu - last_prof.spu) / win, (p.cd - last_prof.cd) / win,
+                  (p.vblank - last_prof.vblank) / win, (p.sleep - last_prof.sleep) / win);
+      last_prof = p;
       last_status_us = now;
     }
 #if CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS > 0
@@ -373,9 +437,17 @@ void audio_task(void *) {
   vTaskDelete(nullptr);
 }
 
+// the PSX GPU's command stream, behind the game's back (rt_gpu_set_async)
+void gpu_task(void *) {
+  rt_gpu_worker(&g_gpu_stop);
+  g_gpu_task = nullptr;
+  vTaskDelete(nullptr);
+}
+
 void game_task(void *) {
   logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
   rt_set_realtime(1);
+  rt_gpu_set_async(g_gpu_task != nullptr);
 #if CONFIG_TPM_GPU_TRACE_VBLANK > 0
   rt_set_gpu_trace(CONFIG_TPM_GPU_TRACE_VBLANK);
 #endif
@@ -420,7 +492,9 @@ bool init(const std::string &data_dir) {
     logger.error("cannot open {}", disc);
     return false;
   }
-  setvbuf(g_disc, nullptr, _IOFBF, 4096);
+  setvbuf(g_disc, nullptr, _IONBF, 0); // the read-ahead buffers instead
+  g_ra = static_cast<uint8_t *>(heap_caps_malloc(RA_SECTORS * 2352, MALLOC_CAP_SPIRAM));
+  g_ra_count = 0;
   fseek(g_disc, 0, SEEK_END);
   g_disc_sectors = static_cast<uint32_t>(ftell(g_disc) / 2352);
   logger.info("disc {}: {} sectors", disc, g_disc_sectors);
@@ -471,7 +545,18 @@ bool init(const std::string &data_dir) {
   if (!g_shot) {
     g_shot = static_cast<uint16_t *>(heap_caps_malloc(512 * 256 * 2, MALLOC_CAP_SPIRAM));
   }
-  xTaskCreatePinnedToCore(shot_task, "tpm_shot", 4096, nullptr, 1, &g_shot_task, 1);
+  // above the GPU worker: printing mostly waits on the console
+  xTaskCreatePinnedToCore(shot_task, "tpm_shot", 4096, nullptr, 5, &g_shot_task, 1);
+#endif
+  // the rasterizer, on the other core (below the video and audio tasks there:
+  // they are short and must not wait behind a frame's drawing)
+  g_gpu_stop = 0;
+  if (xTaskCreatePinnedToCore(gpu_task, "tpm_gpu", 8192, nullptr, 4, &g_gpu_task, 1) != pdPASS) {
+    g_gpu_task = nullptr;
+    logger.warn("no GPU worker: drawing on the game's thread");
+  }
+#if CONFIG_TPM_PROFILE_VBLANK > 0
+  xTaskCreatePinnedToCore(prof_task, "tpm_prof", 4096, nullptr, 10, nullptr, 0);
 #endif
   xTaskCreatePinnedToCore(audio_task, "tpm_audio", 4096, nullptr, 7, &g_audio_task, 1);
   // The recompiled code nests a C frame per guest call (<= 304 bytes on
@@ -502,6 +587,13 @@ void deinit() {
     vTaskDelete(g_game_task);
     g_game_task = nullptr;
   }
+  if (g_gpu_task) {
+    g_gpu_stop = 1;
+    xTaskNotifyGive(g_gpu_task);
+    for (int i = 0; i < 100 && g_gpu_task; i++) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+  }
   g_stop = true;
   if (g_video_task) {
     xTaskNotifyGive(g_video_task);
@@ -512,6 +604,9 @@ void deinit() {
     fclose(g_disc);
     g_disc = nullptr;
   }
+  heap_caps_free(g_ra);
+  g_ra = nullptr;
+  g_ra_count = 0;
   heap_caps_free(g_ring);
   g_ring = nullptr;
   heap_caps_free(g_snap);
@@ -560,9 +655,6 @@ uint32_t plat_disc_sectors(void) { return tpm::engine::g_disc_sectors; }
 
 void plat_vblank(void) {
   using namespace tpm::engine;
-  // present every other vblank at most (the game runs at 30 or less), and
-  // never queue behind a conversion that is still running
-  static uint32_t n;
   static int last_x = -1, last_y = -1;
   RtDisplay d;
   rt_gpu_display(&d);
@@ -571,9 +663,18 @@ void plat_vblank(void) {
     last_x = d.x;
     last_y = d.y;
   }
+}
+
+// On the GPU worker (core 1), after the drawing queued before the vblank.
+void plat_display_ready(const RtDisplay *dp) {
+  using namespace tpm::engine;
+  // present every other vblank at most (the game runs at 30 or less), and
+  // never queue behind a conversion that is still running
+  static uint32_t n;
   if ((++n & 1) || g_video_busy.load() || !g_video_task || !g_snap || !g_rt_vram) {
     return;
   }
+  const RtDisplay d = *dp;
   g_display = d;
   if (d.enabled) {
     // the displayed span of each displayed row (bytes, wrapping at the row's
@@ -594,6 +695,21 @@ void plat_vblank(void) {
   }
   g_video_busy = true;
   xTaskNotifyGive(g_video_task);
+}
+
+void plat_gpu_kick(void) {
+  if (tpm::engine::g_gpu_task) {
+    xTaskNotifyGive(tpm::engine::g_gpu_task);
+  }
+}
+
+void plat_gpu_idle(void) {
+  using namespace tpm::engine;
+  if (xTaskGetCurrentTaskHandle() == g_gpu_task) {
+    ulTaskNotifyTake(pdTRUE, 1); // the worker: until kicked (or a tick)
+  } else {
+    esp_rom_delay_us(20); // the game's thread: the worker is on the other core
+  }
 }
 
 uint16_t plat_pad_buttons(int port) {

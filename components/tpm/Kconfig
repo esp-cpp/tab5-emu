@@ -54,4 +54,9 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
         help
             Compare with the desktop runner's --gpu-trace N.
 
+    config TPM_PROFILE_VBLANK
+        int "Test: sample the game thread's PC for 8000 ticks from this vblank (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+
 endmenu
