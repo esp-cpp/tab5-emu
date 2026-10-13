@@ -16,7 +16,9 @@ struct GamepadState {
     LEFT = 8,
     RIGHT = 9,
     L = 10,
-    R = 11
+    R = 11,
+    L2 = 12,
+    R2 = 13
   };
 
   union {
@@ -31,8 +33,10 @@ struct GamepadState {
       int down : 1;
       int left : 1;
       int right : 1;
-      int l : 1; ///< left shoulder (SNES L, GBA L)
-      int r : 1; ///< right shoulder
+      int l : 1; ///< left shoulder (SNES L, GBA L); a USB pad's L1 or L2
+      int r : 1; ///< right shoulder; R1 or R2
+      int l2 : 1; ///< left trigger on its own (PlayStation L2); l is set too
+      int r2 : 1; ///< right trigger on its own (R2); r is set too
     };
     uint16_t buttons{0};
   };
@@ -52,6 +56,8 @@ struct GamepadState {
       case Button::RIGHT: return right;
       case Button::L: return l;
       case Button::R: return r;
+      case Button::L2: return l2;
+      case Button::R2: return r2;
       default: return false;
     }
   }

@@ -25,9 +25,9 @@ public:
 
   ~JkCart() override {
     deinit();
-    // the heap is clean right after the engine shutdown: reserve the arena
-    // again now, before the GUI fragments it
-    Tab5Emu::get().reserve_rom_arena();
+    // the ROM arena is reserved again by the launcher once the whole cart,
+    // pause menu included, is gone (main.cpp): here the menu's cached
+    // screenshots still sit in the hole and the reservation failed
   }
 
   void reset() override {

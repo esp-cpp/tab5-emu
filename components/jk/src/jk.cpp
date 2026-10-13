@@ -398,6 +398,10 @@ int jk_esp_park_point(void) {
   }
   g_parked = true;
   while (g_paused && !g_engine_stop && !jk_esp_quit_requested) {
+    // the pause menu's save / load / reset arrive while parked here: serve
+    // them, or request() times out and the menu shows a state that was
+    // never written (the loop above only looks between frames)
+    run_pending_request();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
   g_parked = false;
@@ -590,9 +594,22 @@ void jk_esp_pool_report() {
 // PSRAM only, on purpose: the engine's material cache evicts when an
 // allocation fails, and a fallback to internal RAM would instead drain the
 // internal heap (SD card DMA buffers, USB) once PSRAM is full.
+//
+// Zeroed, like calloc: the engine reads some of what it allocates before
+// writing it (the world material array's free-on-reload walk visits entries
+// a load never filled in). On a fresh boot that memory had never been used
+// and read as zeros; after another cart ran (MGS) the same heap holds its
+// leftovers, and the walk followed them into a load fault.
+//
+// No reserve: the engine's material cache grows until an allocation fails
+// (RDMATERIAL_LRU_LOAD_UNLOAD evicts on failure) and the level's working set
+// needs essentially all of PSRAM -- holding back even 128 KB left it
+// evicting every frame. Whatever else in the firmware allocates while the
+// engine runs must do so up front (the frame buffers are) or cope with NULL.
 void *jk_esp_malloc_site(size_t size, const void *site) {
   void *p = size <= POOL_CLASSES[POOL_NUM_CLASSES - 1] ? pool_alloc(size) : nullptr;
   if (!p) p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (p) memset(p, 0, size);
 #if defined(JK_ESP_FS_DEBUG)
   alloc_track(p, size, site);
 #endif
@@ -852,7 +869,21 @@ bool init(const Config &config) {
   g_engine_running = true;
   auto ok = xTaskCreatePinnedToCoreWithCaps(
       [](void *) {
-        logger.info("heap before engine startup: internal {} (largest {}), psram {} (largest {})",
+        // The frame conversion buffers (about 1 MB) are needed at the first present
+  // of a mode, which comes after the level load has filled PSRAM: the
+  // material cache grows until an allocation fails. Reserved now, so that
+  // assign() later finds the capacity and cannot throw std::bad_alloc.
+  try {
+    const size_t w = CONFIG_JK_INTERNAL_WIDTH, h = CONFIG_JK_INTERNAL_HEIGHT;
+    g_last_rgb565.reserve(std::max<size_t>(w * h * 2, 640 * 480 * 2));
+    g_frame8[0].reserve(std::max<size_t>(w * h, 640 * 480));
+    g_frame8[1].reserve(std::max<size_t>(w * h, 640 * 480));
+    g_overlay8[0].reserve(640 * 480);
+    g_overlay8[1].reserve(640 * 480);
+  } catch (const std::bad_alloc &) {
+    logger.warn("could not reserve the frame buffers up front");
+  }
+  logger.info("heap before engine startup: internal {} (largest {}), psram {} (largest {})",
                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                     heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         jk_esp_pool_create(); // no-op after the first session (see ensure_pool)

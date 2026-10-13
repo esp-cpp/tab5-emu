@@ -7,7 +7,7 @@
 #include "format.hpp"
 
 
-enum class Emulator { UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA };
+enum class Emulator { UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA, MGS };
 
 struct RomInfo {
   std::string name;
@@ -23,6 +23,8 @@ struct RomInfo {
 ///   - "*.jk"  / "jk.cd"  / "JK1.gob" : Jedi Knight (the directory containing
 ///                                      the file is the game install dir)
 ///   - "dark.gob" / "*.df"            : Dark Forces
+///   - "STAGE.DIR" / "*.mgs"          : Metal Gear Solid (the directory containing
+///                                      the file holds the extracted disc files)
 std::vector<RomInfo> parse_metadata(const std::string &metadata_path);
 
 template <> struct fmt::formatter<Emulator> {
@@ -41,6 +43,8 @@ template <> struct fmt::formatter<Emulator> {
       return fmt::format_to(ctx.out(), "GBA");
     case Emulator::DARK_FORCES:
       return fmt::format_to(ctx.out(), "DARK_FORCES");
+    case Emulator::MGS:
+      return fmt::format_to(ctx.out(), "MGS");
     default:
       return fmt::format_to(ctx.out(), "UNKNOWN");
     }

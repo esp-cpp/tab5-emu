@@ -273,11 +273,19 @@ extern u16 palette_ram[512];
 extern u16 oam_ram[512];
 extern u16 palette_ram_converted[512];
 extern u16 io_registers[512];
-extern u8 vram[1024 * 96];
+/* The big RAM arrays are shared-memory allocations made by the cart at
+ * init (components/shared_memory), not statics: the cores never run at
+ * once, so their PSRAM is handed from one to the next instead of being
+ * held for all of them. */
+#define GBA_VRAM_SIZE (1024 * 96)
+#define GBA_EWRAM_SIZE (1024 * 256 * 2)
+#define GBA_IWRAM_SIZE (1024 * 32 * 2)
+#define GBA_GAMEPAK_BACKUP_SIZE (1024 * 128)
+extern u8 *vram;
 extern u8 bios_rom[1024 * 16];
 // Double buffer used for SMC detection
-extern u8 ewram[1024 * 256 * 2];
-extern u8 iwram[1024 * 32 * 2];
+extern u8 *ewram;
+extern u8 *iwram;
 
 extern u8 *memory_map_read[8 * 1024];
 
@@ -317,7 +325,7 @@ extern u32 sram_bankcount;
 extern u32 flash_bank_cnt;
 extern u32 eeprom_size;
 
-extern u8 gamepak_backup[1024 * 128];
+extern u8 *gamepak_backup;
 
 // Page sticky bit routines
 extern u32 gamepak_sticky_bit[1024/32];

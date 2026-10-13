@@ -35,7 +35,7 @@ SnesModel* Model = &M1SNES;
 
 int32_t OpAddress = 0;
 
-CMemory Memory;
+CMemory *Memory_p; /* shared-memory allocation, see memmap.h */
 
 uint8_t OpenBus = 0;
 
@@ -67,7 +67,7 @@ uint32_t odd_low[4][16];
 uint32_t even_high[4][16];
 uint32_t even_low[4][16];
 
-SCheatData Cheat;
+SCheatData *Cheat_p; /* shared-memory allocation, see cheats2.c */
 
 #ifdef LAGFIX
 bool finishedFrame = false;

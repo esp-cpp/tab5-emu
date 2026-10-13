@@ -128,15 +128,27 @@ size_t snes_glue_rom_size(void) { return loaded_rom_size; }
 
 static bool snes_glue_init_common(uint8_t *rom, size_t rom_size);
 
+static bool snes_shared_alloc(void);
+static void snes_shared_free(void);
+
 bool snes_glue_init(uint8_t *rom, size_t rom_size) {
+  if (!snes_shared_alloc()) {
+    snes_shared_free();
+    return false;
+  }
   if (!rom || rom_size < 0x8000) {
     printf("snes: no ROM data (%u bytes)\n", (unsigned)rom_size);
+    snes_shared_free();
     return false;
   }
   return snes_glue_init_common(rom, rom_size);
 }
 
 bool snes_glue_init_file(const char *path) {
+  if (!snes_shared_alloc()) {
+    snes_shared_free();
+    return false;
+  }
   // the core's buffer is MAX_ROM_SIZE + 0x200 (+ 0x8000 in front); read the
   // file into it and let LoadROM strip a copier header in place
   return snes_glue_init_common((uint8_t *)path, (size_t)-1);
@@ -182,12 +194,46 @@ static bool snes_glue_init_common(uint8_t *rom, size_t rom_size) {
   return true;
 }
 
+/* the core's big objects, from the shared pool the emulators hand around
+ * (components/shared_memory); zeroed, as the statics they replace were */
+#include "shared_memory.h"
+extern uint8_t *sdd1_decode_buffer;
+extern SCheatData *Cheat_p;
+static bool snes_shared_alloc(void) {
+  struct { void **p; size_t bytes; } items[] = {
+      {(void **)&Memory_p, sizeof(CMemory)},
+      {(void **)&Cheat_p, sizeof(SCheatData)},
+      {(void **)&s7r_p, sizeof(SPC7110Regs)},
+      {(void **)&sdd1_decode_buffer, 0x10000},
+  };
+  for (size_t i = 0; i < sizeof items / sizeof items[0]; i++) {
+    shared_mem_request_t req = {.size = items[i].bytes, .region = SHARED_MEM_CACHE_LINE, .storage = SHARED_MEM_PSRAM};
+    *items[i].p = shared_mem_allocate(&req);
+    if (!*items[i].p) {
+      return false;
+    }
+    memset(*items[i].p, 0, items[i].bytes);
+  }
+  return true;
+}
+static void snes_shared_free(void) {
+  shared_mem_clear();
+  Memory_p = NULL;
+  Cheat_p = NULL;
+  s7r_p = NULL;
+  sdd1_decode_buffer = NULL;
+}
+
 void snes_glue_deinit(void) {
-  if (Settings.SPC7110) Del7110Gfx();
-  S9xDeinitGFX();
-  deinit_display();
-  S9xDeinitAPU();
-  S9xDeinitMemory();
+  // the core was only initialised if its shared memory was allocated
+  if (Memory_p) {
+    if (Settings.SPC7110) Del7110Gfx();
+    S9xDeinitGFX();
+    deinit_display();
+    S9xDeinitAPU();
+    S9xDeinitMemory();
+  }
+  snes_shared_free();
   free(audio_buffer);
   audio_buffer = NULL;
   audio_buffer_frames = 0;

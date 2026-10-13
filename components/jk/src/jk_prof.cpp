@@ -118,33 +118,45 @@ void jk_prof_release(void) {
   heap_caps_free(s_task_n); s_task_n = nullptr;
 }
 
+// No heap use: this runs on the engine task after a level load has taken
+// every byte of PSRAM (the material cache grows until an allocation fails),
+// and a std::vector of the slots here was what ended the session with
+// std::bad_alloc. The tables are sorted in place and printed with snprintf.
 void jk_prof_dump(int top) {
   s_enabled = 0;
   if (!s_slots) return;
-  std::vector<jk_prof_slot> v;
-  for (size_t i = 0; i < JK_PROF_SLOTS; i++) if (s_slots[i].pc) v.push_back(s_slots[i]);
-  std::sort(v.begin(), v.end(), [](const jk_prof_slot &a, const jk_prof_slot &b) { return a.count > b.count; });
-  espp::Logger logger({.tag = "prof", .level = espp::Logger::Verbosity::INFO});
-  logger.info("samples {} dropped {} distinct {}", s_total, s_dropped, v.size());
+  // unused slots sort last: count 0
+  std::sort(s_slots, s_slots + JK_PROF_SLOTS,
+            [](const jk_prof_slot &a, const jk_prof_slot &b) { return a.count > b.count; });
+  size_t distinct = 0;
+  while (distinct < JK_PROF_SLOTS && s_slots[distinct].pc && s_slots[distinct].count) distinct++;
+  printf("[prof] samples %lu dropped %lu distinct %u\n", (unsigned long)s_total, (unsigned long)s_dropped,
+         (unsigned)distinct);
   for (int i = 0; i < JK_PROF_TASKS && s_task_h[i]; i++) {
-    logger.info("  task {:<16} {} samples", pcTaskGetName(s_task_h[i]), s_task_n[i]);
+    printf("[prof]   task %-16s %lu samples\n", pcTaskGetName(s_task_h[i]), (unsigned long)s_task_n[i]);
   }
-  std::vector<jk_prof_chain> ch(s_chains, s_chains + JK_PROF_CHAINS);
-  std::sort(ch.begin(), ch.end(), [](const jk_prof_chain &a, const jk_prof_chain &b) { return a.count > b.count; });
-  for (int i = 0; i < 6 && ch[i].count; i++) {
-    std::string l = fmt::format("blocked x{}:", ch[i].count);
-    for (int d = 0; d < JK_PROF_DEPTH && ch[i].pc[d]; d++) l += fmt::format(" {:#x}", ch[i].pc[d]);
-    logger.info("{}", l);
+  std::sort(s_chains, s_chains + JK_PROF_CHAINS,
+            [](const jk_prof_chain &a, const jk_prof_chain &b) { return a.count > b.count; });
+  static char line[512];
+  for (int i = 0; i < 6 && s_chains[i].count; i++) {
+    int n = snprintf(line, sizeof line, "[prof] blocked x%lu:", (unsigned long)s_chains[i].count);
+    for (int d = 0; d < JK_PROF_DEPTH && s_chains[i].pc[d] && n < (int)sizeof line - 16; d++) {
+      n += snprintf(line + n, sizeof line - n, " %#lx", (unsigned long)s_chains[i].pc[d]);
+    }
+    printf("%s\n", line);
   }
   static char stats[2048];
   vTaskGetRunTimeStats(stats);
-  logger.info("run-time stats:\n{}", stats);
-  std::string line;
-  for (size_t i = 0; i < v.size() && (int)i < top; i++) {
-    line += fmt::format("{:#x}:{} ", v[i].pc, v[i].count);
-    if ((i % 8) == 7) { logger.info("{}", line); line.clear(); }
+  printf("[prof] run-time stats:\n%s\n", stats);
+  int n = 0;
+  for (size_t i = 0; i < distinct && (int)i < top; i++) {
+    n += snprintf(line + n, sizeof line - n, "%#lx:%lu ", (unsigned long)s_slots[i].pc, (unsigned long)s_slots[i].count);
+    if ((i % 8) == 7 || n > (int)sizeof line - 32) {
+      printf("[prof] %s\n", line);
+      n = 0;
+    }
   }
-  if (!line.empty()) logger.info("{}", line);
+  if (n) printf("[prof] %s\n", line);
 }
 
 } // extern "C"

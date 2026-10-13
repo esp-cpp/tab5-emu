@@ -11,7 +11,7 @@
 #include "spc7110.h"
 #include "spc7110dec.h"
 
-static uint8_t sdd1_decode_buffer[0x10000];
+uint8_t *sdd1_decode_buffer; /* 0x10000: shared-memory allocation made by the glue */
 
 extern int32_t HDMA_ModeByteCounts [8];
 extern uint8_t* HDMAMemPointers [8];

@@ -83,6 +83,7 @@ typedef struct
    uint8_t  bank50[DECOMP_BUFFER_SIZE];
 } SPC7110Regs;
 
-extern SPC7110Regs s7r;
+extern SPC7110Regs *s7r_p; /* shared-memory allocation made by the glue */
+#define s7r (*s7r_p)
 extern S7RTC rtc_f9;
 #endif

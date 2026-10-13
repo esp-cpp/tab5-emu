@@ -189,6 +189,8 @@ struct Tab5Emu::UsbHid {
         state.y = report.west;
         state.l = report.l1 || report.l2;
         state.r = report.r1 || report.r2;
+        state.l2 = report.l2; // the triggers on their own, for carts that tell them apart
+        state.r2 = report.r2;
         state.select = report.select;
         state.start = report.start;
         state.up = report.up;

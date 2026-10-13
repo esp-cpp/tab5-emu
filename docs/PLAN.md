@@ -221,3 +221,45 @@ the pause menu's 600 KB screenshot buffers must be reserved before a game
 fills PSRAM (bad_alloc on pause in JK), and JK's small-object pool has to be
 permanent (the engine frees the previous session's strings at the next
 start).
+
+## Metal Gear Solid (2026-10-03)
+
+Native port, not emulation: the game's decompiled C
+(`components/mgs/mgs_reversing`, the S3 port's `esp32-port` branch) on psyz's
+PlayStation SDK + software GPU (`components/mgs/psyz`), following
+<https://velxio.dev/blog/posts/metal-gear-solid-on-esp32-s3/>. What differs
+from the S3 and why it should do better here: RISC-V at 360 MHz with a 256 KB
+L2 cache against the S3's 240 MHz Xtensa and 64 KB; 32 MB of PSRAM at 200 MHz;
+SDMMC for the disc data (the S3 shared one SPI bus between card and panel and
+read at ~95 KB/s); the HAL's PPA scaler for the 320x240 frame.
+
+Phases:
+
+1. **Build** (done): the component mirrors the upstream CMake; the private
+   shim is reconstructed (`shim/`); game statics to PSRAM; mts stacks in
+   PSRAM; the game's main() on its own task.
+2. **Platform layer** (done, on hardware): the scanout presents the rows the
+   display environment declares (224 centred, 256 cropped) as RGB565 through
+   the HAL's frame buffers; pads from the HAL's merged gamepad (face buttons
+   by position, L1/R1 on the shoulders, L2/R2 on the triggers for the item
+   and weapon menus); data root on the card; pause by parking the game
+   threads at an idle point with the vblank held; reset, relaunch and quit in
+   place (the game's statics are put back between launches, its big buffers
+   live in a PSRAM arena acquired at launch).
+3. **Bring-up** (done): the retail boot chain from the US disc (title,
+   opening, dock, elevator, topside), cutscenes with the frame-buffer
+   effects, codec calls, sound effects, music and streamed speech; the virtual
+   CD reads the card sector by sector with a read-ahead task.
+4. **Performance** (done to the game's cap): two rasterizer workers, one per
+   core, each drawing a band of rows of the same command stream, with FPU
+   gradients corrected to the exact integer quotient, DDA edges and a
+   modulation table; about 28 fps at the dock against the game's 30. Measured
+   with a replay benchmark (`CONFIG_MGS_REPLAY_BENCH`): the pause menu records
+   frames, the next start replays and compares them pixel for pixel.
+5. **Integration polish** (done): metadata/boxart entry, save states from the
+   pause menu (version 4: the statics, the arena, every thread's stack and
+   context), the disc's own English menu text (`TEXT.DAT` from the
+   executable), documentation of the data extraction. Not done: memory-card
+   game saves, full-motion video (MDEC).
+
+The two submodules are esp-cpp forks (`esp32p4` branches).

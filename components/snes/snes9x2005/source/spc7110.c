@@ -5,7 +5,7 @@
 #include "memmap.h"
 #include <time.h>
 
-SPC7110Regs s7r;         /* SPC7110 registers, about 33KB */
+SPC7110Regs *s7r_p;      /* SPC7110 registers, about 33KB: shared-memory allocation */
 S7RTC rtc_f9;            /* FEOEZ (and Shounen Jump no SHou) RTC */
 void S9xUpdateRTC(void); /* S-RTC function hacked to work with the RTC */
 

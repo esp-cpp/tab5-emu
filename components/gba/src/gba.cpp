@@ -1,4 +1,5 @@
 // GBA core glue: a minimal libretro host for gpSP's front end.
+#include "shared_memory.h"
 #include "gba.hpp"
 
 #include <chrono>
@@ -171,8 +172,49 @@ int16_t input_state_cb(unsigned port, unsigned device, unsigned index, unsigned 
 }
 } // namespace
 
+extern "C" {
+extern uint8_t *ewram, *iwram, *vram, *gamepak_backup;
+extern int32_t *sound_buffer;
+extern uint8_t (*obj_priority_list)[160][128];
+size_t gpsp_sound_buffer_bytes(void);
+size_t gpsp_obj_priority_bytes(void);
+}
+// the core's big RAM arrays, from the shared pool the emulators hand around
+// (components/shared_memory); zeroed, as the statics they replace were
+static bool gba_shared_alloc() {
+  struct Item { void **p; size_t bytes; const char *name; };
+  const Item items[] = {
+      {reinterpret_cast<void **>(&ewram), 1024 * 256 * 2, "ewram"},
+      {reinterpret_cast<void **>(&iwram), 1024 * 32 * 2, "iwram"},
+      {reinterpret_cast<void **>(&vram), 1024 * 96, "vram"},
+      {reinterpret_cast<void **>(&gamepak_backup), 1024 * 128, "gamepak_backup"},
+      {reinterpret_cast<void **>(&sound_buffer), gpsp_sound_buffer_bytes(), "sound_buffer"},
+      {reinterpret_cast<void **>(&obj_priority_list), gpsp_obj_priority_bytes(), "obj_priority_list"},
+  };
+  for (const auto &it : items) {
+    shared_mem_request_t req{.size = it.bytes, .region = SHARED_MEM_CACHE_LINE, .storage = SHARED_MEM_PSRAM};
+    *it.p = shared_mem_allocate(&req);
+    if (!*it.p) {
+      fmt::print("gba: no shared memory for {} ({} bytes)\n", it.name, it.bytes);
+      return false;
+    }
+    memset(*it.p, 0, it.bytes);
+  }
+  return true;
+}
+static void gba_shared_free() {
+  shared_mem_clear();
+  ewram = iwram = vram = gamepak_backup = nullptr;
+  sound_buffer = nullptr;
+  obj_priority_list = nullptr;
+}
+
 void init_gba(const std::string &rom_path) {
   g_initialized = false;
+  if (!gba_shared_alloc()) {
+    gba_shared_free();
+    return;
+  }
   retro_set_environment(&environ_cb);
   retro_set_video_refresh(&video_cb);
   retro_set_audio_sample_batch(&audio_batch_cb);
@@ -184,6 +226,7 @@ void init_gba(const std::string &rom_path) {
   if (!retro_load_game(&info)) {
     fmt::print("gba: could not load '{}'\n", rom_path);
     retro_deinit();
+    gba_shared_free();
     return;
   }
   struct retro_system_av_info av = {};
@@ -295,6 +338,7 @@ void deinit_gba() {
              g_skipped_frames ? g_skipped_us / 1000.0 / g_skipped_frames : 0.0);
   retro_unload_game();
   retro_deinit();
+  gba_shared_free();
   BoxEmu::get().audio_sample_rate(48000);
   g_last_frame = nullptr;
   g_audio_status_cb = nullptr;

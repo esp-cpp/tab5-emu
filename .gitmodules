@@ -1,3 +1,11 @@
 [submodule "components/jk/OpenJKDF2"]
 	path = components/jk/OpenJKDF2
 	url = https://github.com/esp-cpp/OpenJKDF2.git
+[submodule "components/mgs/mgs_reversing"]
+	path = components/mgs/mgs_reversing
+	url = https://github.com/esp-cpp/mgs_reversing.git
+	branch = esp32p4
+[submodule "components/mgs/psyz"]
+	path = components/mgs/psyz
+	url = https://github.com/esp-cpp/psyz.git
+	branch = esp32p4
