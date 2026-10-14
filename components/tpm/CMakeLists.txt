@@ -90,8 +90,11 @@ if(TPM_ENGINE_READY)
   #   -O2                   the game's code: speed over the IDF's size setting
   #   -fno-strict-aliasing  guest memory is read through any type
   #   -msmall-data-limit=0  nothing in PSRAM may be addressed gp-relative
+  #   -ffixed-s11           s11 holds the guest RAM's address for the game's code
+  #                         (RT_RAM_REG): nothing in the bundle may use it
   target_compile_options(tpm_rt PRIVATE -O2 -w -fno-strict-aliasing -msmall-data-limit=0
-                                        -Wno-error)
+                                        -Wno-error -ffixed-s11)
+  target_compile_definitions(tpm_rt PRIVATE RT_RAM_REG=s11)
   # the rasterizer's inner loops decide the frame rate; they run from
   # PSRAM-XIP, not IRAM (the runtime's default, as in the MGS port: internal
   # RAM is what the boot-time DMA reserve and the HAL need)
