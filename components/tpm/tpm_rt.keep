@@ -20,3 +20,5 @@ g_rt_gpu_barriers
 g_rt_gpu_wait_us
 rt_gpu_bench
 rt_gpu_bench_mode
+rt_gpu_set_frameskip
+g_rt_gpu_skipped

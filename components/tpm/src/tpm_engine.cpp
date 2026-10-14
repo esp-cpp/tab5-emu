@@ -452,10 +452,15 @@ void video_task(void *) {
     if (now - last_status_us >= 5000000) {
       static uint32_t last_flips = 0;
       const uint32_t flips = g_flips.load();
-      logger.info("vblank {} | presented {} | game {:.1f} fps | {}x{} at ({},{}){}{}", rt_frame_count(), presented,
-                  (flips - last_flips) * 1e6f / (now - last_status_us), d.w, d.h, d.x, d.y, d.rgb24 ? " 24-bit" : "",
-                  d.enabled ? "" : " (display off)");
+      static uint32_t last_skipped = 0;
+      const uint32_t skipped = g_rt_gpu_skipped;
+      logger.info("vblank {} | presented {} | game {:.1f} fps, drawn {:.1f} | {}x{} at ({},{}){}{}", rt_frame_count(),
+                  presented, (flips - last_flips) * 1e6f / (now - last_status_us),
+                  (static_cast<int>(flips - last_flips) - static_cast<int>(skipped - last_skipped)) * 1e6f /
+                      (now - last_status_us),
+                  d.w, d.h, d.x, d.y, d.rgb24 ? " 24-bit" : "", d.enabled ? "" : " (display off)");
       last_flips = flips;
+      last_skipped = skipped;
       // the game thread's time over the same window
       static RtProf last_prof{};
       const RtProf p = g_rt_prof;
@@ -578,6 +583,7 @@ void game_task(void *) {
   logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
   rt_set_realtime(1);
   rt_gpu_set_async(g_gpu_task ? (g_gpu0_task ? 2 : 1) : 0);
+  rt_gpu_set_frameskip(CONFIG_TPM_FRAMESKIP);
 #if CONFIG_TPM_GPU_TRACE_VBLANK > 0
   rt_set_gpu_trace(CONFIG_TPM_GPU_TRACE_VBLANK);
 #endif
@@ -827,6 +833,12 @@ void plat_display_ready(const RtDisplay *dp) {
   static uint32_t since;
   static int shown_x = -1, shown_y = -1;
   since++;
+  if (dp->stale) {
+    // frameskip: this buffer's frame was not drawn; keep the last picture,
+    // and the next drawn frame counts as new wherever it is
+    shown_x = shown_y = -1;
+    return;
+  }
   const bool flipped = dp->x != shown_x || dp->y != shown_y;
   if (!((flipped && since >= 2) || since >= 4) || g_paused.load() || g_video_busy.load() || !g_video_task ||
       !g_rt_vram) {

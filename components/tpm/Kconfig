@@ -33,6 +33,20 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
             this board it measured slower: both cores then contend for PSRAM
             and the cache with the game's recompiled code.
 
+    config TPM_FRAMESKIP
+        int "Frameskip: most frames in a row the GPU may leave undrawn (0 = off)"
+        default 2
+        range 0 4
+        depends on TPM_ENGINE
+        help
+            When the game has queued a whole frame more than the GPU worker
+            has drawn, the worker drops the next frame's primitives into the
+            display buffers (texture uploads, VRAM copies and other drawing
+            still run) and the screen keeps the previous picture. The game
+            then runs at the speed its own thread allows instead of the
+            rasterizer's. Effects that read back the frame buffer may show
+            the older frame for a moment.
+
     config TPM_GPU_BENCH_FILE
         string "Test: GPU benchmark recording to embed (rt_gpu_record file)"
         default ""
