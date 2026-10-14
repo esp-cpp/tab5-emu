@@ -102,4 +102,19 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
         default 0
         depends on TPM_ENGINE
 
+    config TPM_BENCH_FROM
+        int "Test: run unpaced and time the vblanks from this one (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Emulated time runs as fast as the board can (no pacing to real
+            time; audio that does not fit is dropped), so with
+            TPM_AUTOPRESS the game does the same work every run, and the log
+            gives the time from this vblank to TPM_BENCH_TO.
+
+    config TPM_BENCH_TO
+        int "Test: ... to this one"
+        default 0
+        depends on TPM_BENCH_FROM > 0
+
 endmenu

@@ -32,11 +32,17 @@ if(CONFIG_TPM_ENGINE)
       set(python python3)
     endif()
     # Re-run when the executable or the recompiler changes
+    # the access sites that go to the scratchpad check it first
+    set(sites ${TPM_DECOMP}/config/scratch_sites.us.txt)
+    set(sites_arg)
+    if(EXISTS "${sites}")
+      set(sites_arg --scratch-sites "${sites}")
+    endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
       "${exe}" "${TPM_DECOMP}/tools/recomp.py" "${TPM_DECOMP}/config/recomp_entries.us.txt"
-      "${TPM_DECOMP}/recomp/hle.us.txt")
+      "${TPM_DECOMP}/recomp/hle.us.txt" "${sites}")
     execute_process(
-      COMMAND ${python} ${TPM_DECOMP}/tools/recomp.py "${exe}" ${TPM_GEN} --files 16
+      COMMAND ${python} ${TPM_DECOMP}/tools/recomp.py "${exe}" ${TPM_GEN} --files 16 ${sites_arg}
       RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if(rc EQUAL 0)
       set(TPM_ENGINE_READY ON)

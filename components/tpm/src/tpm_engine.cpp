@@ -592,7 +592,7 @@ void game_task(void *) {
 #endif
   logger.info("booting SLUS_008.84 ({} bytes); PSRAM free {} KB, largest block {} KB", g_exe.size(),
               heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024, heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
-  rt_set_realtime(1);
+  rt_set_realtime(CONFIG_TPM_BENCH_FROM > 0 ? 0 : 1);
   rt_gpu_set_async(g_gpu_task ? (g_gpu0_task ? 2 : 1) : 0);
   rt_gpu_set_frameskip(CONFIG_TPM_FRAMESKIP);
 #if CONFIG_TPM_GPU_TRACE_VBLANK > 0
@@ -821,6 +821,23 @@ uint32_t plat_disc_sectors(void) { return tpm::engine::g_disc_sectors; }
 
 void plat_vblank(void) {
   using namespace tpm::engine;
+#if CONFIG_TPM_BENCH_FROM > 0
+  {
+    // (the game's thread time is the total less its waits for the GPU)
+    static int64_t t0;
+    static uint64_t w0;
+    const uint32_t n = rt_frame_count();
+    if (n == CONFIG_TPM_BENCH_FROM) {
+      t0 = esp_timer_get_time();
+      w0 = g_rt_gpu_prod_wait_us;
+    } else if (n == CONFIG_TPM_BENCH_TO) {
+      const int64_t all = esp_timer_get_time() - t0;
+      const int64_t wait = static_cast<int64_t>(g_rt_gpu_prod_wait_us - w0);
+      logger.info("bench: vblanks {}..{} in {} ms, {} ms of it waiting for the GPU: game {} ms",
+                  CONFIG_TPM_BENCH_FROM, CONFIG_TPM_BENCH_TO, all / 1000, wait / 1000, (all - wait) / 1000);
+    }
+  }
+#endif
   static int last_x = -1, last_y = -1;
   RtDisplay d;
   rt_gpu_display(&d);
