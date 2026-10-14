@@ -551,9 +551,17 @@ void gpu_task(void *arg) {
 // the embedded recording through the rasterizer, on the GPU worker's core
 void bench_task(void *arg) {
   const size_t n = _binary_gpubench_bin_end - _binary_gpubench_bin_start;
-  auto *rec = static_cast<uint32_t *>(heap_caps_malloc(n, MALLOC_CAP_SPIRAM));
+  // read in place when aligned (the rodata is in PSRAM too): a copy is 3 MB
+  // the cart's own buffers may need
+  const bool in_place = (reinterpret_cast<uintptr_t>(_binary_gpubench_bin_start) & 3) == 0;
+  auto *rec = in_place ? reinterpret_cast<uint32_t *>(const_cast<uint8_t *>(_binary_gpubench_bin_start))
+                       : static_cast<uint32_t *>(heap_caps_malloc(n, MALLOC_CAP_SPIRAM));
+  printf("TPMBENCH recording %u bytes, %s; PSRAM free %u KB\n", static_cast<unsigned>(n), in_place ? "in place" : "copied",
+         static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
   if (rec) {
-    memcpy(rec, _binary_gpubench_bin_start, n);
+    if (!in_place) {
+      memcpy(rec, _binary_gpubench_bin_start, n);
+    }
     static const char *const modes[] = {"all", "no span pixels", "setup only", "no triangles",
                                         "span pixels to internal RAM", "all, per-row dispatch",
                                         "all, no pre-modulated palettes",
@@ -564,7 +572,9 @@ void bench_task(void *arg) {
       printf("TPMBENCH %u us per vblank (%s)\n", static_cast<unsigned>(us), modes[mode]);
     }
     rt_gpu_bench_mode(0);
-    heap_caps_free(rec);
+    if (!in_place) {
+      heap_caps_free(rec);
+    }
   }
   xTaskNotifyGive(static_cast<TaskHandle_t>(arg));
   vTaskSuspend(nullptr);
@@ -580,7 +590,8 @@ void game_task(void *) {
   vTaskDelay(1);
   vTaskDeleteWithCaps(bench);
 #endif
-  logger.info("booting SLUS_008.84 ({} bytes)", g_exe.size());
+  logger.info("booting SLUS_008.84 ({} bytes); PSRAM free {} KB, largest block {} KB", g_exe.size(),
+              heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024, heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
   rt_set_realtime(1);
   rt_gpu_set_async(g_gpu_task ? (g_gpu0_task ? 2 : 1) : 0);
   rt_gpu_set_frameskip(CONFIG_TPM_FRAMESKIP);
