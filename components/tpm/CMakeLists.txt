@@ -90,6 +90,10 @@ if(TPM_ENGINE_READY)
   # PSRAM-XIP, not IRAM (the runtime's default, as in the MGS port: internal
   # RAM is what the boot-time DMA reserve and the HAL need)
   set_property(SOURCE ${rt}/rt_gpu.c APPEND PROPERTY COMPILE_OPTIONS "-O3;-fomit-frame-pointer")
+  # ...as are the SPU's per-sample loop and the GTE's commands, on the game's
+  # thread
+  set_property(SOURCE ${TPM_PSYZ}/psyz/src/psyz/psyz_spu.c ${rt}/rt_gte.c APPEND PROPERTY
+               COMPILE_OPTIONS "-O3;-fomit-frame-pointer")
 
   # ---- hide it: components/mgs links its own psyz, with the same names ----
   # One relocatable object with only the runtime's API left global.
