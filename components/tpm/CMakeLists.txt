@@ -63,7 +63,7 @@ idf_component_register(
   INCLUDE_DIRS "include"
   PRIV_INCLUDE_DIRS "src" "${TPM_DECOMP}/recomp/runtime"
   REQUIRES tab5-emu
-  PRIV_REQUIRES esp_timer heap statistics shared_memory
+  PRIV_REQUIRES esp_timer heap statistics shared_memory esp_app_format
 )
 
 if(TPM_ENGINE_READY)

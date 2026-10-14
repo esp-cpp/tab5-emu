@@ -37,5 +37,14 @@ void resume();
 std::pair<size_t, size_t> video_size();
 /// The last presented frame as RGB565, for screenshots.
 std::span<uint8_t> video_buffer_rgb565();
+/// Save states, while paused (the emulator's menu). A state loads only into
+/// the firmware build that wrote it, with the game's memory at the same
+/// address, which the game normally gets back when it is launched first
+/// after a restart.
+bool save_state(const std::string &path);
+bool load_state(const std::string &path);
+/// Free the game's PSRAM block, which is kept across quits for the save
+/// states; the launcher calls this before it starts any other cart.
+void release_arena();
 
 } // namespace tpm

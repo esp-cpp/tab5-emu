@@ -23,3 +23,7 @@ rt_gpu_bench_mode
 rt_gpu_set_frameskip
 g_rt_gpu_skipped
 g_rt_gpu_prod_wait_us
+rt_mem_bytes
+rt_snap_preserve
+rt_snap_restored
+g_ram

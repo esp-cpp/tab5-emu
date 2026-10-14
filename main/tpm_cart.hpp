@@ -40,6 +40,28 @@ public:
 #endif
   }
 
+  // Save states: the game is paused while the menu is up (pre_menu), which
+  // is what the snapshot needs.
+  void load() override {
+#if defined(ENABLE_TPM)
+    const auto path = get_save_path();
+    if (path.empty()) {
+      logger_.warn("load: no state in slot {}", get_selected_save_slot());
+      return;
+    }
+    if (tpm::load_state(path)) {
+      Cart::load();
+    }
+#endif
+  }
+  void save() override {
+#if defined(ENABLE_TPM)
+    if (tpm::save_state(get_save_path(true))) {
+      Cart::save();
+    }
+#endif
+  }
+
   bool run() override {
 #if defined(ENABLE_TPM)
     if (!tpm::update()) {

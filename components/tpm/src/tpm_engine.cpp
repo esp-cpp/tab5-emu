@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include <esp_app_desc.h>
 #include <esp_heap_caps.h>
 #include <esp_rom_sys.h>
 #include <esp_timer.h>
@@ -43,6 +45,7 @@ extern "C" {
 #include "shared_memory.h"
 // tpm_rt.ld: the runtime's statics, for the reset between launches
 extern uint8_t _tpm_bss_start[], _tpm_bss_end[], _tpm_data_start[], _tpm_data_end[];
+extern uint8_t *g_ram; // guest RAM (the save state test hashes it)
 #if TPM_GPU_BENCH
 extern const uint8_t _binary_gpubench_bin_start[], _binary_gpubench_bin_end[];
 #endif
@@ -85,6 +88,71 @@ std::atomic<uint32_t> g_flips{0}; // display-area moves: the game's frames
 constexpr size_t RING_FRAMES = 8192; // ~186 ms
 int16_t *g_ring{nullptr};
 std::atomic<uint32_t> g_ring_w{0}, g_ring_r{0};
+
+// ---- the arena ----
+//
+// The runtime's big buffers (guest RAM, VRAM, transfers, the GPU queue, the
+// SPU) and the game thread's stack, in one PSRAM block, as the MGS port
+// does: a save state is full of absolute pointers into them (the recompiled
+// code keeps host pointers in its stack frames), so it loads only while they
+// sit at the same addresses. The block is kept across the cart's quits for
+// that reason; the launcher releases it before it starts any other cart.
+// Launched first after a boot, the game normally gets the same block back.
+//
+// The stack is the block's first STACK bytes. Its lowest ALT bytes above the
+// canary are where the game thread waits while a state is put back over the
+// rest (the P4's stack guard faults on a stack pointer outside the task's
+// stack, so the spare stack is inside it); a save point is far above them.
+constexpr uint32_t STACK = 32 * 1024;
+constexpr uint32_t ALT_LO = 1024, ALT_HI = 6 * 1024;
+constexpr size_t ARENA_ALIGN = 64;
+uint8_t *g_arena{nullptr};
+size_t g_arena_size{0}, g_arena_used{0};
+bool g_arena_overflow{false}; // some allocation came from the heap: no states
+StaticTask_t g_game_tcb;
+
+size_t arena_bytes() {
+  int count = 0;
+  const uint32_t bytes = rt_mem_bytes(&count);
+  return STACK + bytes + static_cast<size_t>(count) * ARENA_ALIGN;
+}
+
+bool acquire_arena() {
+  const size_t total = arena_bytes();
+  if (g_arena && g_arena_size != total) {
+    heap_caps_free(g_arena);
+    g_arena = nullptr;
+  }
+  if (!g_arena) {
+    g_arena = static_cast<uint8_t *>(heap_caps_aligned_alloc(ARENA_ALIGN, total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!g_arena) {
+      logger.error("no {} KB of PSRAM for the game (free {} KB, largest {} KB)", total / 1024,
+                   heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
+                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
+      return false;
+    }
+    g_arena_size = total;
+    logger.info("arena: {} KB at {}", total / 1024, fmt::ptr(g_arena));
+  }
+  memset(g_arena, 0, g_arena_size);
+  g_arena_used = STACK;
+  g_arena_overflow = false;
+  return true;
+}
+
+// ---- save states ----
+//
+// Taken and put back by the menu's task while the game's thread waits in
+// plat_pause_wait, where it checkpoints itself (setjmp) for a save, or for a
+// load moves to the spare stack and waits there until the memory is back,
+// then jumps to the state's checkpoint. A state is: the runtime's statics
+// (.data, .bss), the arena's buffers and the live part of the game's stack.
+enum SnapReq : int { SNAP_NONE, SNAP_SAVE, SNAP_LOAD };
+std::atomic<int> g_snap_req{SNAP_NONE};
+std::atomic<bool> g_snap_ack{false};  // the game's thread: checkpoint taken / parked
+std::atomic<bool> g_snap_done{false}; // the menu's task: go on
+jmp_buf g_snap_jb;
+uint8_t *g_snap_sp{nullptr};
 
 // ---- a fresh machine for every launch ----
 //
@@ -261,6 +329,51 @@ void pause_test_task(void *) {
   vTaskDelete(nullptr);
 }
 #endif
+
+// Save states (CONFIG_TPM_TEST_STATE "A:B"): at vblank A a state is saved,
+// at B loaded. From the save on, both passes log a hash of guest RAM at each
+// of 120 vblanks: the game is deterministic in emulated time, so the run
+// after the load must repeat the first pass's hashes.
+std::atomic<uint32_t> g_hash_from{0};
+constexpr uint32_t HASH_VBLANKS = 120;
+#define TPM_STATE_TEST (sizeof(CONFIG_TPM_TEST_STATE) > 1)
+void state_test_task(void *) {
+  const uint32_t a = static_cast<uint32_t>(strtoul(CONFIG_TPM_TEST_STATE, nullptr, 10));
+  const char *colon = strchr(CONFIG_TPM_TEST_STATE, ':');
+  const uint32_t b = colon ? static_cast<uint32_t>(strtoul(colon + 1, nullptr, 10)) : 0;
+  const std::string path = "/sdcard/tpm_state_test.sav";
+  const uint32_t marks[2] = {a, b};
+  // Only the load when the card already has a state from this build (an
+  // earlier boot's, after a reset): the hashes then start from the loaded
+  // vblank, to compare with that boot's
+  bool have = false;
+  if (FILE *f = fopen(path.c_str(), "rb")) {
+    uint8_t head[40];
+    have = fread(head, 1, sizeof head, f) == sizeof head && memcmp(head, "TPMS", 4) == 0 &&
+           memcmp(head + 8, esp_app_get_description()->app_elf_sha256, 32) == 0;
+    fclose(f);
+  }
+  if (have) {
+    logger.warn("state test: a state of this build is on the card: loading it at vblank {}", b);
+  }
+  for (int step = have ? 1 : 0; step < 2 && !g_stop.load(); step++) {
+    while (!g_stop.load() && rt_frame_count() < marks[step]) {
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    pause();
+    vTaskDelay(pdMS_TO_TICKS(300));
+    const uint32_t at = rt_frame_count();
+    const bool ok = step == 0 ? save_state(path) : load_state(path);
+    logger.warn("state test: {} at vblank {}: {} (vblank now {})", step == 0 ? "save" : "load", at,
+                ok ? "ok" : "FAILED", rt_frame_count());
+    if (step == 0 || (have && ok)) {
+      g_hash_from = (step == 0 ? at : rt_frame_count()) + 1;
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));
+    resume();
+  }
+  vTaskDelete(nullptr);
+}
 
 // ---- the disc ----
 
@@ -542,9 +655,45 @@ void audio_task(void *) {
 // worker 1 on core 1, worker 0 on core 0; each draws a band of rows
 void gpu_task(void *arg) {
   const int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-  rt_gpu_worker_n(&g_gpu_stop, idx);
-  g_gpu_done[idx] = true;
-  vTaskSuspend(nullptr); // deinit deletes it (its stack is in PSRAM)
+  for (;;) {
+    rt_gpu_worker_n(&g_gpu_stop, idx);
+    g_gpu_done[idx] = true;
+    // stopped for a save state (started again after it), or for good:
+    // deinit deletes the task (its stack is in PSRAM)
+    while (g_gpu_stop) {
+      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+    }
+    g_gpu_done[idx] = false;
+  }
+}
+
+// the workers out of the GPU's state (each finishes what it took from the
+// queue; what is left stays queued, which is part of the state), and back
+bool gpu_stop_workers() {
+  g_gpu_stop = 1;
+  for (int i = 0; i < 300; i++) {
+    if ((!g_gpu_task || g_gpu_done[1]) && (!g_gpu0_task || g_gpu_done[0])) {
+      return true;
+    }
+    if (g_gpu_task) xTaskNotifyGive(g_gpu_task);
+    if (g_gpu0_task) xTaskNotifyGive(g_gpu0_task);
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  logger.error("the GPU workers did not stop");
+  return false;
+}
+
+void gpu_start_workers() {
+  g_gpu_stop = 0;
+  for (int i = 0; i < 300; i++) {
+    if ((!g_gpu_task || !g_gpu_done[1]) && (!g_gpu0_task || !g_gpu_done[0])) {
+      return;
+    }
+    if (g_gpu_task) xTaskNotifyGive(g_gpu_task);
+    if (g_gpu0_task) xTaskNotifyGive(g_gpu0_task);
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+  logger.error("the GPU workers did not start again");
 }
 
 #if TPM_GPU_BENCH
@@ -675,6 +824,10 @@ bool init(const std::string &data_dir) {
   emu.audio_sample_rate(AUDIO_RATE);
   emu.audio_max_wait_ms(30);
 
+  if (!acquire_arena()) {
+    deinit();
+    return false;
+  }
   g_ring = static_cast<int16_t *>(heap_caps_calloc(RING_FRAMES * 2, sizeof(int16_t), MALLOC_CAP_SPIRAM));
   g_resume = xSemaphoreCreateBinary();
   g_stop = false;
@@ -724,13 +877,17 @@ bool init(const std::string &data_dir) {
 #if CONFIG_TPM_TEST_PAUSE_VBLANK > 0
   xTaskCreatePinnedToCore(pause_test_task, "tpm_ptest", 4096, nullptr, 5, nullptr, 0);
 #endif
+  g_hash_from = 0;
+  if (TPM_STATE_TEST) {
+    xTaskCreatePinnedToCore(state_test_task, "tpm_stest", 8192, nullptr, 5, nullptr, 0);
+  }
   // The recompiled code nests a C frame per guest call (<= 304 bytes on
-  // RV32, guest chains seen up to 25 deep including interrupts): 32 KB, in
-  // internal RAM since those frames are the guest's registers; PSRAM if the
-  // internal heap cannot spare it.
-  constexpr uint32_t STACK = 32 * 1024;
-  if (xTaskCreatePinnedToCoreWithCaps(game_task, "tpm_game", STACK, nullptr, 5, &g_game_task, 0,
-                                      MALLOC_CAP_SPIRAM) != pdPASS) {
+  // RV32, guest chains seen up to 25 deep including interrupts): 32 KB, the
+  // arena's first part (PSRAM: on the P4 the cores reach cached PSRAM faster
+  // than internal RAM, and save states need it at a fixed address)
+  g_game_task = xTaskCreateStaticPinnedToCore(game_task, "tpm_game", STACK, nullptr, 5,
+                                              reinterpret_cast<StackType_t *>(g_arena), &g_game_tcb, 0);
+  if (!g_game_task) {
     logger.error("could not create the game task");
     deinit();
     return false;
@@ -748,7 +905,7 @@ void deinit() {
     for (int i = 0; i < 200 && !g_game_done.load(); i++) {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
-    vTaskDeleteWithCaps(g_game_task);
+    vTaskDelete(g_game_task); // static: its stack is the arena's
     g_game_task = nullptr;
   }
   if (g_gpu_task || g_gpu0_task) {
@@ -782,8 +939,9 @@ void deinit() {
     g_resume = nullptr;
   }
   g_last_frame = nullptr;
-  // the runtime's buffers (rt_shutdown dropped its pointers if the game got
-  // to return; the next launch resets the statics either way)
+  g_snap_req = SNAP_NONE;
+  // the runtime's buffers are the arena's, kept for the next launch (see
+  // release_arena); the pool holds only what did not fit in it
   shared_mem_clear();
   g_exe.clear();
   g_exe.shrink_to_fit();
@@ -808,6 +966,223 @@ void resume() {
 std::span<uint8_t> last_frame() {
   auto *f = g_last_frame.load();
   return f ? std::span<uint8_t>{f, FRAME_W * FRAME_H * 2} : std::span<uint8_t>{};
+}
+
+void release_arena() {
+  if (g_game_task) {
+    return; // the game is running in it
+  }
+  heap_caps_free(g_arena);
+  g_arena = nullptr;
+  g_arena_size = g_arena_used = 0;
+}
+
+namespace {
+
+constexpr uint32_t kSnapVersion = 1;
+struct SnapHeader {
+  char magic[4];
+  uint32_t version;
+  uint8_t elf_sha[32]; // the build that wrote it: return addresses in the stack
+  uint32_t arena, arena_size, arena_used;
+  uint32_t bss, bss_size, data, data_size;
+  uint32_t stack_lo; // the saved part of the stack: [stack_lo, arena + STACK)
+  uint32_t jb_size;
+  uint8_t jb[sizeof(jmp_buf)];
+};
+
+struct SnapRegion {
+  uint8_t *p;
+  size_t n;
+};
+
+// in the order of the file, after the header
+std::vector<SnapRegion> snap_regions(uint8_t *stack_lo) {
+  return {
+      {_tpm_data_start, static_cast<size_t>(_tpm_data_end - _tpm_data_start)},
+      {_tpm_bss_start, static_cast<size_t>(_tpm_bss_end - _tpm_bss_start)},
+      {g_arena + STACK, g_arena_used - STACK},
+      {stack_lo, static_cast<size_t>(g_arena + STACK - stack_lo)},
+  };
+}
+
+bool io_chunked(FILE *f, uint8_t *p, size_t n, bool writing) {
+  while (n > 0) {
+    const size_t chunk = std::min<size_t>(n, 64 * 1024);
+    if ((writing ? fwrite(p, 1, chunk, f) : fread(p, 1, chunk, f)) != chunk) {
+      return false;
+    }
+    p += chunk;
+    n -= chunk;
+  }
+  return true;
+}
+
+// ask the game's thread (waiting in plat_pause_wait) for a checkpoint or to
+// park; true once it has
+bool snap_request(SnapReq req) {
+  g_snap_ack = false;
+  g_snap_done = false;
+  g_snap_req = req;
+  for (int i = 0; i < 300; i++) {
+    xSemaphoreGive(g_resume);
+    if (g_snap_ack.load()) {
+      return true;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  g_snap_req = SNAP_NONE;
+  logger.error("{} state: the game's thread did not answer", req == SNAP_SAVE ? "save" : "load");
+  return false;
+}
+
+void snap_release() {
+  g_snap_done = true;
+  xSemaphoreGive(g_resume);
+  xTaskNotifyGive(g_game_task);
+}
+
+} // namespace
+
+bool save_state(const std::string &path) {
+  if (!g_game_task || !g_paused.load() || g_game_done.load()) {
+    logger.error("save state: the game must be running and paused");
+    return false;
+  }
+  if (g_arena_overflow) {
+    logger.error("save state: part of the game's memory is outside its arena");
+    return false;
+  }
+  const int64_t t0 = esp_timer_get_time();
+  if (!snap_request(SNAP_SAVE)) {
+    return false;
+  }
+  // the game's thread is at its checkpoint, waiting below it
+  uint8_t *const stack_lo = reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(g_snap_sp - 256) & ~uintptr_t{15});
+  if (stack_lo < g_arena + ALT_HI) {
+    logger.error("save state: the game's stack is too deep here ({} bytes)", g_arena + STACK - g_snap_sp);
+    snap_release();
+    return false;
+  }
+  SnapHeader h{};
+  memcpy(h.magic, "TPMS", 4);
+  h.version = kSnapVersion;
+  memcpy(h.elf_sha, esp_app_get_description()->app_elf_sha256, sizeof h.elf_sha);
+  h.arena = reinterpret_cast<uint32_t>(g_arena);
+  h.arena_size = g_arena_size;
+  h.arena_used = g_arena_used;
+  h.bss = reinterpret_cast<uint32_t>(_tpm_bss_start);
+  h.bss_size = _tpm_bss_end - _tpm_bss_start;
+  h.data = reinterpret_cast<uint32_t>(_tpm_data_start);
+  h.data_size = _tpm_data_end - _tpm_data_start;
+  h.stack_lo = reinterpret_cast<uint32_t>(stack_lo);
+  h.jb_size = sizeof(jmp_buf);
+  memcpy(h.jb, &g_snap_jb, sizeof(jmp_buf));
+  bool ok = gpu_stop_workers();
+  size_t total = sizeof h;
+  if (ok) {
+    FILE *f = fopen(path.c_str(), "wb");
+    ok = f && fwrite(&h, 1, sizeof h, f) == sizeof h;
+    for (const auto &r : snap_regions(stack_lo)) {
+      ok = ok && io_chunked(f, r.p, r.n, true);
+      total += r.n;
+    }
+    if (f) {
+      ok = fclose(f) == 0 && ok;
+    }
+  }
+  gpu_start_workers();
+  snap_release();
+  logger.info("save state: {} {} ({} KB, stack {} B, in {} ms)", ok ? "wrote" : "FAILED to write", path,
+              total / 1024, g_arena + STACK - stack_lo, (esp_timer_get_time() - t0) / 1000);
+  return ok;
+}
+
+bool load_state(const std::string &path) {
+  if (!g_game_task || !g_paused.load() || g_game_done.load()) {
+    logger.error("load state: the game must be running and paused");
+    return false;
+  }
+  const int64_t t0 = esp_timer_get_time();
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) {
+    logger.error("load state: cannot open {}", path);
+    return false;
+  }
+  SnapHeader h{};
+  const auto refuse = [&](const char *why) {
+    logger.error("load state: {}: {}", path, why);
+    fclose(f);
+    return false;
+  };
+  if (fread(&h, 1, sizeof h, f) != sizeof h || memcmp(h.magic, "TPMS", 4) != 0 || h.version != kSnapVersion ||
+      h.jb_size != sizeof(jmp_buf)) {
+    return refuse("not a save state of this format");
+  }
+  if (memcmp(h.elf_sha, esp_app_get_description()->app_elf_sha256, sizeof h.elf_sha) != 0) {
+    return refuse("written by another firmware build; states load only into the build that wrote them");
+  }
+  if (h.arena != reinterpret_cast<uint32_t>(g_arena) || h.arena_size != g_arena_size ||
+      h.arena_used != g_arena_used) {
+    return refuse("the game's memory sits elsewhere in this session (another game ran first?): "
+                  "launch the game first after a restart to load it");
+  }
+  auto *const stack_lo = reinterpret_cast<uint8_t *>(h.stack_lo);
+  if (h.bss != reinterpret_cast<uint32_t>(_tpm_bss_start) || h.data != reinterpret_cast<uint32_t>(_tpm_data_start) ||
+      stack_lo < g_arena + ALT_HI || stack_lo >= g_arena + STACK) {
+    return refuse("layout mismatch");
+  }
+  const auto regions = snap_regions(stack_lo);
+  {
+    // all of it must be there before the first byte of the game is overwritten
+    size_t expected = sizeof h;
+    for (const auto &r : regions) {
+      expected += r.n;
+    }
+    fseek(f, 0, SEEK_END);
+    const long actual = ftell(f);
+    fseek(f, sizeof h, SEEK_SET);
+    if (actual < 0 || static_cast<size_t>(actual) != expected) {
+      return refuse("truncated or corrupt");
+    }
+  }
+  if (!gpu_stop_workers()) {
+    gpu_start_workers();
+    fclose(f);
+    return false;
+  }
+  if (!snap_request(SNAP_LOAD)) {
+    gpu_start_workers();
+    fclose(f);
+    return false;
+  }
+  // the game's thread waits on the spare stack: everything else may go
+  void **slots[16];
+  void *kept[16];
+  const int n_slots = rt_snap_preserve(slots, 16);
+  for (int i = 0; i < n_slots; i++) {
+    kept[i] = *slots[i];
+  }
+  bool ok = true;
+  for (const auto &r : regions) {
+    ok = ok && io_chunked(f, r.p, r.n, false);
+  }
+  fclose(f);
+  for (int i = 0; i < n_slots; i++) {
+    *slots[i] = kept[i];
+  }
+  if (!ok) {
+    // half restored: the game cannot go on; the cart quits
+    logger.error("load state: short read from {}: the game's memory is inconsistent, stopping it", path);
+    g_game_done = true;
+    return false;
+  }
+  rt_snap_restored();
+  memcpy(&g_snap_jb, h.jb, sizeof(jmp_buf));
+  gpu_start_workers();
+  snap_release(); // the game's thread jumps into the state's checkpoint
+  logger.info("load state: {} restored in {} ms", path, (esp_timer_get_time() - t0) / 1000);
+  return true;
 }
 
 } // namespace tpm::engine
@@ -838,6 +1213,17 @@ void plat_vblank(void) {
     }
   }
 #endif
+  if (TPM_STATE_TEST) {
+    const uint32_t from = g_hash_from.load(), n = rt_frame_count();
+    if (from && n >= from && n < from + HASH_VBLANKS && g_ram) {
+      const auto *w = reinterpret_cast<const uint32_t *>(g_ram);
+      uint32_t h = 2166136261u;
+      for (size_t i = 0; i < 2 * 1024 * 1024 / 4; i++) {
+        h = (h ^ w[i]) * 16777619u;
+      }
+      printf("TPMHASH %u %08x\n", static_cast<unsigned>(n), static_cast<unsigned>(h));
+    }
+  }
   static int last_x = -1, last_y = -1;
   RtDisplay d;
   rt_gpu_display(&d);
@@ -962,6 +1348,16 @@ void plat_audio(const int16_t *samples, int frames) {
 uint64_t plat_time_us(void) { return static_cast<uint64_t>(esp_timer_get_time()); }
 
 void *plat_alloc(uint32_t size) {
+  using namespace tpm::engine;
+  // the arena, in rt_boot's fixed order (rt_mem_bytes sized it)
+  const size_t off = (g_arena_used + ARENA_ALIGN - 1) & ~(ARENA_ALIGN - 1);
+  if (g_arena && off + size <= g_arena_size) {
+    g_arena_used = off + size;
+    memset(g_arena + off, 0, size);
+    return g_arena + off;
+  }
+  g_arena_overflow = true;
+  tpm::engine::logger.warn("{} bytes outside the arena: no save states this run", size);
   shared_mem_request_t req{.size = size, .region = SHARED_MEM_CACHE_LINE, .storage = SHARED_MEM_PSRAM};
   void *p = shared_mem_allocate(&req); // zeroed
   if (!p) {
@@ -977,9 +1373,50 @@ void plat_sleep_us(uint32_t us) {
   vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(us / 1000)));
 }
 
+// the game's thread, on the spare stack while a state is read over its own;
+// then into the state's checkpoint
+[[noreturn]] void tpm_snap_parked(void) {
+  using namespace tpm::engine;
+  g_snap_ack = true;
+  while (!g_snap_done.load()) {
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+  }
+  g_snap_req = SNAP_NONE;
+  longjmp(g_snap_jb, 1);
+}
+
+// after the checkpoint: below it, until the state is written
+static void __attribute__((noinline)) snap_saved_wait(void) {
+  using namespace tpm::engine;
+  g_snap_req = SNAP_NONE;
+  g_snap_ack = true;
+  while (!g_snap_done.load()) {
+    xSemaphoreTake(g_resume, pdMS_TO_TICKS(10));
+  }
+}
+
 void plat_pause_wait(void) {
-  if (tpm::engine::g_resume) {
-    xSemaphoreTake(tpm::engine::g_resume, pdMS_TO_TICKS(100));
+  using namespace tpm::engine;
+  const int req = g_snap_req.load();
+  if (req == SNAP_SAVE) {
+    // a load of this state comes back here (setjmp returns 1) and returns to
+    // the runtime's pause loop, as the saving run does
+    if (setjmp(g_snap_jb) == 0) {
+      uint8_t *sp;
+      asm volatile("mv %0, sp" : "=r"(sp));
+      g_snap_sp = sp;
+      snap_saved_wait();
+    }
+    return;
+  }
+  if (req == SNAP_LOAD) {
+    // to the spare stack: the state is read over this one
+    uint8_t *const top = g_arena + ALT_HI;
+    asm volatile("mv sp, %0\n\tjr %1" : : "r"(top), "r"(&tpm_snap_parked) : "memory");
+    __builtin_unreachable();
+  }
+  if (g_resume) {
+    xSemaphoreTake(g_resume, pdMS_TO_TICKS(100));
   } else {
     vTaskDelay(pdMS_TO_TICKS(10));
   }

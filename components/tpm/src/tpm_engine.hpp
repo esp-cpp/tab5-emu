@@ -16,5 +16,12 @@ void pause();
 void resume();
 /// The last presented frame (320x240 RGB565), or empty.
 std::span<uint8_t> last_frame();
+/// Save states, while paused. A state loads only into the firmware build
+/// that wrote it, with the game's memory where it was (see release_arena).
+bool save_state(const std::string &path);
+bool load_state(const std::string &path);
+/// The game's PSRAM block is kept across quits (save states need it at the
+/// same address); the launcher frees it before another cart starts.
+void release_arena();
 
 } // namespace tpm::engine

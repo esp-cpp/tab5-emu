@@ -15,6 +15,11 @@ inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
     mgs::release_arena(); // its 3.8 MB of PSRAM: Jedi Knight needs the room
   }
 #endif
+#if defined(ENABLE_TPM)
+  if (info.platform != Emulator::TPM) {
+    tpm::release_arena(); // its ~5 MB, likewise
+  }
+#endif
   switch (info.platform) {
   case Emulator::JEDI_KNIGHT:
     return std::make_unique<JkCart>(Cart::Config{

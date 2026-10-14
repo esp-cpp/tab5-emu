@@ -205,4 +205,30 @@ std::span<uint8_t> video_buffer_rgb565() {
   return f ? std::span<uint8_t>{f, SCREEN_W * FRAME_H * 2} : std::span<uint8_t>{};
 }
 
+bool save_state(const std::string &path) {
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    return engine::save_state(path);
+  }
+#endif
+  logger_.warn("save state: the game is not running");
+  return false;
+}
+
+bool load_state(const std::string &path) {
+#if defined(TPM_HAVE_ENGINE)
+  if (engine_) {
+    return engine::load_state(path);
+  }
+#endif
+  logger_.warn("load state: the game is not running");
+  return false;
+}
+
+void release_arena() {
+#if defined(TPM_HAVE_ENGINE)
+  engine::release_arena();
+#endif
+}
+
 } // namespace tpm

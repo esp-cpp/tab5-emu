@@ -57,6 +57,17 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
             core 1 when the cart starts, printing "TPMBENCH <us> us per
             vblank". Only for measuring the rasterizer.
 
+    config TPM_TEST_STATE
+        string "Test: save a state at vblank A, load it at vblank B (\"A:B\")"
+        default ""
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: at vblank A pauses, saves a state to
+            /sdcard/tpm_state_test.sav and resumes; at B pauses, loads it and
+            resumes. From the save on, both passes print a hash of guest RAM
+            for 120 vblanks ("TPMHASH vblank hash"); the run after the load
+            must repeat them. B must be past A + 120.
+
     config TPM_TEST_PAUSE_VBLANK
         int "Test: pause at this vblank and log the paused frame (0: off)"
         default 0
