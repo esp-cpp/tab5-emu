@@ -7,9 +7,9 @@ states, and a `Cart` per game or emulator core, in the same shape as
 [esp-box-emu](https://github.com/esp-cpp/esp-box-emu) so glue can move
 between the two.
 
-Two of the carts are not emulators. They are native ports of PC and
-PlayStation games, running the games' own C code on the two 360 MHz RISC-V
-cores with a software rasterizer.
+Three of the carts are not emulators. They are native ports of PC and
+PlayStation games, running the games' own code as C on the two 360 MHz
+RISC-V cores with a software rasterizer.
 
 ## Metal Gear Solid, natively
 
@@ -30,6 +30,25 @@ speech. Gameplay runs at about 28 fps against the game's own 30 fps cap,
 drawn by two rasterizer workers, one per core, each taking a band of rows.
 Save and load states from the pause menu. See
 [components/mgs/README.md](components/mgs/README.md).
+
+## Star Wars Episode I: The Phantom Menace, recompiled
+
+https://github.com/user-attachments/assets/a1001e13-553d-4048-aa23-dba5409316e3
+
+<p>
+<img src="docs/images/tpm-conference.jpg" width="32%"> <img src="docs/images/tpm-corridor.jpg" width="32%"> <img src="docs/images/tpm-pause.jpg" width="32%">
+</p>
+
+The 1999 PlayStation game, USA Rev 1, through
+[tpm-decomp](https://github.com/esp-cpp/tpm-decomp): its static recompiler
+turns the game's executable into C at build time, and its runtime is the
+PlayStation around that C (BIOS, interrupts, DMA, CD-ROM, MDEC, GPU ports)
+on the same psyz rasterizer, GTE and SPU as the Metal Gear Solid port. It
+boots from the disc image on the card through the title, the full-motion
+movies (MDEC video with XA audio at the movies' full 15 fps) and the levels,
+at about 27 fps in game with sound effects, music and speech. Save and
+load states from the pause menu. See
+[components/tpm/README.md](components/tpm/README.md).
 
 ## Star Wars: Jedi Knight – Dark Forces II
 
@@ -87,6 +106,7 @@ components/
   statistics/       frame timing
   jk/               OpenJKDF2 port: engine submodule + ESP32 platform layer + glue
   mgs/              Metal Gear Solid: mgs_reversing + psyz submodules + the Tab5 platform layer
+  tpm/              The Phantom Menace: tpm-decomp submodule (static recompiler + runtime) + glue
   gba/ genesis/ snes/   the emulator cores and their glue
 docs/PLAN.md        the Jedi Knight plan and history
 ```
@@ -110,16 +130,20 @@ docs/PLAN.md        the Jedi Knight plan and history
   mgs/                        # Metal Gear Solid, extracted from your own US disc
     STAGE.DIR RADIO.DAT FACE.DAT ZMOVIE.STR VOX.DAT DEMO.DAT BRF.DAT
                               # (components/mgs/mgs_reversing/port/extract_disc.py)
+  tpm/                        # The Phantom Menace, USA Rev 1: the .bin of a bin/cue rip
+    Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin
   saves/                      # save states and their screenshots
 ```
 
 Example `metadata.csv` (one line per game: rom path, boxart, name; the
 platform comes from the path: `.md`/`.gen` Genesis, `.sfc`/`.smc` SNES,
-`.gba` Game Boy Advance, `jk.cd` Jedi Knight, `STAGE.DIR` Metal Gear Solid):
+`.gba` Game Boy Advance, `jk.cd` Jedi Knight, `STAGE.DIR` Metal Gear Solid,
+`SLUS_008.84` The Phantom Menace):
 
 ```
 jk/jk.cd, boxart/jk.jpg, Star Wars: Jedi Knight - Dark Forces II
 mgs/STAGE.DIR, boxart/mgs.jpg, Metal Gear Solid
+tpm/SLUS_008.84, boxart/tpm.jpg, Star Wars Episode I: The Phantom Menace
 genesis/sonic.md, boxart/sonic.jpg, Sonic the Hedgehog
 snes/smw.sfc, boxart/smw.jpg, Super Mario World
 gba/mk.gba, boxart/mk.jpg, Mario Kart: Super Circuit

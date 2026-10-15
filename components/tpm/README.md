@@ -56,10 +56,14 @@ Only USA Rev 1 works: the recompiled code is that executable.
 
 ## Running
 
-Status (2026-10-13, on the Tab5): boots from the card through the memory-card
-notice, the title menu and the loading screens into the first level (the
-Trade Federation ship), drawn correctly, at about **12 fps** against the
-game's 30 (the game runs in slow motion: emulated time never skips ahead).
+https://github.com/user-attachments/assets/a1001e13-553d-4048-aa23-dba5409316e3
+
+Status (2026-10-15, on the Tab5): plays from the card through the
+memory-card notice, the intro movie, the title menu and the levels, with
+sound effects, music, speech and the full-motion movies. In the levels the
+game runs at about **27 fps** against its 30 (with frameskip; both cores
+~95% busy); a level loads in about 4 s. Save and load states from the pause
+menu (3.6 MB each; save 1.5 s, load 0.6 s).
 
 - Threads: the game on core 0 (32 KB internal stack); the GPU's command
   stream on core 1 (`tpm_gpu`: the rasterizer, behind the game's back like
@@ -74,17 +78,24 @@ game's 30 (the game runs in slow motion: emulated time never skips ahead).
   the shared-memory pool and go back to it when the cart quits. Internal RAM
   holds only the guest register file and the game task's stack.
 - Disc reads go through a 32-sector read-ahead.
-- Pads: the HAL's merged gamepad; A = cross, B = circle, X = square,
-  Y = triangle, L/R = L1/R1.
+- Pads: the HAL's merged gamepad, face buttons by position (the HAL's B is
+  south): B = cross, A = circle, Y = square, X = triangle, L/R = L1/R1.
 - Movies play at full speed (15 fps, the game thread ~80% busy) with their
   XA audio when the overlay was recompiled (`CONFIG_TPM_DISC_PATH`). There is
   no memory card (the game says so and carries on).
-- The pause menu pauses the game at its next loop back-edge.
+- Frameskip (`CONFIG_TPM_FRAMESKIP`, default 2): when the game is ahead of
+  the GPU, the worker leaves up to that many frames in a row undrawn, so
+  the game keeps its pace instead of running in slow motion.
+- The pause menu pauses the game at its next loop back-edge. Save states
+  hold guest RAM, VRAM, the SPU, the CPU / GTE / hardware state and the
+  runtime's live statics; without enough free PSRAM for the game's arena
+  (after another big cart) the game still runs, without save states.
 
-Where the time goes (in the level): the game thread is busy all the time,
-about 10% SPU, a few % CD, the rest recompiled game code and psyz's GTE;
-the GPU worker is ~80% busy. Next: the GTE (16% of the game thread before
-the GPU moved), the recompiled code, the rasterizer's spans.
+Where the time goes (in the level): both the game thread and the GPU worker
+are ~95% busy. The game thread is the recompiled code (with g_ram pinned in
+a register and scratchpad accesses resolved at recompile time), the GTE
+(~24%) and the SPU mix (~10%). Next: a native renderer for the game's
+drawing code and the rasterizer's spans.
 
 ### Bring-up aids (menuconfig, "Test:" options)
 
