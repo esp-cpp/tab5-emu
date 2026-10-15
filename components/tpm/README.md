@@ -6,13 +6,44 @@ The PlayStation game (Big Ape Productions / LucasArts, 1999), USA Rev 1
 its static recompiler turns the game's executable into C at build time, and
 its runtime is the PlayStation around that C (BIOS, interrupts, DMA, CD-ROM,
 GPU ports) on psyz's software rasterizer, GTE and SPU, the same pieces the
-Metal Gear Solid port in `components/mgs` uses. The decompilation in that
-repo continues alongside.
+Metal Gear Solid port in `components/mgs` uses.
+
+## Recompiled, not (yet) decompiled
+
+The game code in this cart is **not** decompiled source. `tools/recomp.py`
+translates the executable instruction by instruction into C (one C function
+per guest function, with the registers and memory of the PlayStation as
+variables). No human writes, names or restructures anything. The output is
+the executable in another encoding, and the executable is Sony's copyrighted
+code. That decides how the port is built and shared:
+
+- Nothing generated from the game is committed, here or in tpm-decomp. The C
+  is produced at configure time in the build directory from your own
+  `SLUS_008.84`, and from your own disc image for the movie overlay.
+- A playable TPM firmware cannot be distributed. Each user builds it from
+  their own disc. The CI firmware is built without the executable and shows
+  only the load screens below.
+- tpm-decomp itself holds only original work: the recompiler, the runtime
+  (BIOS, interrupts, DMA, CD-ROM, MDEC, GPU ports), the HLE replacements, and
+  configuration that names addresses in the executable.
+
+**Where we want to go:** a real **matching decompilation**, hand-written C
+that compiles with the original toolchain (PSY-Q 4.3, GCC 2.8.1) back to the
+byte-identical executable. That is how
+[mgs_reversing](https://github.com/FoxdieTeam/mgs_reversing) works for the
+Metal Gear Solid port. tpm-decomp has started on this: the executable is
+split with splat and rebuilds byte-identical from `INCLUDE_ASM` stubs, the
+PSY-Q library functions are identified, and the first functions (`main`, the
+file layer) are in C. Decompiled functions can replace recompiled ones one at
+a time, so the port keeps running while the decompilation grows. When it is
+complete, this cart can build from source like `components/mgs`, with only
+the game data read from the card. Help is very welcome; see tpm-decomp's
+[docs/PLAN.md](https://github.com/esp-cpp/tpm-decomp/blob/main/docs/PLAN.md).
 
 ## Building
 
 The recompiler needs **your own** copy of the executable at build time
-(nothing derived from it is committed). Extract it from your disc image and
+(see above: nothing derived from it is committed). Extract it from your disc image and
 put it where `CONFIG_TPM_EXE_PATH` points (the default):
 
 ```sh

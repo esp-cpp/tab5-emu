@@ -9,7 +9,9 @@ between the two.
 
 Three of the carts are not emulators. They are native ports of PC and
 PlayStation games, running the games' own code as C on the two 360 MHz
-RISC-V cores with a software rasterizer.
+RISC-V cores with a software rasterizer: Jedi Knight and Metal Gear Solid from
+decompiled source, The Phantom Menace from a static recompilation of your own
+copy of the game (see below).
 
 ## Metal Gear Solid, natively
 
@@ -47,7 +49,24 @@ on the same psyz rasterizer, GTE and SPU as the Metal Gear Solid port. It
 boots from the disc image on the card through the title, the full-motion
 movies (MDEC video with XA audio at the movies' full 15 fps) and the levels,
 at about 27 fps in game with sound effects, music and speech. Save and
-load states from the pause menu. See
+load states from the pause menu.
+
+**Recompiled, not (yet) decompiled.** Unlike the other two ports, TPM does not
+run from decompiled source. `tpm-decomp/tools/recomp.py` translates every
+MIPS instruction of the executable into C, mechanically. That C is
+effectively Sony's executable in another form, so it is never committed or
+distributed. It is generated in the build directory from **your own** copy
+of `SLUS_008.84` (`CONFIG_TPM_EXE_PATH`), so a playable TPM needs a local
+build. The firmware from CI, built without the executable, carries only the
+cart's load-screen viewer.
+
+The goal is a real, matching decompilation: hand-written C that compiles back
+to the byte-identical executable, as mgs_reversing is for Metal Gear Solid.
+tpm-decomp has started one (the executable is split and rebuilds
+byte-identical, and the first functions are in C), and decompiled functions
+can replace recompiled ones one at a time. Once the decompilation is
+complete, TPM would build from source like the MGS port, with only the game
+data on the card. Contributions are very welcome. See
 [components/tpm/README.md](components/tpm/README.md).
 
 ## Star Wars: Jedi Knight – Dark Forces II
