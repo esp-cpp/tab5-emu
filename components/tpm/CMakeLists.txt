@@ -95,12 +95,13 @@ if(TPM_ENGINE_READY)
   target_compile_options(tpm_rt PRIVATE -O2 -w -fno-strict-aliasing -msmall-data-limit=0
                                         -Wno-error -ffixed-s11)
   target_compile_definitions(tpm_rt PRIVATE RT_RAM_REG=s11)
+  # the generated functions are huge and short of registers: scheduling
+  # that minds the pressure (-1%; without the scheduling pass, +2%), and s0
+  # for the code instead of a frame pointer (-0.5%)
+  set_property(SOURCE ${gen_srcs} APPEND PROPERTY COMPILE_OPTIONS "-fsched-pressure;-fomit-frame-pointer")
   # the rasterizer's inner loops decide the frame rate; they run from
   # PSRAM-XIP, not IRAM (the runtime's default, as in the MGS port: internal
   # RAM is what the boot-time DMA reserve and the HAL need)
-  # the generated functions are huge and short of registers: scheduling
-  # that minds the pressure (-1%; without the scheduling pass, +2%)
-  set_property(SOURCE ${gen_srcs} APPEND PROPERTY COMPILE_OPTIONS "-fsched-pressure")
   set_property(SOURCE ${rt}/rt_gpu.c APPEND PROPERTY COMPILE_OPTIONS "-O3;-fomit-frame-pointer")
   # ...as are the SPU's per-sample loop and the GTE's commands, on the game's
   # thread
