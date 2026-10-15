@@ -125,14 +125,24 @@ bool acquire_arena() {
   }
   if (!g_arena) {
     g_arena = static_cast<uint8_t *>(heap_caps_aligned_alloc(ARENA_ALIGN, total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!g_arena) {
-      logger.error("no {} KB of PSRAM for the game (free {} KB, largest {} KB)", total / 1024,
-                   heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
-                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
-      return false;
+    if (g_arena) {
+      g_arena_size = total;
+      logger.info("arena: {} KB at {}", total / 1024, fmt::ptr(g_arena));
+    } else {
+      // no block that size (another game ran first and the heap is in
+      // pieces): the game task's stack alone, everything else from the heap
+      // piece by piece (plat_alloc), and no save states this session; the
+      // next launch tries for the whole block again
+      logger.warn("no {} KB block of PSRAM (free {} KB, largest {} KB): running without save states",
+                  total / 1024, heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
+                  heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
+      g_arena = static_cast<uint8_t *>(heap_caps_aligned_alloc(ARENA_ALIGN, STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+      if (!g_arena) {
+        logger.error("no PSRAM for the game's stack");
+        return false;
+      }
+      g_arena_size = STACK;
     }
-    g_arena_size = total;
-    logger.info("arena: {} KB at {}", total / 1024, fmt::ptr(g_arena));
   }
   memset(g_arena, 0, g_arena_size);
   g_arena_used = STACK;
