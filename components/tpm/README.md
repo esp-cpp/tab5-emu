@@ -21,6 +21,13 @@ cp /tmp/tpm/SLUS_008.84 components/tpm/tpm-decomp/disks/us/
 idf.py build
 ```
 
+For the cutscene movies, point `CONFIG_TPM_DISC_PATH` at your disc image
+too (read at build time only): the movie player overlay (`FMV.CPE`) is
+recompiled from it, and the movies then play natively (tpm-decomp's
+`rt_movie.c`; Start or Cross skips one). Without it they are skipped.
+`CONFIG_TPM_MOVIES` turns them off; builds with `CONFIG_TPM_AUTOPRESS` skip
+them anyway, for the scripted timeline.
+
 CMake runs `tools/recomp.py` when it configures (and again whenever the
 executable or the recompiler changes); the C lands in the build directory.
 Without the executable the build still succeeds, with a warning, and the
@@ -69,10 +76,9 @@ game's 30 (the game runs in slow motion: emulated time never skips ahead).
 - Disc reads go through a 32-sector read-ahead.
 - Pads: the HAL's merged gamepad; A = cross, B = circle, X = square,
   Y = triangle, L/R = L1/R1.
-- Movies are skipped (no MDEC yet), XA speech / music is silent (not decoded
-  yet), there is no memory card (the game says so and carries on). At the
-  current speed the SPU makes samples at ~40% of real time, so sound breaks
-  up.
+- Movies play at full speed (15 fps, the game thread ~80% busy) with their
+  XA audio when the overlay was recompiled (`CONFIG_TPM_DISC_PATH`). There is
+  no memory card (the game says so and carries on).
 - The pause menu pauses the game at its next loop back-edge.
 
 Where the time goes (in the level): the game thread is busy all the time,

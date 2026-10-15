@@ -33,6 +33,20 @@ if(CONFIG_TPM_ENGINE)
     endif()
     # Re-run when the executable or the recompiler changes
     # the access sites that go to the scratchpad check it first
+    # the movie player overlay comes from the disc image, when there is one
+    set(disc_arg)
+    set(disc "${CONFIG_TPM_DISC_PATH}")
+    if(disc)
+      if(NOT IS_ABSOLUTE "${disc}")
+        set(disc "${CMAKE_SOURCE_DIR}/${disc}")
+      endif()
+      if(EXISTS "${disc}")
+        set(disc_arg --disc "${disc}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${disc}")
+      else()
+        message(WARNING "tpm: ${disc} not found (CONFIG_TPM_DISC_PATH): no movies")
+      endif()
+    endif()
     set(sites ${TPM_DECOMP}/config/scratch_sites.us.txt)
     set(sites_arg)
     if(EXISTS "${sites}")
@@ -42,7 +56,7 @@ if(CONFIG_TPM_ENGINE)
       "${exe}" "${TPM_DECOMP}/tools/recomp.py" "${TPM_DECOMP}/config/recomp_entries.us.txt"
       "${TPM_DECOMP}/recomp/hle.us.txt" "${sites}")
     execute_process(
-      COMMAND ${python} ${TPM_DECOMP}/tools/recomp.py "${exe}" ${TPM_GEN} --files 16 ${sites_arg}
+      COMMAND ${python} ${TPM_DECOMP}/tools/recomp.py "${exe}" ${TPM_GEN} --files 16 ${sites_arg} ${disc_arg}
       RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if(rc EQUAL 0)
       set(TPM_ENGINE_READY ON)

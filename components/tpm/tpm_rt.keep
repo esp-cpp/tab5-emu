@@ -29,3 +29,4 @@ rt_snap_restored
 g_ram
 rt_snap_dead
 rt_gpu_queue_empty
+rt_set_movies

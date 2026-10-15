@@ -19,6 +19,25 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
             tpm-decomp/tools/extract_disc.py. It is only read at build time;
             nothing derived from it is committed.
 
+    config TPM_DISC_PATH
+        string "Path of the disc image (.bin), for the movies"
+        default ""
+        depends on TPM_ENGINE
+        help
+            Your own raw image of the game's disc (2352-byte sectors), absolute
+            or relative to the project. It is only read at build time: the
+            movie player overlay (FMV.CPE) is recompiled from it. Empty: the
+            cart skips the movies.
+
+    config TPM_MOVIES
+        bool "Play the cutscene movies"
+        default y
+        depends on TPM_ENGINE
+        help
+            The movies play natively (tpm-decomp's rt_movie.c); Start or Cross
+            skips one. Needs TPM_DISC_PATH. Builds with TPM_AUTOPRESS skip them
+            regardless, for a fixed timeline.
+
     config TPM_SLIDE_SECONDS
         int "Seconds per load screen in the data viewer"
         default 4

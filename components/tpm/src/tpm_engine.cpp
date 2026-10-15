@@ -744,6 +744,13 @@ void game_task(void *) {
   rt_set_realtime(CONFIG_TPM_BENCH_FROM > 0 ? 0 : 1);
   rt_gpu_set_async(g_gpu_task ? (g_gpu0_task ? 2 : 1) : 0);
   rt_gpu_set_frameskip(CONFIG_TPM_FRAMESKIP);
+  // the movies (when the overlay was recompiled: CONFIG_TPM_DISC_PATH); a
+  // test build's scripted presses assume the fixed timeline without them
+#if CONFIG_TPM_MOVIES
+  rt_set_movies(g_presses.empty() ? 1 : 0);
+#else
+  rt_set_movies(0);
+#endif
 #if CONFIG_TPM_GPU_TRACE_VBLANK > 0
   rt_set_gpu_trace(CONFIG_TPM_GPU_TRACE_VBLANK);
 #endif
