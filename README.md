@@ -160,6 +160,7 @@ Requires ESP-IDF v6.x.
 git clone --recurse-submodules=components/jk/OpenJKDF2 \
           --recurse-submodules=components/mgs/mgs_reversing \
           --recurse-submodules=components/mgs/psyz \
+          --recurse-submodules=components/tpm/tpm-decomp \
           https://github.com/esp-cpp/tab5-emu
 cd tab5-emu
 idf.py set-target esp32p4
