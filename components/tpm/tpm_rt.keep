@@ -27,3 +27,5 @@ rt_mem_bytes
 rt_snap_preserve
 rt_snap_restored
 g_ram
+rt_snap_dead
+rt_gpu_queue_empty

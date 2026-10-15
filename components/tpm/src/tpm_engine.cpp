@@ -979,7 +979,8 @@ void release_arena() {
 
 namespace {
 
-constexpr uint32_t kSnapVersion = 1;
+constexpr uint32_t kSnapVersion = 2;
+constexpr int kSnapSkips = 4;
 struct SnapHeader {
   char magic[4];
   uint32_t version;
@@ -989,6 +990,10 @@ struct SnapHeader {
   uint32_t stack_lo; // the saved part of the stack: [stack_lo, arena + STACK)
   uint32_t jb_size;
   uint8_t jb[sizeof(jmp_buf)];
+  // arena ranges not in the file (rt_snap_dead: the drained GPU queue, the
+  // transfer buffer past any transfer), offsets from the arena, ascending
+  uint32_t n_skip;
+  uint32_t skip_off[kSnapSkips], skip_size[kSnapSkips];
 };
 
 struct SnapRegion {
@@ -997,13 +1002,47 @@ struct SnapRegion {
 };
 
 // in the order of the file, after the header
-std::vector<SnapRegion> snap_regions(uint8_t *stack_lo) {
-  return {
+std::vector<SnapRegion> snap_regions(uint8_t *stack_lo, const SnapHeader &h) {
+  std::vector<SnapRegion> r{
       {_tpm_data_start, static_cast<size_t>(_tpm_data_end - _tpm_data_start)},
       {_tpm_bss_start, static_cast<size_t>(_tpm_bss_end - _tpm_bss_start)},
-      {g_arena + STACK, g_arena_used - STACK},
-      {stack_lo, static_cast<size_t>(g_arena + STACK - stack_lo)},
   };
+  // the arena past the stack, around the skipped ranges
+  uint32_t at = STACK;
+  for (uint32_t i = 0; i < h.n_skip; i++) {
+    if (h.skip_off[i] > at) {
+      r.push_back({g_arena + at, h.skip_off[i] - at});
+    }
+    at = std::max(at, h.skip_off[i] + h.skip_size[i]);
+  }
+  if (g_arena_used > at) {
+    r.push_back({g_arena + at, g_arena_used - at});
+  }
+  r.push_back({stack_lo, static_cast<size_t>(g_arena + STACK - stack_lo)});
+  return r;
+}
+
+// the ranges rt_snap_dead gives, as arena offsets in ascending order (only
+// those wholly inside the arena past the stack)
+void snap_skips(SnapHeader &h) {
+  void *p[kSnapSkips];
+  uint32_t n[kSnapSkips];
+  const int k = rt_snap_dead(p, n, kSnapSkips);
+  h.n_skip = 0;
+  for (int i = 0; i < k; i++) {
+    const auto *b = static_cast<const uint8_t *>(p[i]);
+    if (n[i] == 0 || b < g_arena + STACK || b + n[i] > g_arena + g_arena_used) {
+      continue;
+    }
+    h.skip_off[h.n_skip] = static_cast<uint32_t>(b - g_arena);
+    h.skip_size[h.n_skip++] = n[i];
+  }
+  for (uint32_t i = 1; i < h.n_skip; i++) { // a handful: insertion sort
+    for (uint32_t j = i; j > 0 && h.skip_off[j] < h.skip_off[j - 1]; j--) {
+      std::swap(h.skip_off[j], h.skip_off[j - 1]);
+      std::swap(h.skip_size[j], h.skip_size[j - 1]);
+    }
+  }
 }
 
 bool io_chunked(FILE *f, uint8_t *p, size_t n, bool writing) {
@@ -1078,12 +1117,18 @@ bool save_state(const std::string &path) {
   h.stack_lo = reinterpret_cast<uint32_t>(stack_lo);
   h.jb_size = sizeof(jmp_buf);
   memcpy(h.jb, &g_snap_jb, sizeof(jmp_buf));
+  // the workers finish the queue first (it need not be saved then)
+  for (int i = 0; i < 500 && !rt_gpu_queue_empty(); i++) {
+    if (g_gpu_task) xTaskNotifyGive(g_gpu_task);
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
   bool ok = gpu_stop_workers();
   size_t total = sizeof h;
   if (ok) {
+    snap_skips(h);
     FILE *f = fopen(path.c_str(), "wb");
     ok = f && fwrite(&h, 1, sizeof h, f) == sizeof h;
-    for (const auto &r : snap_regions(stack_lo)) {
+    for (const auto &r : snap_regions(stack_lo, h)) {
       ok = ok && io_chunked(f, r.p, r.n, true);
       total += r.n;
     }
@@ -1132,7 +1177,13 @@ bool load_state(const std::string &path) {
       stack_lo < g_arena + ALT_HI || stack_lo >= g_arena + STACK) {
     return refuse("layout mismatch");
   }
-  const auto regions = snap_regions(stack_lo);
+  for (uint32_t i = 0; i < h.n_skip; i++) {
+    if (h.n_skip > kSnapSkips || h.skip_off[i] < STACK || h.skip_off[i] + h.skip_size[i] > g_arena_used ||
+        (i && h.skip_off[i] < h.skip_off[i - 1] + h.skip_size[i - 1])) {
+      return refuse("layout mismatch");
+    }
+  }
+  const auto regions = snap_regions(stack_lo, h);
   {
     // all of it must be there before the first byte of the game is overwritten
     size_t expected = sizeof h;
