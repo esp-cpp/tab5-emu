@@ -44,7 +44,9 @@ The 1997 PC game through [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF
 branch `esp32p4`): the engine's software rasterizer draws the world at a
 low internal resolution and the P4's 2D accelerator scales it to the panel,
 with the HUD composited at full resolution. Playable on hardware with
-sound, music, saves, and a USB keyboard and mouse or a gamepad. The port
+sound, music, the full-motion cutscenes (Smacker video and audio at the
+movies' full 15 fps; Start skips), saves, and a USB keyboard and mouse or a
+gamepad. The port
 plan and its history are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Emulators
