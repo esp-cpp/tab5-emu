@@ -25,6 +25,8 @@ set(SNES_COMPONENTS snes)
 set(GBA_COMPONENTS gba)
 ### Metal Gear Solid (mgs_reversing decompilation on psyz, native) ###
 set(MGS_COMPONENTS mgs)
+### Star Wars Episode I: The Phantom Menace (tpm-decomp on psyz, native) ###
+set(TPM_COMPONENTS tpm)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
@@ -44,6 +46,9 @@ endif()
 if(MGS_COMPONENTS)
   add_compile_definitions(ENABLE_MGS)
 endif()
+if(TPM_COMPONENTS)
+  add_compile_definitions(ENABLE_TPM)
+endif()
 
 if(DARK_FORCES_COMPONENTS)
   add_compile_definitions(ENABLE_DARK_FORCES)
@@ -55,6 +60,7 @@ set(GAME_COMPONENTS
   ${SNES_COMPONENTS}
   ${GBA_COMPONENTS}
   ${MGS_COMPONENTS}
+  ${TPM_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
   )
 

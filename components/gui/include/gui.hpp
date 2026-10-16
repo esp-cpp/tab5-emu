@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "lvgl.h"
@@ -46,6 +47,9 @@ public:
   void resume();
 
   void update_rom_list();
+
+  /// Select the first game whose name or rom path contains `text`
+  bool select_rom_matching(std::string_view text);
 
 protected:
   void init_ui();

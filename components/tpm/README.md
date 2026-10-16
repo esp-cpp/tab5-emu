@@ -1,0 +1,153 @@
+# Star Wars Episode I: The Phantom Menace, natively
+
+The PlayStation game (Big Ape Productions / LucasArts, 1999), USA Rev 1
+(`SLUS_008.84`), running natively on the ESP32-P4 through
+[tpm-decomp](https://github.com/esp-cpp/tpm-decomp) (submodule `tpm-decomp/`):
+its static recompiler turns the game's executable into C at build time, and
+its runtime is the PlayStation around that C (BIOS, interrupts, DMA, CD-ROM,
+GPU ports) on psyz's software rasterizer, GTE and SPU, the same pieces the
+Metal Gear Solid port in `components/mgs` uses.
+
+## Recompiled, not (yet) decompiled
+
+The game code in this cart is **not** decompiled source. `tools/recomp.py`
+translates the executable instruction by instruction into C (one C function
+per guest function, with the registers and memory of the PlayStation as
+variables). No human writes, names or restructures anything. The output is
+the executable in another encoding, and the executable is Sony's copyrighted
+code. That decides how the port is built and shared:
+
+- Nothing generated from the game is committed, here or in tpm-decomp. The C
+  is produced at configure time in the build directory from your own
+  `SLUS_008.84`, and from your own disc image for the movie overlay.
+- A playable TPM firmware cannot be distributed. Each user builds it from
+  their own disc. The CI firmware is built without the executable and shows
+  only the load screens below.
+- tpm-decomp itself holds only original work: the recompiler, the runtime
+  (BIOS, interrupts, DMA, CD-ROM, MDEC, GPU ports), the HLE replacements, and
+  configuration that names addresses in the executable.
+
+**Where we want to go:** a real **matching decompilation**, hand-written C
+that compiles with the original toolchain (PSY-Q 4.3, GCC 2.8.1) back to the
+byte-identical executable. That is how
+[mgs_reversing](https://github.com/FoxdieTeam/mgs_reversing) works for the
+Metal Gear Solid port. tpm-decomp has started on this: the executable is
+split with splat and rebuilds byte-identical from `INCLUDE_ASM` stubs, the
+PSY-Q library functions are identified, and the first functions (`main`, the
+file layer) are in C. Decompiled functions can replace recompiled ones one at
+a time, so the port keeps running while the decompilation grows. When it is
+complete, this cart can build from source like `components/mgs`, with only
+the game data read from the card. Help is very welcome; see tpm-decomp's
+[docs/PLAN.md](https://github.com/esp-cpp/tpm-decomp/blob/main/docs/PLAN.md).
+
+## Building
+
+The recompiler needs **your own** copy of the executable at build time
+(see above: nothing derived from it is committed). Extract it from your disc image and
+put it where `CONFIG_TPM_EXE_PATH` points (the default):
+
+```sh
+python3 components/tpm/tpm-decomp/tools/extract_disc.py "<your disc>.bin" /tmp/tpm
+cp /tmp/tpm/SLUS_008.84 components/tpm/tpm-decomp/disks/us/
+idf.py build
+```
+
+For the cutscene movies, point `CONFIG_TPM_DISC_PATH` at your disc image
+too (read at build time only): the movie player overlay (`FMV.CPE`) is
+recompiled from it, and the movies then play natively (tpm-decomp's
+`rt_movie.c`; Start or Cross skips one). Without it they are skipped.
+`CONFIG_TPM_MOVIES` turns them off; builds with `CONFIG_TPM_AUTOPRESS` skip
+them anyway, for the scripted timeline.
+
+CMake runs `tools/recomp.py` when it configures (and again whenever the
+executable or the recompiler changes); the C lands in the build directory.
+Without the executable the build still succeeds, with a warning, and the
+cart falls back to the load-screen viewer below.
+
+`components/mgs` links its own psyz under the same names, so the game, the
+runtime and their psyz pieces are linked into one relocatable object and
+everything but the runtime's API (`tpm_rt.keep`) is made local.
+
+## On the SD card
+
+The disc image: the `.bin` of a bin/cue rip (raw 2352-byte sectors, one
+track). The executable is read out of it, so nothing else is needed:
+
+```
+/sdcard/tpm/Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin
+```
+
+and a metadata entry (the path names the cart; the file itself may be absent):
+
+```
+tpm/SLUS_008.84,boxart/tpm.jpg,Star Wars Episode I: The Phantom Menace
+```
+
+Only USA Rev 1 works: the recompiled code is that executable.
+
+## Running
+
+https://github.com/user-attachments/assets/a1001e13-553d-4048-aa23-dba5409316e3
+
+Status (2026-10-15, on the Tab5): plays from the card through the
+memory-card notice, the intro movie, the title menu and the levels, with
+sound effects, music, speech and the full-motion movies. In the levels the
+game runs at about **27 fps** against its 30 (with frameskip; both cores
+~95% busy); a level loads in about 4 s. Save and load states from the pause
+menu (3.6 MB each; save 1.5 s, load 0.6 s).
+
+- Threads: the game on core 0 (32 KB internal stack); the GPU's command
+  stream on core 1 (`tpm_gpu`: the rasterizer, behind the game's back like
+  the real GPU's FIFO; a vblank marker in the queue copies the displayed
+  rows once the drawing before it is done); RGB565 conversion and the SPU's
+  audio on core 1 too.
+- Time: emulated time advances with the work done and never runs ahead of
+  the wall clock; when the board is slower the game runs slower (jumping the
+  clock made libetc's VSync time out).
+- Memory: the runtime's statics are in PSRAM (`tpm_rt.ld`) and put back
+  before every launch; guest RAM, VRAM, the SPU and the GPU queue come from
+  the shared-memory pool and go back to it when the cart quits. Internal RAM
+  holds only the guest register file and the game task's stack.
+- Disc reads go through a 32-sector read-ahead.
+- Pads: the HAL's merged gamepad, face buttons by position (the HAL's B is
+  south): B = cross, A = circle, Y = square, X = triangle, L/R = L1/R1.
+- Movies play at full speed (15 fps, the game thread ~80% busy) with their
+  XA audio when the overlay was recompiled (`CONFIG_TPM_DISC_PATH`). There is
+  no memory card (the game says so and carries on).
+- Frameskip (`CONFIG_TPM_FRAMESKIP`, default 2): when the game is ahead of
+  the GPU, the worker leaves up to that many frames in a row undrawn, so
+  the game keeps its pace instead of running in slow motion.
+- The pause menu pauses the game at its next loop back-edge. Save states
+  hold guest RAM, VRAM, the SPU, the CPU / GTE / hardware state and the
+  runtime's live statics; without enough free PSRAM for the game's arena
+  (after another big cart) the game still runs, without save states.
+
+Where the time goes (in the level): both the game thread and the GPU worker
+are ~95% busy. The game thread is the recompiled code (with g_ram pinned in
+a register and scratchpad accesses resolved at recompile time), the GTE
+(~24%) and the SPU mix (~10%). Next: a native renderer for the game's
+drawing code and the rasterizer's spans.
+
+### Bring-up aids (menuconfig, "Test:" options)
+
+- `CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS` + `CONFIG_TAB5_EMU_AUTOSTART_MATCH`
+  (main): launch the game whose name or path matches, e.g. `tpm/`.
+- `CONFIG_TPM_AUTOPRESS`: scripted pad presses by vblank, e.g.
+  `300:cross,600:cross,900:start,1200:cross,1500:cross` reaches the first
+  level.
+- `CONFIG_TPM_SERIAL_SCREENSHOT_SECONDS`: half-resolution screenshots on the
+  console (`tools/serial_screenshots.py log out/` makes PNGs; printing
+  stalls core 1 for a few seconds each time);
+  `CONFIG_TPM_SERIAL_FULL_SHOT_VBLANK`: all of VRAM once.
+- `CONFIG_TPM_GPU_TRACE_VBLANK`: the GPU state commands of one frame, to
+  diff against the desktop runner's `--gpu-trace N` (the emulated timeline
+  is deterministic: the same presses give the same frames).
+- `CONFIG_TPM_PROFILE_VBLANK`: 8000 PC samples of the game thread, printed
+  as `TPMPROF pc ra` for addr2line.
+- A status line every 5 s: vblanks, frames presented, the game's frame rate,
+  and the game thread's time split.
+
+Without the engine (or without a `.bin` on the card) the cart shows the
+game's 44 load screens from extracted disc files (`FILE.000` and
+`SLUS_008.84` in `/sdcard/tpm/`), every `CONFIG_TPM_SLIDE_SECONDS` or on
+left / right.

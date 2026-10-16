@@ -167,6 +167,9 @@ extern "C" void app_main(void) {
     static bool autostarted = false;
     if (!autostarted && gui.get_selected_rom().has_value()) {
       autostarted = true;
+      if (sizeof(CONFIG_TAB5_EMU_AUTOSTART_MATCH) > 1 && !gui.select_rom_matching(CONFIG_TAB5_EMU_AUTOSTART_MATCH)) {
+        logger.warn("Auto-start: no game matches '{}'", CONFIG_TAB5_EMU_AUTOSTART_MATCH);
+      }
       logger.warn("Auto-starting the first game in {} ms", CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS);
       std::this_thread::sleep_for(std::chrono::milliseconds(CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS));
       gui.ready_to_play(true);

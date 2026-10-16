@@ -9,3 +9,7 @@
 	path = components/mgs/psyz
 	url = https://github.com/esp-cpp/psyz.git
 	branch = esp32p4
+[submodule "components/tpm/tpm-decomp"]
+	path = components/tpm/tpm-decomp
+	url = https://github.com/esp-cpp/tpm-decomp.git
+	branch = main

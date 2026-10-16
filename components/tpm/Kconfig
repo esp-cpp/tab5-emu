@@ -1,0 +1,150 @@
+menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
+
+    config TPM_ENGINE
+        bool "Build the game (static recompilation of your SLUS_008.84)"
+        default y
+        help
+            Recompile the game's executable to C at configure time
+            (tpm-decomp/tools/recomp.py) and build it with tpm-decomp's
+            runtime on psyz. Needs the USA Rev 1 executable at
+            TPM_EXE_PATH; without it the build carries on and the cart shows
+            the game's load screens (the data and display path) instead.
+
+    config TPM_EXE_PATH
+        string "Path of SLUS_008.84 (USA Rev 1), relative to the project"
+        default "components/tpm/tpm-decomp/disks/us/SLUS_008.84"
+        depends on TPM_ENGINE
+        help
+            Your own copy of the game's executable, e.g. extracted with
+            tpm-decomp/tools/extract_disc.py. It is only read at build time;
+            nothing derived from it is committed.
+
+    config TPM_DISC_PATH
+        string "Path of the disc image (.bin), for the movies"
+        default ""
+        depends on TPM_ENGINE
+        help
+            Your own raw image of the game's disc (2352-byte sectors), absolute
+            or relative to the project. It is only read at build time: the
+            movie player overlay (FMV.CPE) is recompiled from it. Empty: the
+            cart skips the movies.
+
+    config TPM_MOVIES
+        bool "Play the cutscene movies"
+        default y
+        depends on TPM_ENGINE
+        help
+            The movies play natively (tpm-decomp's rt_movie.c); Start or Cross
+            skips one. Needs TPM_DISC_PATH. Builds with TPM_AUTOPRESS skip them
+            regardless, for a fixed timeline.
+
+    config TPM_SLIDE_SECONDS
+        int "Seconds per load screen in the data viewer"
+        default 4
+
+    config TPM_GPU_WORKERS
+        int "GPU workers (1: core 1 draws; 2: both cores, a band of rows each)"
+        default 1
+        range 1 2
+        depends on TPM_ENGINE
+        help
+            With 2 the second worker runs on the game's core above it. On
+            this board it measured slower: both cores then contend for PSRAM
+            and the cache with the game's recompiled code.
+
+    config TPM_FRAMESKIP
+        int "Frameskip: most frames in a row the GPU may leave undrawn (0 = off)"
+        default 2
+        range 0 4
+        depends on TPM_ENGINE
+        help
+            When the game has queued a whole frame more than the GPU worker
+            has drawn, the worker drops the next frame's primitives into the
+            display buffers (texture uploads, VRAM copies and other drawing
+            still run) and the screen keeps the previous picture. The game
+            then runs at the speed its own thread allows instead of the
+            rasterizer's. Effects that read back the frame buffer may show
+            the older frame for a moment.
+
+    config TPM_GPU_BENCH_FILE
+        string "Test: GPU benchmark recording to embed (rt_gpu_record file)"
+        default ""
+        depends on TPM_ENGINE
+        help
+            A recording made by tpm-decomp's desktop runner (--gpu-record):
+            embedded in the firmware and replayed through the rasterizer on
+            core 1 when the cart starts, printing "TPMBENCH <us> us per
+            vblank". Only for measuring the rasterizer.
+
+    config TPM_TEST_STATE
+        string "Test: save a state at vblank A, load it at vblank B (\"A:B\")"
+        default ""
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: at vblank A pauses, saves a state to
+            /sdcard/tpm_state_test.sav and resumes; at B pauses, loads it and
+            resumes. From the save on, both passes print a hash of guest RAM
+            for 120 vblanks ("TPMHASH vblank hash"); the run after the load
+            must repeat them. B must be past A + 120.
+
+    config TPM_TEST_PAUSE_VBLANK
+        int "Test: pause at this vblank and log the paused frame (0: off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: does what the emulator's pause menu does to the
+            engine (pause, read the last frame for the screenshot), logs how
+            much of that frame is not black, and resumes.
+
+    config TPM_AUTOPRESS
+        string "Test: scripted button presses (vblank:button,...)"
+        default ""
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: press pad buttons at given vblanks without anyone
+            at the board, e.g. "300:cross,600:cross,900:start". Each press
+            is held for 8 vblanks. Buttons: cross circle square triangle
+            start select up down left right l1 r1 l2 r2.
+
+    config TPM_SERIAL_SCREENSHOT_SECONDS
+        int "Test: print the screen on the console every N seconds (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Bring-up aid: the presented 320x240 RGB565 frame as base64 lines
+            ("TPMFB ..."), for tools/serial_screenshots.py to turn into
+            PNGs.
+
+    config TPM_SERIAL_FULL_SHOT_VBLANK
+        int "Test: print all of VRAM (half resolution) once, at this vblank (0 = off)"
+        default 0
+        depends on TPM_SERIAL_SCREENSHOT_SECONDS > 0
+
+    config TPM_GPU_TRACE_VBLANK
+        int "Test: log the GPU state commands of this frame (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Compare with the desktop runner's --gpu-trace N.
+
+    config TPM_PROFILE_VBLANK
+        int "Test: sample the game thread's PC for 8000 ticks from this vblank (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+
+    config TPM_BENCH_FROM
+        int "Test: run unpaced and time the vblanks from this one (0 = off)"
+        default 0
+        depends on TPM_ENGINE
+        help
+            Emulated time runs as fast as the board can (no pacing to real
+            time; audio that does not fit is dropped), so with
+            TPM_AUTOPRESS the game does the same work every run, and the log
+            gives the time from this vblank to TPM_BENCH_TO.
+
+    config TPM_BENCH_TO
+        int "Test: ... to this one"
+        default 0
+        depends on TPM_BENCH_FROM > 0
+
+endmenu

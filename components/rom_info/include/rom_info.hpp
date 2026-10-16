@@ -7,7 +7,7 @@
 #include "format.hpp"
 
 
-enum class Emulator { UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA, MGS };
+enum class Emulator { UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA, MGS, TPM };
 
 struct RomInfo {
   std::string name;
@@ -45,6 +45,8 @@ template <> struct fmt::formatter<Emulator> {
       return fmt::format_to(ctx.out(), "DARK_FORCES");
     case Emulator::MGS:
       return fmt::format_to(ctx.out(), "MGS");
+    case Emulator::TPM:
+      return fmt::format_to(ctx.out(), "TPM");
     default:
       return fmt::format_to(ctx.out(), "UNKNOWN");
     }

@@ -40,6 +40,7 @@ void mgs_platform_init(const char *data_dir) { g_sd_root = data_dir ? data_dir :
 
 extern "C" {
 void Psyz_SpuInit(void);
+extern int psyz_spu_by_voice; // psyz_spu.c: 1 mixes a block a voice at a time
 void Psyz_SpuPullSamples(short *out, int num_frames);
 extern volatile unsigned psyz_spu_irq_raised, psyz_spu_voices_active, psyz_spu_irq_caught_up; // psyz_spu.c
 extern volatile unsigned mgs_spu_irq_delivered;                        // port/esp32_vblank.c
@@ -55,6 +56,12 @@ std::atomic<bool> g_audio_stop{false};
 std::atomic<bool> g_audio_done{false};
 
 void audio_task(void *) {
+  // MGS clocks its sound driver off the SPU interrupt (voice 23 loops a blank
+  // sample, the IRQ address toggled ahead of it): mixed a voice at a time,
+  // the beats came irregularly (a third of them re-armed behind the voice
+  // and caught up, against a tenth sample by sample) and the opening's
+  // streamed audio was choppier. Sample by sample costs ~2.5x the mixing.
+  psyz_spu_by_voice = 0;
   auto &emu = Tab5Emu::get();
   static int16_t buf[kAudioFrames * 2];
   int64_t last_report = esp_timer_get_time();

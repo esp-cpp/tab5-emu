@@ -263,3 +263,35 @@ Phases:
    game saves, full-motion video (MDEC).
 
 The two submodules are esp-cpp forks (`esp32p4` branches).
+
+## Star Wars Episode I: The Phantom Menace (2026-10-11)
+
+Same shape as the MGS port (decompiled C on psyz, natively), but there is no
+decompilation to start from: making one is the job. It lives in its own repo,
+[tpm-decomp](https://github.com/esp-cpp/tpm-decomp) (submodule
+`components/tpm/tpm-decomp`), target
+`SLUS_008.84`, the USA **Rev 1** disc. Its `docs/LAYOUT.md` has what is known
+about the executable and the disc, `docs/PLAN.md` the road map.
+
+Where it stands:
+
+1. **Decomp ground** (done): splat split, byte-identical rebuild from
+   `INCLUDE_ASM` stubs through PSY-Q 4.3's GCC 2.8.1 + maspsx; ~105 PSY-Q
+   library objects named by signature; 823 game functions waiting.
+2. **The game runs, recompiled** (2026-10-11): tpm-decomp's static
+   recompiler translates the whole executable to C at build time and its
+   runtime emulates the machine around it (BIOS calls, interrupts, DMA,
+   CD-ROM over the `.bin`, GPU ports on psyz's rasterizer, psyz's GTE and
+   SPU). On the desktop it boots into the first level in 3D. Here it is
+   `CONFIG_TPM_ENGINE` (default on): CMake recompiles the user's
+   `SLUS_008.84` at configure time; the game, runtime and psyz pieces are
+   one relocatable object with only the runtime's API global (MGS links the
+   same psyz names). Built (7.9 MB image; app partition grown to 12 MB);
+   **not run on the Tab5 yet**.
+3. **Next**: the first run on the board, then performance (the MGS lessons:
+   the two-core rasterizer), MDEC movies, XA audio, memory card saves. The
+   decompilation continues in tpm-decomp; decompiled functions can replace
+   recompiled ones one at a time.
+
+The load-screen viewer remains the fallback (no executable at build time,
+or no `.bin` on the card).

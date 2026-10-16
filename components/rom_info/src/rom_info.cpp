@@ -75,6 +75,10 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 #if defined(ENABLE_MGS)
       platform = Emulator::MGS;
 #endif
+    } else if (endsWith(lp, "slus_008.84")) { // star wars episode i: the phantom menace
+#if defined(ENABLE_TPM)
+      platform = Emulator::TPM;
+#endif
     }
     if (platform != Emulator::UNKNOWN) {
       infos.emplace_back(name, fs_prefix + boxart_path, fs_prefix + rom_path, platform);
