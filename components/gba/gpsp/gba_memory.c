@@ -2356,6 +2356,12 @@ u8 *load_gamepak_page(u32 physical_index)
   return swap_location;
 }
 
+/* Where the 1 MB ROM cache blocks come from: the platform may hand out
+ * memory of its own (tab5-emu: slices of its boot-time ROM arena) before the
+ * heap. A block the hook did not allocate it frees with free(). */
+__attribute__((weak)) void *gpsp_rom_block_alloc(size_t bytes) { return malloc(bytes); }
+__attribute__((weak)) void gpsp_rom_block_free(void *p) { free(p); }
+
 void init_gamepak_buffer(void)
 {
   unsigned i;
@@ -2363,7 +2369,7 @@ void init_gamepak_buffer(void)
   gamepak_buffer_count = 0;
   while (gamepak_buffer_count < ROM_BUFFER_SIZE)
   {
-    void *ptr = malloc(gamepak_buffer_blocksize);
+    void *ptr = gpsp_rom_block_alloc(gamepak_buffer_blocksize);
     if (!ptr)
       break;
     gamepak_buffers[gamepak_buffer_count++] = (u8*)ptr;
@@ -2463,7 +2469,7 @@ void memory_term(void)
 
   while (gamepak_buffer_count)
   {
-    free(gamepak_buffers[--gamepak_buffer_count]);
+    gpsp_rom_block_free(gamepak_buffers[--gamepak_buffer_count]);
   }
 
   if (gamepak_mini_rom)
