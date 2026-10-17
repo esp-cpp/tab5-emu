@@ -56,8 +56,8 @@ run from decompiled source. `tpm-decomp/tools/recomp.py` translates every
 MIPS instruction of the executable into C, mechanically. That C is
 effectively Sony's executable in another form, so it is never committed or
 distributed. It is generated in the build directory from **your own** copy
-of `SLUS_008.84` (`CONFIG_TPM_EXE_PATH`), so a playable TPM needs a local
-build. The firmware from CI, built without the executable, carries only the
+of the game (`CONFIG_TPM_DISC_PATH`, see Build below), so a playable TPM
+needs a local build. The firmware from CI, built without the executable, carries only the
 cart's load-screen viewer.
 
 The goal is a real, matching decompilation: hand-written C that compiles back
@@ -188,6 +188,13 @@ idf.py build flash monitor
 
 (Do not recurse into the engine's own submodules; they are desktop-only
 dependencies.)
+
+The Phantom Menace is recompiled from your own disc at build time: set
+`CONFIG_TPM_DISC_PATH` to your USA Rev 1 disc image (the `.bin` of a bin/cue
+rip) in `idf.py menuconfig`, under "Star Wars Episode I: The Phantom
+Menace", before building. Without it the build succeeds with a warning and
+the TPM cart only shows the game's load screens. See
+[components/tpm/README.md](components/tpm/README.md#building).
 
 ## Controls
 
