@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <esp_heap_caps.h>
+#include <multi_heap.h>
 
 #include "task.hpp"
 #include <esp_timer.h>
@@ -22,6 +23,14 @@
 
 #include "logger.hpp"
 #include "tab5-emu.hpp"
+
+extern "C" {
+namespace {
+size_t arena_free_size(); // the engine heap over the ROM arena (below, in the C glue)
+void arena_create();
+void arena_destroy();
+} // namespace
+}
 
 using namespace std::chrono_literals;
 
@@ -388,7 +397,7 @@ void jk_esp_audio_lock(void) { g_audio_mutex.lock(); }
 void jk_esp_audio_unlock(void) { g_audio_mutex.unlock(); }
 
 uint32_t jk_esp_time_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
-size_t jk_esp_psram_free(void) { return heap_caps_get_free_size(MALLOC_CAP_SPIRAM); }
+size_t jk_esp_psram_free(void) { return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) + arena_free_size(); }
 void *jk_esp_malloc_dma(size_t bytes) { return heap_caps_malloc(bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL); }
 void jk_esp_free_dma(void *ptr) { heap_caps_free(ptr); }
 
@@ -591,6 +600,83 @@ void jk_esp_pool_report() {
               g_pool_allocs, g_pool_fallbacks);
 }
 
+// ---------------------------------------------------------------------------
+// The engine's large allocations go first to a private heap over the HAL's
+// ROM arena (the 6 MB block reserved at boot). The arena never goes back to
+// the system heap, so it stays at its boot address for the carts that keep
+// address-bound save states in it (MGS, TPM), and the engine's level data
+// does not cut up the system heap for the carts that run after it.
+//
+// The engine frees some blocks at the *next* session's start (see the pool
+// above); by then the arena may have held another game. Every block carries
+// the session it was allocated in, and a free from an earlier session is
+// dropped instead of reaching the new heap.
+// ---------------------------------------------------------------------------
+namespace {
+struct ArenaHdr {
+  uint32_t magic;
+  uint32_t session;
+};
+constexpr uint32_t ARENA_MAGIC = 0x4a4b4152;
+multi_heap_handle_t g_arena_heap = nullptr;
+const uint8_t *g_arena_lo = nullptr, *g_arena_hi = nullptr;
+uint32_t g_arena_session = 0;
+portMUX_TYPE g_arena_lock = portMUX_INITIALIZER_UNLOCKED;
+
+inline bool arena_owns(const void *p) { return g_arena_lo && p >= g_arena_lo && p < g_arena_hi; }
+// the header of a live block of this session, or null
+inline ArenaHdr *arena_hdr(void *p) {
+  auto *h = static_cast<ArenaHdr *>(p) - 1;
+  return g_arena_heap && h->magic == ARENA_MAGIC && h->session == g_arena_session ? h : nullptr;
+}
+void *arena_alloc(size_t size) {
+  if (!g_arena_heap) return nullptr;
+  auto *h = static_cast<ArenaHdr *>(multi_heap_malloc(g_arena_heap, size + sizeof(ArenaHdr)));
+  if (!h) return nullptr;
+  h->magic = ARENA_MAGIC;
+  h->session = g_arena_session;
+  return h + 1;
+}
+size_t arena_block_size(void *p) {
+  auto *h = arena_hdr(p);
+  return h ? multi_heap_get_allocated_size(g_arena_heap, h) - sizeof(ArenaHdr) : 0;
+}
+void arena_free(void *p) {
+  auto *h = arena_hdr(p);
+  if (!h) return; // an earlier session's block: its heap is gone
+  h->magic = 0;
+  multi_heap_free(g_arena_heap, h);
+}
+void arena_create() {
+  auto &emu = Tab5Emu::get();
+  auto *base = emu.rom_arena(emu.rom_arena_size());
+  if (!base) {
+    logger.warn("no ROM arena: the engine allocates from the system heap only");
+    return;
+  }
+  g_arena_heap = multi_heap_register(base, emu.rom_arena_size());
+  if (!g_arena_heap) {
+    logger.warn("could not make a heap of the ROM arena");
+    return;
+  }
+  multi_heap_set_lock(g_arena_heap, &g_arena_lock);
+  g_arena_lo = base;
+  g_arena_hi = base + emu.rom_arena_size();
+  g_arena_session++;
+  logger.info("engine heap: the ROM arena, {} KB at {}", multi_heap_free_size(g_arena_heap) / 1024,
+              fmt::ptr(base));
+}
+// the arena's range is kept, so late frees into it are still recognised
+void arena_destroy() { g_arena_heap = nullptr; }
+size_t arena_free_size() { return g_arena_heap ? multi_heap_free_size(g_arena_heap) : 0; }
+size_t arena_largest_free() {
+  if (!g_arena_heap) return 0;
+  multi_heap_info_t info;
+  multi_heap_get_info(g_arena_heap, &info);
+  return info.largest_free_block;
+}
+} // namespace
+
 // PSRAM only, on purpose: the engine's material cache evicts when an
 // allocation fails, and a fallback to internal RAM would instead drain the
 // internal heap (SD card DMA buffers, USB) once PSRAM is full.
@@ -608,6 +694,7 @@ void jk_esp_pool_report() {
 // engine runs must do so up front (the frame buffers are) or cope with NULL.
 void *jk_esp_malloc_site(size_t size, const void *site) {
   void *p = size <= POOL_CLASSES[POOL_NUM_CLASSES - 1] ? pool_alloc(size) : nullptr;
+  if (!p) p = arena_alloc(size);
   if (!p) p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (p) memset(p, 0, size);
 #if defined(JK_ESP_FS_DEBUG)
@@ -642,8 +729,32 @@ void *jk_esp_realloc_site(void *ptr, size_t size, const void *site) {
 #if defined(JK_ESP_FS_DEBUG)
     return p;
 #endif
+  } else if (ptr && arena_owns(ptr)) {
+    // grow or shrink in place when the arena can, else move to wherever
+    // there is room (the system heap once the arena is full)
+    const size_t old = arena_block_size(ptr);
+    auto *h = arena_hdr(ptr);
+    void *moved = h ? multi_heap_realloc(g_arena_heap, h, size + sizeof(ArenaHdr)) : nullptr;
+    if (moved) {
+      p = static_cast<ArenaHdr *>(moved) + 1;
+    } else {
+      p = size ? jk_esp_malloc_site(size, site) : nullptr;
+      if (p && h) memcpy(p, ptr, std::min(old, size));
+      if (p || !size) arena_free(ptr);
+#if defined(JK_ESP_FS_DEBUG)
+      return p; // already tracked by jk_esp_malloc_site
+#endif
+    }
   } else {
     p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p && ptr && size) {
+      // the system heap is full: the arena may still have room
+      p = arena_alloc(size);
+      if (p) {
+        memcpy(p, ptr, std::min(heap_caps_get_allocated_size(ptr), size));
+        heap_caps_free(ptr);
+      }
+    }
   }
 #if defined(JK_ESP_FS_DEBUG)
   alloc_track(p, size, site);
@@ -658,6 +769,8 @@ void jk_esp_free(void *ptr) {
 #endif
   if (pool_owns(ptr)) {
     pool_free(ptr);
+  } else if (arena_owns(ptr)) {
+    arena_free(ptr);
   } else {
     heap_caps_free(ptr);
   }
@@ -681,9 +794,10 @@ void jk_esp_log(const char *fmt, ...) {
 }
 
 void jk_esp_print_heap(void) {
-  logger.info("heap: internal free {} (largest {}), psram free {} (largest {})",
+  logger.info("heap: internal free {} (largest {}), psram free {} (largest {}), arena free {} (largest {})",
               heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-              heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+              heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+              arena_free_size(), arena_largest_free());
 }
 
 int jk_esp_internal_width(void) { return g_native_w; }
@@ -826,6 +940,7 @@ bool init(const Config &config) {
   g_native_h = CONFIG_JK_INTERNAL_HEIGHT;
   logger.info("init: game_dir='{}' internal {}x{}", config.game_dir, g_native_w, g_native_h);
 #if CONFIG_JK_ENGINE
+  arena_create();
 #if defined(JK_ESP_FS_DEBUG)
   // bring-up benchmark: SD read throughput and float parsing speed
   {
@@ -1009,6 +1124,9 @@ void deinit() {
   g_overlay_w = g_overlay_h = 0;
   g_pattern.clear();
   g_pattern.shrink_to_fit();
+#if CONFIG_JK_ENGINE
+  arena_destroy();
+#endif
 }
 
 bool run_frame() {

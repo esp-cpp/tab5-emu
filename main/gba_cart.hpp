@@ -9,15 +9,14 @@
 class GbaCart : public Cart {
 public:
   explicit GbaCart(const Cart::Config &config) : Cart(config) {
-    // the 16 MB ROM cache does not fit next to the 6 MB SNES ROM arena
-    Tab5Emu::get().release_rom_arena();
+    // the ROM cache takes its first blocks from the ROM arena (gba.cpp
+    // gpsp_rom_block_alloc), so the arena stays where it is
     handle_video_setting();
     init();
   }
   ~GbaCart() override {
     logger_.info("~GbaCart()");
     deinit();
-    Tab5Emu::get().reserve_rom_arena(); // the heap is clean again
   }
   void reset() override {
     Cart::reset();
