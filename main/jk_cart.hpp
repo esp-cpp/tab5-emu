@@ -17,18 +17,13 @@ public:
       : Cart(config) {
     // the engine's permanent small-object pool lives in the HAL's boot-time slab
     jk::ensure_pool();
-    // the engine's level load needs ~10 MB of PSRAM; give it the ROM arena
-    Tab5Emu::get().release_rom_arena();
+    // the engine's level load needs ~10 MB of PSRAM: the ROM arena is part of
+    // it, as the engine's own heap while it runs (jk.cpp arena_create)
     handle_video_setting();
     init();
   }
 
-  ~JkCart() override {
-    deinit();
-    // the ROM arena is reserved again by the launcher once the whole cart,
-    // pause menu included, is gone (main.cpp): here the menu's cached
-    // screenshots still sit in the hole and the reservation failed
-  }
+  ~JkCart() override { deinit(); }
 
   void reset() override {
     Cart::reset();

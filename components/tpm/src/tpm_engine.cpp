@@ -97,7 +97,10 @@ std::atomic<uint32_t> g_ring_w{0}, g_ring_r{0};
 // code keeps host pointers in its stack frames), so it loads only while they
 // sit at the same addresses. The block is kept across the cart's quits for
 // that reason; the launcher releases it before it starts any other cart.
-// Launched first after a boot, the game normally gets the same block back.
+// It is the HAL's ROM arena when that is free (reserved at boot at a fixed
+// address, so it is the same block every launch and every boot, and no other
+// game can cut it up: SNES loads its ROM there and Jedi Knight borrows it,
+// both only after make_cart released this hold); otherwise a heap block.
 //
 // The stack is the block's first STACK bytes. Its lowest ALT bytes above the
 // canary are where the game thread waits while a state is put back over the
@@ -107,6 +110,7 @@ constexpr uint32_t STACK = 32 * 1024;
 constexpr uint32_t ALT_LO = 1024, ALT_HI = 6 * 1024;
 constexpr size_t ARENA_ALIGN = 64;
 uint8_t *g_arena{nullptr};
+bool g_arena_lent{false}; // the HAL's ROM arena: never freed here
 size_t g_arena_size{0}, g_arena_used{0};
 bool g_arena_overflow{false}; // some allocation came from the heap: no states
 StaticTask_t g_game_tcb;
@@ -120,8 +124,20 @@ size_t arena_bytes() {
 bool acquire_arena() {
   const size_t total = arena_bytes();
   if (g_arena && g_arena_size != total) {
-    heap_caps_free(g_arena);
+    if (!g_arena_lent) {
+      heap_caps_free(g_arena);
+    }
     g_arena = nullptr;
+    g_arena_lent = false;
+  }
+  if (!g_arena) {
+    auto *lent = Tab5Emu::get().rom_arena(total + ARENA_ALIGN);
+    if (lent) {
+      g_arena = reinterpret_cast<uint8_t *>((reinterpret_cast<uintptr_t>(lent) + ARENA_ALIGN - 1) & ~(ARENA_ALIGN - 1));
+      g_arena_lent = true;
+      g_arena_size = total;
+      logger.info("arena: {} KB at {} (the ROM arena)", total / 1024, fmt::ptr(g_arena));
+    }
   }
   if (!g_arena) {
     g_arena = static_cast<uint8_t *>(heap_caps_aligned_alloc(ARENA_ALIGN, total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -989,8 +1005,11 @@ void release_arena() {
   if (g_game_task) {
     return; // the game is running in it
   }
-  heap_caps_free(g_arena);
+  if (!g_arena_lent) {
+    heap_caps_free(g_arena);
+  }
   g_arena = nullptr;
+  g_arena_lent = false;
   g_arena_size = g_arena_used = 0;
 }
 

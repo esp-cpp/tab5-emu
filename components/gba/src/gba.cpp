@@ -179,6 +179,37 @@ extern uint8_t (*obj_priority_list)[160][128];
 size_t gpsp_sound_buffer_bytes(void);
 size_t gpsp_obj_priority_bytes(void);
 }
+// The ROM cache's 1 MB blocks (gpSP init_gamepak_buffer): slices of the
+// HAL's ROM arena first, then the heap. The arena stays reserved at its boot
+// address for the carts that keep address-bound save states in it (MGS,
+// TPM); releasing it for the cache let it come back somewhere else.
+namespace {
+uint32_t g_arena_slices = 0; // bit i: slice i of the ROM arena is a cache block
+}
+extern "C" void *gpsp_rom_block_alloc(size_t bytes) {
+  auto &emu = Tab5Emu::get();
+  if (auto *arena = emu.rom_arena(emu.rom_arena_size())) {
+    const size_t n = std::min<size_t>(emu.rom_arena_size() / bytes, 32);
+    for (size_t i = 0; i < n; i++) {
+      if (!(g_arena_slices & (1u << i))) {
+        g_arena_slices |= 1u << i;
+        return arena + i * bytes;
+      }
+    }
+  }
+  return malloc(bytes);
+}
+extern "C" void gpsp_rom_block_free(void *p) {
+  auto &emu = Tab5Emu::get();
+  const auto *arena = emu.rom_arena(emu.rom_arena_size());
+  const auto *b = static_cast<const uint8_t *>(p);
+  if (arena && b >= arena && b < arena + emu.rom_arena_size()) {
+    g_arena_slices &= ~(1u << ((b - arena) / (1024 * 1024)));
+    return;
+  }
+  free(p);
+}
+
 // the core's big RAM arrays, from the shared pool the emulators hand around
 // (components/shared_memory); zeroed, as the statics they replace were
 static bool gba_shared_alloc() {
