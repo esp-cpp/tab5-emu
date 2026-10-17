@@ -106,6 +106,14 @@ public:
 
   virtual bool is_running() const { return running_; }
 
+  /// Quit the way the pause menu's Quit does (the game is paused first, then
+  /// the cart stops; the caller stops calling run()); for the automated
+  /// launch tests.
+  void quit_as_from_menu() {
+    pre_menu();
+    running_ = false;
+  }
+
   /// Run one iteration of the game loop; returns false once the user quits.
   virtual bool run() {
     running_ = true;
