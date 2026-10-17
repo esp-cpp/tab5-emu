@@ -12,7 +12,17 @@ menu "tab5-emu"
         default ""
         depends on TAB5_EMU_AUTOSTART_DELAY_MS > 0
         help
-            Empty: the first entry of metadata.csv.
+            Empty: the first entry of metadata.csv. A comma-separated list
+            launches each in turn when TAB5_EMU_AUTOQUIT_SECONDS is set.
+
+    config TAB5_EMU_AUTOQUIT_SECONDS
+        int "Test: quit each auto-started game after this many seconds (0 = off)"
+        default 0
+        depends on TAB5_EMU_AUTOSTART_DELAY_MS > 0
+        help
+            Quits the way the pause menu's Quit does, then auto-starts the
+            next game of TAB5_EMU_AUTOSTART_MATCH, round and round: a soak
+            test of launching and quitting the carts one after another.
 
     config TAB5_EMU_USB_MSC_AT_BOOT
         bool "Test: turn the USB drive on right after boot"
