@@ -47,6 +47,9 @@ Tab5Emu::Tab5Emu()
 /////////////////////////////////////////////////////////////////////////////
 
 bool Tab5Emu::initialize_tab5() {
+  // the video tile first: it needs one 64 KB block of internal RAM, which the
+  // BSP's own allocations (its rotation tile, audio DMA) can otherwise split
+  ensure_tile_buffer();
   auto &bsp = Bsp::get();
   if (!bsp.initialize_io_expanders()) {
     logger_.error("Failed to initialize IO expanders");
@@ -526,9 +529,10 @@ bool Tab5Emu::initialize_video() {
     logger_.error("Could not register a PPA client: {}", esp_err_to_name(err));
     return false;
   }
-  // the conversion tile (internal RAM) is allocated now, before the GUI
-  // fragments the internal heap, and kept for the life of the app: every
-  // cart needs it and the cores' own hot data lives in PSRAM
+  // the conversion tile (internal RAM), normally already allocated at the top
+  // of initialize_tab5(), before the BSP and the GUI fragment the internal
+  // heap, and kept for the life of the app: every cart needs it and the
+  // cores' own hot data lives in PSRAM
   if (!ensure_tile_buffer()) {
     return false;
   }
