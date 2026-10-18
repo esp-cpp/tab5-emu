@@ -67,6 +67,15 @@ void Psyz_GpuSync(void);              // psyz libgpu.c: wait for the raster work
 // launcher starts another cart.
 unsigned char *g_mgs_arena{nullptr};
 size_t g_mgs_arena_size{0};
+int g_mgs_arena_borrowed{0};
+// The HAL's ROM arena, reserved at boot, when it is free and big enough: a
+// block at a fixed address that other carts cannot fragment (SNES loads its
+// ROM there, Jedi Knight borrows it while it runs; both only while MGS is
+// not running, as make_cart releases MGS's hold first).
+unsigned char *Mgs_ArenaBorrow(size_t bytes) {
+  auto *p = Tab5Emu::get().rom_arena(bytes + 64);
+  return p ? reinterpret_cast<unsigned char *>((reinterpret_cast<uintptr_t>(p) + 63) & ~uintptr_t{63}) : nullptr;
+}
 unsigned char *mgs_main_ram{nullptr};
 unsigned char *mgs_face_group{nullptr};
 unsigned short *g_RawVram{nullptr};

@@ -20,6 +20,12 @@ inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
     tpm::release_arena(); // its ~5 MB, likewise
   }
 #endif
+#if CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS > 0
+  fmt::print("make_cart: psram free {} (largest {}), internal free {} (largest {})\n",
+             heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+#endif
   switch (info.platform) {
   case Emulator::JEDI_KNIGHT:
     return std::make_unique<JkCart>(Cart::Config{

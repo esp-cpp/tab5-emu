@@ -164,13 +164,32 @@ extern "C" void app_main(void) {
     // reset gui ready to play
     gui.ready_to_play(false);
 #if CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS > 0
-    static bool autostarted = false;
-    if (!autostarted && gui.get_selected_rom().has_value()) {
-      autostarted = true;
-      if (sizeof(CONFIG_TAB5_EMU_AUTOSTART_MATCH) > 1 && !gui.select_rom_matching(CONFIG_TAB5_EMU_AUTOSTART_MATCH)) {
-        logger.warn("Auto-start: no game matches '{}'", CONFIG_TAB5_EMU_AUTOSTART_MATCH);
+    // AUTOSTART_MATCH is a comma-separated list; with AUTOQUIT_SECONDS each
+    // game is quit after that long and the next one in the list starts,
+    // round and round (a launch / quit / launch soak test)
+    static size_t autostart_launches = 0;
+    if ((autostart_launches == 0 || CONFIG_TAB5_EMU_AUTOQUIT_SECONDS > 0) && gui.get_selected_rom().has_value()) {
+      std::vector<std::string> matches;
+      std::string_view list = CONFIG_TAB5_EMU_AUTOSTART_MATCH;
+      while (!list.empty()) {
+        const auto comma = list.find(',');
+        auto item = list.substr(0, comma);
+        if (!item.empty())
+          matches.emplace_back(item);
+        list = comma == std::string_view::npos ? std::string_view{} : list.substr(comma + 1);
       }
-      logger.warn("Auto-starting the first game in {} ms", CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS);
+      if (!matches.empty()) {
+        const auto &match = matches[autostart_launches % matches.size()];
+        if (!gui.select_rom_matching(match)) {
+          logger.warn("Auto-start: no game matches '{}'", match);
+        }
+      }
+      autostart_launches++;
+      logger.warn("AUTOSTART launch {} ({}) in {} ms; free: internal {} (largest {}), psram {} (largest {})",
+                  autostart_launches, gui.get_selected_rom().value().name, CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS,
+                  heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                  heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
       std::this_thread::sleep_for(std::chrono::milliseconds(CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS));
       gui.ready_to_play(true);
     }
@@ -192,8 +211,19 @@ extern "C" void app_main(void) {
       {
         std::unique_ptr<Cart> cart(make_cart(selected_rom));
         if (cart) {
+#if CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS > 0 && CONFIG_TAB5_EMU_AUTOQUIT_SECONDS > 0
+          const auto quit_at = std::chrono::steady_clock::now() + std::chrono::seconds(CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
+          while (cart->run()) {
+            if (std::chrono::steady_clock::now() >= quit_at) {
+              logger.warn("AUTOQUIT after {} s", CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
+              cart->quit_as_from_menu();
+              break;
+            }
+          }
+#else
           while (cart->run())
             ;
+#endif
         } else {
           logger.error("Failed to create cart!");
         }
@@ -204,10 +234,10 @@ extern "C" void app_main(void) {
 
     // The cart is gone, and with it its pause menu and the screenshots LVGL
     // cached for it: the PSRAM heap is as clean as it gets. Reserve the ROM
-    // arena again now (a no-op when it is still held) -- a cart that released
-    // it for its own level data (Jedi Knight) cannot do this early enough,
-    // its destructor runs before the base's menu is torn down -- and before
-    // the GUI decodes boxart into the hole.
+    // arena again if it was lost (a no-op normally: the carts that need its
+    // room borrow it -- Jedi Knight as its engine heap, GBA for ROM cache
+    // blocks, MGS and TPM for their arenas -- instead of releasing it, so it
+    // keeps its boot address), before the GUI decodes boxart into the heap.
     if (!Tab5Emu::get().reserve_rom_arena()) {
 #if CONFIG_HEAP_TRACING_STANDALONE
       if (trace_records && hole_base) {
