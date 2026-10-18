@@ -6,28 +6,33 @@ menu "Star Wars Episode I: The Phantom Menace (tpm-decomp)"
         help
             Recompile the game's executable to C at configure time
             (tpm-decomp/tools/recomp.py) and build it with tpm-decomp's
-            runtime on psyz. Needs the USA Rev 1 executable at
-            TPM_EXE_PATH; without it the build carries on and the cart shows
-            the game's load screens (the data and display path) instead.
-
-    config TPM_EXE_PATH
-        string "Path of SLUS_008.84 (USA Rev 1), relative to the project"
-        default "components/tpm/tpm-decomp/disks/us/SLUS_008.84"
-        depends on TPM_ENGINE
-        help
-            Your own copy of the game's executable, e.g. extracted with
-            tpm-decomp/tools/extract_disc.py. It is only read at build time;
-            nothing derived from it is committed.
+            runtime on psyz. Needs your USA Rev 1 disc image at
+            TPM_DISC_PATH (or the executable at TPM_EXE_PATH); without it the
+            build carries on and the cart shows the game's load screens (the
+            data and display path) instead.
 
     config TPM_DISC_PATH
-        string "Path of the disc image (.bin), for the movies"
+        string "Path of your disc image (.bin)"
         default ""
         depends on TPM_ENGINE
         help
-            Your own raw image of the game's disc (2352-byte sectors), absolute
-            or relative to the project. It is only read at build time: the
-            movie player overlay (FMV.CPE) is recompiled from it. Empty: the
-            cart skips the movies.
+            Your own raw image of the game's disc, USA Rev 1 (the .bin of a
+            bin/cue rip, 2352-byte sectors), absolute or relative to the
+            project. This is the only setting a build needs: the executable
+            (SLUS_008.84) is extracted from it into the build directory, and
+            the movie player overlay (FMV.CPE) is recompiled from it. It is
+            only read at build time; nothing derived from it is committed.
+            Empty: give TPM_EXE_PATH instead, and the cart skips the movies.
+
+    config TPM_EXE_PATH
+        string "Path of SLUS_008.84 (optional, relative to the project)"
+        default "components/tpm/tpm-decomp/disks/us/SLUS_008.84"
+        depends on TPM_ENGINE
+        help
+            The game's executable (USA Rev 1), when you have it on its own,
+            e.g. extracted with tpm-decomp/tools/extract_disc.py. Used when
+            the file exists; otherwise it is extracted from TPM_DISC_PATH.
+            Only read at build time; nothing derived from it is committed.
 
     config TPM_MOVIES
         bool "Play the cutscene movies"

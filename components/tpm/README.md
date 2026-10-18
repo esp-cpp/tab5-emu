@@ -42,27 +42,35 @@ the game data read from the card. Help is very welcome; see tpm-decomp's
 
 ## Building
 
-The recompiler needs **your own** copy of the executable at build time
-(see above: nothing derived from it is committed). Extract it from your disc image and
-put it where `CONFIG_TPM_EXE_PATH` points (the default):
+The recompiler needs **your own** copy of the game at build time (see
+above: nothing derived from it is committed). Point `CONFIG_TPM_DISC_PATH`
+at your disc image (`idf.py menuconfig` > "Star Wars Episode I: The Phantom
+Menace" > "Path of your disc image", absolute or relative to the project) and
+build:
 
 ```sh
-python3 components/tpm/tpm-decomp/tools/extract_disc.py "<your disc>.bin" /tmp/tpm
-cp /tmp/tpm/SLUS_008.84 components/tpm/tpm-decomp/disks/us/
+idf.py menuconfig   # or put it in sdkconfig:
+                    # CONFIG_TPM_DISC_PATH="/path/to/Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin"
 idf.py build
 ```
 
-For the cutscene movies, point `CONFIG_TPM_DISC_PATH` at your disc image
-too (read at build time only): the movie player overlay (`FMV.CPE`) is
-recompiled from it, and the movies then play natively (tpm-decomp's
-`rt_movie.c`; Start or Cross skips one). Without it they are skipped.
+That is the only setting. At configure time CMake extracts the executable
+(`SLUS_008.84`) from the image into `build/esp-idf/tpm/disc/` (again only
+when the image changes), checks that it is USA Rev 1 by its SHA-1, and
+recompiles it along with the movie player overlay (`FMV.CPE`), so the movies
+play natively (tpm-decomp's `rt_movie.c`; Start or Cross skips one).
 `CONFIG_TPM_MOVIES` turns them off; builds with `CONFIG_TPM_AUTOPRESS` skip
 them anyway, for the scripted timeline.
 
+If you already have the executable on its own, `CONFIG_TPM_EXE_PATH`
+(default `components/tpm/tpm-decomp/disks/us/SLUS_008.84`, gitignored) is
+used when the file exists; without a disc image the movies are skipped.
+
 CMake runs `tools/recomp.py` when it configures (and again whenever the
 executable or the recompiler changes); the C lands in the build directory.
-Without the executable the build still succeeds, with a warning, and the
-cart falls back to the load-screen viewer below.
+Without the game (or with another revision) the build still succeeds, with
+a warning saying what is missing, and the cart falls back to the
+load-screen viewer below.
 
 `components/mgs` links its own psyz under the same names, so the game, the
 runtime and their psyz pieces are linked into one relocatable object and
