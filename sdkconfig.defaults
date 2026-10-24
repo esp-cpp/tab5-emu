@@ -7,8 +7,11 @@ CONFIG_ESP32P4_REV_MIN_0=y
 
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
-CONFIG_COMPILER_CXX_EXCEPTIONS=y
-CONFIG_COMPILER_CXX_RTTI=y
+# No C++ exceptions or RTTI: nothing in the firmware needs them (the games
+# and emulator cores are C; the C++ glue checks allocations instead of
+# catching bad_alloc), and they cost code size and unwind tables in PSRAM.
+# CONFIG_COMPILER_CXX_EXCEPTIONS is not set
+# CONFIG_COMPILER_CXX_RTTI is not set
 
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

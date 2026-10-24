@@ -61,6 +61,7 @@ extern "C" void app_main(void) {
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+#if __cpp_exceptions
     if (auto *t = __cxxabiv1::__cxa_current_exception_type()) {
       printf("terminate: uncaught exception of type %s", t->name());
       try {
@@ -73,6 +74,7 @@ extern "C" void app_main(void) {
     } else {
       printf("terminate: no active exception\n");
     }
+#endif
     abort();
   });
 

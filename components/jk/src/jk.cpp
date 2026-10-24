@@ -987,16 +987,25 @@ bool init(const Config &config) {
         // The frame conversion buffers (about 1 MB) are needed at the first present
   // of a mode, which comes after the level load has filled PSRAM: the
   // material cache grows until an allocation fails. Reserved now, so that
-  // assign() later finds the capacity and cannot throw std::bad_alloc.
-  try {
+  // assign() later finds the capacity and never allocates. There are no C++
+  // exceptions (a failed allocation in reserve() aborts), so check the heap
+  // first; the engine has not started, so nothing else allocates meanwhile.
+  {
     const size_t w = CONFIG_JK_INTERNAL_WIDTH, h = CONFIG_JK_INTERNAL_HEIGHT;
-    g_last_rgb565.reserve(std::max<size_t>(w * h * 2, 640 * 480 * 2));
-    g_frame8[0].reserve(std::max<size_t>(w * h, 640 * 480));
-    g_frame8[1].reserve(std::max<size_t>(w * h, 640 * 480));
-    g_overlay8[0].reserve(640 * 480);
-    g_overlay8[1].reserve(640 * 480);
-  } catch (const std::bad_alloc &) {
-    logger.warn("could not reserve the frame buffers up front");
+    const size_t rgb = std::max<size_t>(w * h * 2, 640 * 480 * 2);
+    const size_t f8 = std::max<size_t>(w * h, 640 * 480);
+    const size_t ov = 640 * 480;
+    const size_t total = rgb + 2 * f8 + 2 * ov;
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= rgb &&
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= total + 64 * 1024) {
+      g_last_rgb565.reserve(rgb);
+      g_frame8[0].reserve(f8);
+      g_frame8[1].reserve(f8);
+      g_overlay8[0].reserve(ov);
+      g_overlay8[1].reserve(ov);
+    } else {
+      logger.warn("could not reserve the frame buffers up front");
+    }
   }
   logger.info("heap before engine startup: internal {} (largest {}), psram {} (largest {})",
                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
