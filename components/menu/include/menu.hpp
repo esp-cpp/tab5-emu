@@ -92,5 +92,5 @@ protected:
       .callback = std::bind(&Menu::update, this),
   }};
   espp::Logger logger_;
-  std::recursive_mutex mutex_;
+  std::recursive_mutex &mutex_{Tab5Emu::lvgl_mutex()}; // shared: LVGL is not thread-safe
 };
