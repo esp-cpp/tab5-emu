@@ -171,7 +171,15 @@ void freeze() {
   if (!(mts_active_task_800C0DB0 == MTS_TASK_IDLE && psyz_critical_depth == 0)) {
     wait_for_idle(200);
   }
+  // the running thread is suspended wherever it is: holding stdout's and
+  // stderr's locks meanwhile keeps that from being inside printf (the game
+  // prints a lot while it boots), where it would keep the lock and the next
+  // log line from any other task would wait forever
+  flockfile(stdout);
+  flockfile(stderr);
   Mgs_ThreadsPause();
+  funlockfile(stderr);
+  funlockfile(stdout);
   if (mts_active_task_800C0DB0 != MTS_TASK_IDLE) {
     logger.warn("frozen with mts task {} active (not idle)", mts_active_task_800C0DB0);
   }
