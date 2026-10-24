@@ -36,6 +36,8 @@ void Menu::select_slot(int slot) {
 void Menu::pause() {
   paused_ = true;
   task_.stop();
+  // wait out a timer callback already in lv_timer_handler() (stop() does not)
+  std::lock_guard<std::recursive_mutex> lk(mutex_);
 }
 
 void Menu::resume() {

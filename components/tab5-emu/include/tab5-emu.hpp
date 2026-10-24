@@ -194,6 +194,13 @@ public:
   /// focused slider / dropdown), A = enter, B = escape. Menus attach their
   /// lv_group to it (lv_indev_set_group) when shown.
   lv_indev_t *keypad_indev() const { return keypad_indev_; }
+  /// The one lock for LVGL (built without LV_USE_OS, so it is not
+  /// thread-safe): the launcher's and the pause menu's timers and their
+  /// event-manager callbacks (volume) all touch it from different tasks.
+  static std::recursive_mutex &lvgl_mutex() {
+    static std::recursive_mutex m;
+    return m;
+  }
   /// Stop the USB host library (keyboard / mouse stop working). The USB
   /// controller is shared with device mode (see initialize_usb_msc()).
   void deinitialize_usb_host();
