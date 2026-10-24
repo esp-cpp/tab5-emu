@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 
 #include "box-emu.hpp"
@@ -183,8 +184,12 @@ size_t gpsp_obj_priority_bytes(void);
 // HAL's ROM arena first, then the heap. The arena stays reserved at its boot
 // address for the carts that keep address-bound save states in it (MGS,
 // TPM); releasing it for the cache let it come back somewhere else.
+// The core asks for blocks until it has ROM_BUFFER_SIZE or one fails, so the
+// heap ones stop short of the last PSRAM_RESERVE bytes: the frame buffers,
+// the pause menu's screenshots and a save state's buffer come after it.
 namespace {
 uint32_t g_arena_slices = 0; // bit i: slice i of the ROM arena is a cache block
+constexpr size_t PSRAM_RESERVE = 2 * 1024 * 1024;
 }
 extern "C" void *gpsp_rom_block_alloc(size_t bytes) {
   auto &emu = Tab5Emu::get();
@@ -196,6 +201,9 @@ extern "C" void *gpsp_rom_block_alloc(size_t bytes) {
         return arena + i * bytes;
       }
     }
+  }
+  if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < bytes + PSRAM_RESERVE) {
+    return nullptr; // a smaller cache pages the rest of the ROM from the card
   }
   return malloc(bytes);
 }
@@ -246,6 +254,15 @@ void init_gba(const std::string &rom_path) {
     gba_shared_free();
     return;
   }
+  // the two frame buffers video_cb alternates between, before the ROM cache
+  // takes what PSRAM is left (allocated on first use, they came after it, and
+  // with the second one missing no frame reached the screen)
+  auto &emu = BoxEmu::get();
+  if (!emu.frame_buffer0() || !emu.frame_buffer1()) {
+    fmt::print("gba: no memory for the frame buffers\n");
+    gba_shared_free();
+    return;
+  }
   retro_set_environment(&environ_cb);
   retro_set_video_refresh(&video_cb);
   retro_set_audio_sample_batch(&audio_batch_cb);
@@ -263,7 +280,6 @@ void init_gba(const std::string &rom_path) {
   struct retro_system_av_info av = {};
   retro_get_system_av_info(&av);
   g_fps = av.timing.fps;
-  auto &emu = BoxEmu::get();
   emu.palette(nullptr);
   g_audio_rate = static_cast<uint32_t>(av.timing.sample_rate);
   emu.audio_sample_rate(g_audio_rate);
@@ -299,7 +315,11 @@ void run_gba_rom() {
   if (g_next_due == 0 || start > g_next_due + 2 * frame_us) {
     g_next_due = start;
   }
-  const bool behind = start > g_next_due;
+  // the sleep below wakes up to a tick (1 ms) after the deadline, so a frame
+  // that starts just past it is on time; only a quarter frame late is behind
+  // (with no slack every frame after a sleep was "behind" and every other
+  // frame was skipped, even at 4 ms a frame)
+  const bool behind = start > g_next_due + frame_us / 4;
   // the core's "auto" frameskip skips a frame when the host reports an
   // audio underrun (up to 30 in a row). Rendering is a small part of a
   // frame here, so skipping barely catches up but makes the output choppy:
