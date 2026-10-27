@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "../mgs_reversing/port/mgs_snapshot.h"
+#include <psyz/mcd.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -323,6 +324,7 @@ bool init(const Config &config) {
   // the directory must be called MGS (FAT is case-insensitive about it).
   const auto root = std::filesystem::path(config.data_dir).parent_path().string();
   Mgs_SetDataRoot(root.c_str());
+  Mcd_SetPath(0, config.memory_card.c_str()); // the "bu00:" device (psyz/mcd.h)
   mgs_platform_init(config.data_dir.c_str());
   // the frame buffers the scanout converts VRAM into (the S3 port's app_main
   // does this; here it is the cart's job)

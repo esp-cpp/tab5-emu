@@ -16,6 +16,10 @@ struct Config {
   /// Directory holding the disc files: STAGE.DIR, RADIO.DAT, FACE.DAT, ...
   /// (what port/extract_disc.py produces), e.g. "/sdcard/mgs".
   std::string data_dir;
+  /// The memory card in port 1, a 128 KB card image file (the format PC
+  /// emulators use): the game's own saves go there. Made, formatted, the
+  /// first time the game looks. Empty: no card.
+  std::string memory_card;
 };
 
 /// Start the game. Returns false if the data is missing or the engine could

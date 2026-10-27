@@ -151,7 +151,9 @@ docs/PLAN.md        the Jedi Knight plan and history
                               # (components/mgs/mgs_reversing/port/extract_disc.py)
   tpm/                        # The Phantom Menace, USA Rev 1: the .bin of a bin/cue rip
     Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin
-  saves/                      # save states and their screenshots
+  saves/                      # save states and their screenshots; the PlayStation
+                              # games' memory cards (tpm_card1.mcd, mgs_card1.mcd:
+                              # raw 128 KB images, as PC emulators use)
 ```
 
 Example `metadata.csv` (one line per game: rom path, boxart, name; the
