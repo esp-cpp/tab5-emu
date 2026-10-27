@@ -120,15 +120,20 @@ menu (3.6 MB each; save 1.5 s, load 0.6 s).
 - Pads: the HAL's merged gamepad, face buttons by position (the HAL's B is
   south): B = cross, A = circle, Y = square, X = triangle, L/R = L1/R1.
 - Movies play at full speed (15 fps, the game thread ~80% busy) with their
-  XA audio when the overlay was recompiled (`CONFIG_TPM_DISC_PATH`). There is
-  no memory card (the game says so and carries on).
+  XA audio when the overlay was recompiled (`CONFIG_TPM_DISC_PATH`).
+- Memory card: the game's own saves (pause menu: Save Game; title: Load
+  Game) go to `/sdcard/saves/tpm_card1.mcd`, a raw 128 KB card image as PC
+  emulators use (DuckStation, ePSXe, ...), made the first time the game
+  looks. Unlike save states they load into any firmware build.
 - Frameskip (`CONFIG_TPM_FRAMESKIP`, default 2): when the game is ahead of
   the GPU, the worker leaves up to that many frames in a row undrawn, so
   the game keeps its pace instead of running in slow motion.
 - The pause menu pauses the game at its next loop back-edge. Save states
   hold guest RAM, VRAM, the SPU, the CPU / GTE / hardware state and the
-  runtime's live statics; without enough free PSRAM for the game's arena
-  (after another big cart) the game still runs, without save states.
+  runtime's live statics, and load only into the firmware build that wrote
+  them (the memory card is for keeping progress across updates); without
+  enough free PSRAM for the game's arena (after another big cart) the game
+  still runs, without save states.
 
 Where the time goes (in the level): both the game thread and the GPU worker
 are ~95% busy. The game thread is the recompiled code (with g_ram pinned in

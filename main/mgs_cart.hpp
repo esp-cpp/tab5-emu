@@ -18,7 +18,7 @@ public:
     handle_video_setting();
 #if defined(ENABLE_MGS)
     const auto data_dir = std::filesystem::path(get_rom_filename()).parent_path().string();
-    if (!mgs::init({.data_dir = data_dir})) {
+    if (!mgs::init({.data_dir = data_dir, .memory_card = get_memory_card_path()})) {
       logger_.error("could not start Metal Gear Solid");
       running_ = false;
     }

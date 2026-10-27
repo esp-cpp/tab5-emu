@@ -63,6 +63,7 @@ constexpr uint32_t AUDIO_RATE = 44100;
 
 FILE *g_disc{nullptr};
 uint32_t g_disc_sectors{0};
+std::string g_memory_card; // the card image in port 1 (plat_memcard_path)
 std::vector<uint8_t> g_exe;
 
 TaskHandle_t g_game_task{nullptr};
@@ -810,7 +811,8 @@ std::string find_disc(const std::string &dir) {
 
 } // namespace
 
-bool init(const std::string &data_dir) {
+bool init(const std::string &data_dir, const std::string &memory_card) {
+  g_memory_card = memory_card;
   const auto disc = find_disc(data_dir);
   if (disc.empty()) {
     logger.error("no disc image (.bin, raw 2352-byte sectors) in {}", data_dir);
@@ -1480,6 +1482,12 @@ static void __attribute__((noinline)) snap_saved_wait(void) {
   while (!g_snap_done.load()) {
     xSemaphoreTake(g_resume, pdMS_TO_TICKS(10));
   }
+}
+
+// The game's own saves (libmcrd, tpm-decomp's rt_hle.c): a card image file.
+const char *plat_memcard_path(int port) {
+  using namespace tpm::engine;
+  return port == 0 && !g_memory_card.empty() ? g_memory_card.c_str() : nullptr;
 }
 
 void plat_pause_wait(void) {

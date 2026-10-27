@@ -18,7 +18,7 @@ public:
     handle_video_setting();
 #if defined(ENABLE_TPM)
     const auto data_dir = std::filesystem::path(get_rom_filename()).parent_path().string();
-    if (!tpm::init({.data_dir = data_dir})) {
+    if (!tpm::init({.data_dir = data_dir, .memory_card = get_memory_card_path()})) {
       logger_.error("could not start The Phantom Menace");
       running_ = false;
     }
