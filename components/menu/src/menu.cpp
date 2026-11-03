@@ -56,6 +56,14 @@ void Menu::resume() {
   paused_ = false;
 }
 
+void Menu::click(Action action) {
+  std::lock_guard<std::recursive_mutex> lk(mutex_);
+  lv_obj_t *const buttons[] = {btn_resume_, btn_reset_, btn_save_, btn_load_, btn_quit_};
+  if (auto *btn = buttons[static_cast<size_t>(action)]) {
+    lv_obj_send_event(btn, LV_EVENT_CLICKED, nullptr);
+  }
+}
+
 void Menu::update() {
   if (!paused_) {
     std::lock_guard<std::recursive_mutex> lk(mutex_);

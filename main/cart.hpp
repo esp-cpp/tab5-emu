@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "sdkconfig.h"
+
 #include "logger.hpp"
 
 #include "menu.hpp"
@@ -114,6 +116,26 @@ public:
     running_ = false;
   }
 
+  /// Open the pause menu over the game, click the button of `action` there
+  /// and resume, as a player would; for the automated launch tests.
+  void menu_action_as_from_menu(Menu::Action action) {
+    using namespace std::chrono_literals;
+    auto &emu = Tab5Emu::get();
+    pre_menu();
+    screenshot(get_paused_image_path());
+    menu_->resume();
+    std::this_thread::sleep_for(1s);
+    menu_->click(action);
+    std::this_thread::sleep_for(1s);
+    if (!menu_->is_paused()) {
+      menu_->click(Menu::Action::RESUME);
+    }
+    (void)emu.menu_requested();
+    emu.clear_screen();
+    if (running_)
+      post_menu();
+  }
+
   /// Run one iteration of the game loop; returns false once the user quits.
   virtual bool run() {
     running_ = true;
@@ -145,7 +167,12 @@ protected:
   static constexpr size_t SCREEN_WIDTH = Tab5Emu::lcd_width();
   static constexpr size_t SCREEN_HEIGHT = Tab5Emu::lcd_height();
   static inline const std::string FS_PREFIX = Tab5Emu::mount_point;
+#if CONFIG_TAB5_EMU_AUTOQUIT_STATES
+  // the automated save / load test writes its own saves, not the player's
+  static inline const std::string SAVE_DIR = "saves-soak";
+#else
   static inline const std::string SAVE_DIR = "saves";
+#endif
 
   static void copy_file(const std::string &from, const std::string &to) {
     std::error_code ec;
