@@ -7,7 +7,6 @@
 
 #include <esp_cache.h>
 #include <esp_heap_caps.h>
-#include <esp_lcd_mipi_dsi.h>
 
 #include "statistics.hpp"
 
@@ -17,25 +16,6 @@ using namespace std::chrono_literals;
 // 1280x720 landscape screen. Flip to 270 if the image is upside down for the
 // way you hold the Tab5.
 static constexpr lv_display_rotation_t LANDSCAPE_ROTATION = LV_DISPLAY_ROTATION_90;
-
-// ---------------------------------------------------------------------------
-// Access to protected BSP state.
-//
-// The espp Tab5 BSP keeps the esp_lcd panel handle protected. We need it to
-// get the MIPI-DSI panel's frame buffer so the PPA can scale + rotate game
-// frames straight into it (no intermediate copy through
-// esp_lcd_panel_draw_bitmap). Forming a pointer-to-member from a derived
-// class is the standard-conforming way to reach a protected member of a base
-// object; replace with a BSP accessor once espp exposes one.
-// ---------------------------------------------------------------------------
-namespace {
-struct BspAccess : espp::M5StackTab5 {
-  static esp_lcd_panel_handle_t panel(espp::M5StackTab5 &bsp) {
-    auto pm = &BspAccess::lcd_handles_;
-    return (bsp.*pm).panel;
-  }
-};
-} // namespace
 
 Tab5Emu::Tab5Emu()
     : espp::BaseComponent("Tab5Emu", espp::Logger::Verbosity::INFO) {
@@ -499,18 +479,17 @@ void *Tab5Emu::dpi_frame_buffer() {
   if (dpi_fb_) {
     return dpi_fb_;
   }
-  auto panel = BspAccess::panel(Bsp::get());
-  if (!panel) {
-    logger_.error("No LCD panel handle; was initialize_tab5() called?");
+  // the panel's frame buffer (the one it scans out: the BSP keeps a single
+  // buffer, CONFIG_M5STACK_TAB5_DPI_NUM_FBS = 1), so the PPA can scale and
+  // rotate game frames straight into it
+  const auto fbs = Bsp::get().frame_buffers();
+  if (fbs.empty() || !fbs[0]) {
+    logger_.error("No DPI panel frame buffer; was initialize_tab5() called?");
     return nullptr;
   }
-  void *fb0 = nullptr;
-  if (esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb0) != ESP_OK || !fb0) {
-    logger_.error("Could not get the DPI panel frame buffer");
-    return nullptr;
-  }
+  void *fb0 = fbs[0];
   dpi_fb_ = fb0;
-  dpi_fb_bytes_ = Bsp::display_width() * Bsp::display_height() * sizeof(Pixel);
+  dpi_fb_bytes_ = Bsp::frame_buffer_size();
   logger_.info("DPI frame buffer at {} ({} bytes)", fb0, dpi_fb_bytes_);
   return dpi_fb_;
 }
