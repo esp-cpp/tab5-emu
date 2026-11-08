@@ -240,6 +240,16 @@ protected:
     return "";
   }
 
+  /// The image file of a PlayStation game's memory card (the raw 128 KB
+  /// format PC emulators read), named after the game's data directory
+  /// (saves/tpm_card1.mcd): the game's own saves, which unlike save states
+  /// do not depend on the firmware build.
+  std::string get_memory_card_path(int card = 1) const {
+    namespace fs = std::filesystem;
+    const auto game = fs::path(get_rom_filename()).parent_path().filename().string();
+    return savedir_ + "/" + game + fmt::format("_card{}.mcd", card);
+  }
+
   std::string get_paused_image_path() const { return savedir_ + "/paused" + get_screenshot_extension(); }
 
   std::string get_screenshot_path(bool bypass_exist_check = false) const {

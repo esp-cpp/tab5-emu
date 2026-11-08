@@ -8,8 +8,10 @@
 namespace tpm::engine {
 
 /// Open the disc image in data_dir (a .bin of raw 2352-byte sectors) and
-/// start the game. Returns false if there is no usable image.
-bool init(const std::string &data_dir);
+/// start the game. Returns false if there is no usable image. memory_card:
+/// the image file of the card in port 1 (made the first time the game looks;
+/// empty: no card).
+bool init(const std::string &data_dir, const std::string &memory_card);
 void deinit();
 bool running();
 void pause();

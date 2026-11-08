@@ -21,6 +21,10 @@ struct Config {
   /// Directory holding the disc's files: SLUS_008.84 and FILE.000 (FILE.001
   /// .. FILE.003 later, for streams and movies), e.g. "/sdcard/tpm".
   std::string data_dir;
+  /// The memory card in port 1, a 128 KB card image file (the format PC
+  /// emulators use): the game's own saves go there. Made, formatted, the
+  /// first time the game looks. Empty: no card.
+  std::string memory_card;
 };
 
 /// Open the data. Returns false if it is missing or not the USA Rev 1 disc.

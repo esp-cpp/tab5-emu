@@ -64,7 +64,11 @@ mgs/STAGE.DIR,boxart/mgs.jpg,Metal Gear Solid
   every thread's stack and context), keyed on the memory layout so a
   rebuild that leaves the game code in place keeps old states loadable.
 - Pause, reset, relaunch and quit in place.
-- Not done: memory-card game saves (use states), full-motion video (MDEC,
+- Memory card: the game's own saves (Mei Ling's codec frequency, 140.85;
+  the title's load) go to `/sdcard/saves/mgs_card1.mcd`, a raw 128 KB card
+  image as PC emulators use, made the first time the game looks. Unlike
+  save states they survive any rebuild.
+- Not done: full-motion video (MDEC,
   movies are skipped). 56 of the 96 stages have decompiled actors upstream.
 
 ## Measuring

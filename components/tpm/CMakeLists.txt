@@ -119,7 +119,8 @@ if(TPM_ENGINE_READY)
   set(rt ${TPM_DECOMP}/recomp/runtime)
   file(GLOB rt_srcs ${rt}/*.c)
   file(GLOB gen_srcs ${TPM_GEN}/recomp_*.c)
-  set(psyz_srcs ${TPM_PSYZ}/psyz/src/psyz/psyz_spu.c) # (the GTE is the runtime's own: rt_gte.c)
+  # (the GTE is the runtime's own: rt_gte.c); psyz_mcd.c: the memory card's image file
+  set(psyz_srcs ${TPM_PSYZ}/psyz/src/psyz/psyz_spu.c ${TPM_PSYZ}/psyz/src/psyz/psyz_mcd.c)
   add_library(tpm_rt STATIC ${gen_srcs} ${rt_srcs} ${psyz_srcs})
   idf_build_get_property(config_dir CONFIG_DIR)
   target_include_directories(tpm_rt PRIVATE

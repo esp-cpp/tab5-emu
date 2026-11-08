@@ -73,7 +73,7 @@ bool show(size_t index) {
 bool init(const Config &config) {
   config_ = config;
 #if defined(TPM_HAVE_ENGINE)
-  if (engine::init(config.data_dir)) {
+  if (engine::init(config.data_dir, config.memory_card)) {
     engine_ = true;
     running_ = true;
     return true;
