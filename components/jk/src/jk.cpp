@@ -116,6 +116,7 @@ bool request(Request req, const std::string &path = {}, const std::string &label
 }
 std::unique_ptr<espp::Task> g_audio_task;
 extern "C" void stdSound_ESP32_Pump(void);
+extern "C" void jkCutscene_ESP32_SkipTime(uint64_t us);
 constexpr size_t ENGINE_STACK_BYTES = 1024 * 1024;
 int g_native_w = CONFIG_JK_INTERNAL_WIDTH;
 int g_native_h = CONFIG_JK_INTERNAL_HEIGHT;
@@ -405,6 +406,7 @@ int jk_esp_park_point(void) {
   if (!g_paused) {
     return 0;
   }
+  const uint64_t park_start_us = esp_timer_get_time();
   g_parked = true;
   while (g_paused && !g_engine_stop && !jk_esp_quit_requested) {
     // the pause menu's save / load / reset arrive while parked here: serve
@@ -413,6 +415,11 @@ int jk_esp_park_point(void) {
     run_pending_request();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+#if CONFIG_JK_ENGINE
+  // a cutscene keeps time by the wall clock: without this it takes the pause
+  // for lag and decodes every frame it missed at once
+  jkCutscene_ESP32_SkipTime(esp_timer_get_time() - park_start_us);
+#endif
   g_parked = false;
   return 1;
 }
@@ -1082,7 +1089,9 @@ bool init(const Config &config) {
   g_audio_task = espp::Task::make_unique({
       .callback =
           [](std::mutex &m, std::condition_variable &cv, bool &task_notified) {
-            if (!g_paused) {
+            // mix until the engine has actually parked, so the sound stops
+            // with the picture (it can finish a frame after the pause)
+            if (!g_parked) {
               stdSound_ESP32_Pump();
             }
             std::unique_lock<std::mutex> lk(m);
