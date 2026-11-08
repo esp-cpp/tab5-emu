@@ -4,8 +4,13 @@ dependencies:
   lvgl/lvgl: '>=9.2.2'
   # >= 1.3.4: powers the SD card IO rail through the P4's LDO (SDMMC works);
   # >= 1.3.7: the multi-touch state (every finger, for the virtual gamepad)
-  # through the touch interface and the ST7123 driver
-  espp/m5stack-tab5: '>=1.3.7'
+  # through the touch interface and the ST7123 driver;
+  # >= 1.4.0: frame_buffers() (the DPI panel's frame buffers, which the PPA
+  # draws the games into) and the serialized, asynchronous LVGL flush;
+  # >= 1.4.2: audio through espp::Audio (initialize_audio(AudioConfig) with
+  # recording off, initialize_lcd(LcdConfig) with DMA2D off) and the logger
+  # without a mutex per tag
+  espp/m5stack-tab5: '>=1.4.2'
   espp/touch: '>=1.3.7'
   espp/st7123touch: '>=1.3.7'
   espp/event_manager: '>=1.3'

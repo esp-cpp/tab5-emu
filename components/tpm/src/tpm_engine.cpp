@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+
 #include <esp_app_desc.h>
 #include <esp_heap_caps.h>
 #include <esp_rom_sys.h>
@@ -1083,17 +1085,104 @@ void snap_skips(SnapHeader &h) {
   }
 }
 
-bool io_chunked(FILE *f, uint8_t *p, size_t n, bool writing) {
-  while (n > 0) {
-    const size_t chunk = std::min<size_t>(n, 64 * 1024);
-    if ((writing ? fwrite(p, 1, chunk, f) : fread(p, 1, chunk, f)) != chunk) {
-      return false;
+// A save state's file, read and written a 64 KB block at a time through one
+// 128-byte-aligned PSRAM buffer, at file offsets that are multiples of the
+// block, as the disc's read-ahead does. The pieces of a state (the header,
+// the game's memory regions) sit at any address and length: handed to FATFS
+// as they are, the SD driver bounces each through internal DMA memory, and
+// with the pause menu up there was too little of it (a write failed).
+class StateFile {
+public:
+  static constexpr size_t BLOCK = 64 * 1024;
+
+  StateFile(const std::string &path, bool writing) : writing_(writing) {
+    buf_ = static_cast<uint8_t *>(heap_caps_aligned_alloc(128, BLOCK, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA));
+    if (!buf_) {
+      logger.error("state file: no memory for its {} KB buffer", BLOCK / 1024);
+      return;
     }
-    p += chunk;
-    n -= chunk;
+    f_ = fopen(path.c_str(), writing ? "wb" : "rb");
+    if (f_) {
+      setvbuf(f_, nullptr, _IONBF, 0); // the block buffer instead
+    }
   }
-  return true;
-}
+  ~StateFile() {
+    close();
+    heap_caps_free(buf_);
+  }
+  StateFile(const StateFile &) = delete;
+  StateFile &operator=(const StateFile &) = delete;
+
+  bool is_open() const { return f_ != nullptr; }
+
+  bool write(const void *p, size_t n) {
+    const auto *src = static_cast<const uint8_t *>(p);
+    while (n > 0 && ok()) {
+      const size_t k = std::min(n, BLOCK - len_);
+      memcpy(buf_ + len_, src, k);
+      len_ += k;
+      src += k;
+      n -= k;
+      if (len_ == BLOCK) {
+        flush();
+      }
+    }
+    return ok();
+  }
+
+  bool read(void *p, size_t n) {
+    auto *dst = static_cast<uint8_t *>(p);
+    while (n > 0 && ok()) {
+      if (pos_ == len_) {
+        len_ = fread(buf_, 1, BLOCK, f_);
+        pos_ = 0;
+        if (len_ == 0) {
+          failed_ = true;
+          break;
+        }
+      }
+      const size_t k = std::min(n, len_ - pos_);
+      memcpy(dst, buf_ + pos_, k);
+      pos_ += k;
+      dst += k;
+      n -= k;
+    }
+    return ok();
+  }
+
+  /// the file's size in bytes, or -1
+  long size() {
+    struct stat st;
+    return f_ && fstat(fileno(f_), &st) == 0 ? static_cast<long>(st.st_size) : -1;
+  }
+
+  /// writes what is left and closes the file: true if all of it went well
+  bool close() {
+    if (!f_) {
+      return !failed_;
+    }
+    if (writing_ && len_ > 0) {
+      flush();
+    }
+    failed_ = fclose(f_) != 0 || failed_;
+    f_ = nullptr;
+    return !failed_;
+  }
+
+private:
+  bool ok() const { return f_ && !failed_; }
+  void flush() {
+    failed_ = fwrite(buf_, 1, len_, f_) != len_ || failed_;
+    len_ = 0;
+  }
+
+  FILE *f_{nullptr};
+  uint8_t *buf_{nullptr};
+  size_t len_{0}; // bytes in the buffer
+  size_t pos_{0}; // reading: bytes of the buffer already handed out
+  bool writing_;
+  bool failed_{false};
+};
 
 // ask the game's thread (waiting in plat_pause_wait) for a checkpoint or to
 // park; true once it has
@@ -1164,15 +1253,13 @@ bool save_state(const std::string &path) {
   size_t total = sizeof h;
   if (ok) {
     snap_skips(h);
-    FILE *f = fopen(path.c_str(), "wb");
-    ok = f && fwrite(&h, 1, sizeof h, f) == sizeof h;
+    StateFile f(path, true);
+    ok = f.is_open() && f.write(&h, sizeof h);
     for (const auto &r : snap_regions(stack_lo, h)) {
-      ok = ok && io_chunked(f, r.p, r.n, true);
+      ok = ok && f.write(r.p, r.n);
       total += r.n;
     }
-    if (f) {
-      ok = fclose(f) == 0 && ok;
-    }
+    ok = f.close() && ok;
   }
   gpu_start_workers();
   snap_release();
@@ -1187,18 +1274,17 @@ bool load_state(const std::string &path) {
     return false;
   }
   const int64_t t0 = esp_timer_get_time();
-  FILE *f = fopen(path.c_str(), "rb");
-  if (!f) {
+  StateFile f(path, false);
+  if (!f.is_open()) {
     logger.error("load state: cannot open {}", path);
     return false;
   }
   SnapHeader h{};
   const auto refuse = [&](const char *why) {
     logger.error("load state: {}: {}", path, why);
-    fclose(f);
     return false;
   };
-  if (fread(&h, 1, sizeof h, f) != sizeof h || memcmp(h.magic, "TPMS", 4) != 0 || h.version != kSnapVersion ||
+  if (!f.read(&h, sizeof h) || memcmp(h.magic, "TPMS", 4) != 0 || h.version != kSnapVersion ||
       h.jb_size != sizeof(jmp_buf)) {
     return refuse("not a save state of this format");
   }
@@ -1228,21 +1314,17 @@ bool load_state(const std::string &path) {
     for (const auto &r : regions) {
       expected += r.n;
     }
-    fseek(f, 0, SEEK_END);
-    const long actual = ftell(f);
-    fseek(f, sizeof h, SEEK_SET);
+    const long actual = f.size();
     if (actual < 0 || static_cast<size_t>(actual) != expected) {
       return refuse("truncated or corrupt");
     }
   }
   if (!gpu_stop_workers()) {
     gpu_start_workers();
-    fclose(f);
     return false;
   }
   if (!snap_request(SNAP_LOAD)) {
     gpu_start_workers();
-    fclose(f);
     return false;
   }
   // the game's thread waits on the spare stack: everything else may go
@@ -1254,9 +1336,9 @@ bool load_state(const std::string &path) {
   }
   bool ok = true;
   for (const auto &r : regions) {
-    ok = ok && io_chunked(f, r.p, r.n, false);
+    ok = ok && f.read(r.p, r.n);
   }
-  fclose(f);
+  f.close();
   for (int i = 0; i < n_slots; i++) {
     *slots[i] = kept[i];
   }

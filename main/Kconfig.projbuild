@@ -24,6 +24,16 @@ menu "tab5-emu"
             next game of TAB5_EMU_AUTOSTART_MATCH, round and round: a soak
             test of launching and quitting the carts one after another.
 
+    config TAB5_EMU_AUTOQUIT_STATES
+        bool "Test: save and load a state through the pause menu before each quit"
+        default n
+        depends on TAB5_EMU_AUTOQUIT_SECONDS > 0
+        help
+            A third of the way into each auto-started game, open the pause
+            menu and press Save; two thirds in, open it again and press Load
+            (the same slot). Exercises the menu over a running game and each
+            cart's save states.
+
     config TAB5_EMU_USB_MSC_AT_BOOT
         bool "Test: turn the USB drive on right after boot"
         default n

@@ -214,8 +214,27 @@ extern "C" void app_main(void) {
         std::unique_ptr<Cart> cart(make_cart(selected_rom));
         if (cart) {
 #if CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS > 0 && CONFIG_TAB5_EMU_AUTOQUIT_SECONDS > 0
-          const auto quit_at = std::chrono::steady_clock::now() + std::chrono::seconds(CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
+          const auto start = std::chrono::steady_clock::now();
+          const auto quit_at = start + std::chrono::seconds(CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
+#if CONFIG_TAB5_EMU_AUTOQUIT_STATES
+          // a third of the way in the state is saved, two thirds in loaded
+          // back, both through the pause menu
+          int state_step = 0;
+#endif
           while (cart->run()) {
+#if CONFIG_TAB5_EMU_AUTOQUIT_STATES
+            const auto now = std::chrono::steady_clock::now();
+            if (state_step < 2 && now >= start + (state_step + 1) * (quit_at - start) / 3) {
+              const auto action = state_step == 0 ? Menu::Action::SAVE : Menu::Action::LOAD;
+              logger.warn("AUTOQUIT: {} state from the menu", state_step == 0 ? "save" : "load");
+              cart->menu_action_as_from_menu(action);
+              logger.warn("AUTOQUIT: {} done; free: internal {} (largest {}), psram {} (largest {})",
+                          state_step == 0 ? "save" : "load", heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                          heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                          heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+              state_step++;
+            }
+#endif
             if (std::chrono::steady_clock::now() >= quit_at) {
               logger.warn("AUTOQUIT after {} s", CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
               cart->quit_as_from_menu();

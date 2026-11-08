@@ -44,6 +44,10 @@ public:
   void pause();
   void resume();
 
+  /// Click the button of an action as a tap on it would (the automated
+  /// launch tests)
+  void click(Action action);
+
 protected:
   void init_ui();
   void deinit_ui();
