@@ -35,7 +35,10 @@ bool Tab5Emu::initialize_tab5() {
     logger_.error("Failed to initialize IO expanders");
     return false;
   }
-  if (!bsp.initialize_lcd()) {
+  // every LVGL flush is rotated (landscape), so it goes through the PPA and
+  // the DPI panel's DMA2D copies would never run: leave them off (~3 KB of
+  // internal DMA-capable RAM)
+  if (!bsp.initialize_lcd(Bsp::LcdConfig{.dma2d_enabled = false})) {
     logger_.error("Failed to initialize LCD");
     return false;
   }
@@ -136,7 +139,12 @@ void Tab5Emu::free_romdata() {
 
 bool Tab5Emu::initialize_audio() {
   auto &bsp = Bsp::get();
-  if (!bsp.initialize_audio(48000)) {
+  // playback only, at the DAC's fixed rate (play_audio() resamples): no
+  // microphones, so no RX DMA ring or recording task in internal RAM
+  auto config = Bsp::default_audio_config();
+  config.sample_rate = 48000;
+  config.recording_enabled = false;
+  if (!bsp.initialize_audio(config)) {
     return false;
   }
   bsp.mute(false);
