@@ -32,6 +32,13 @@ game addresses its files as `cdrom:\MGS\NAME`), e.g. `/sdcard/mgs/STAGE.DIR`,
 `RADIO.DAT`, `FACE.DAT`, ... The full 71 MB `STAGE.DIR` is wanted: it is read
 sector by sector on demand, nothing is copied into RAM.
 
+For the second disc, extract it the same way and put its files in a `DISC2`
+directory inside that one (`/sdcard/mgs/DISC2/STAGE.DIR`, ...). When the
+game asks for disc 2 (or for disc 1 again, from a save or the title), the
+port swaps the files it reads from in place of the console's lid: press
+START at the prompt and the game's own disc check runs as on the console.
+Without the directory the game reports the wrong disc and asks again.
+
 The script also writes `MGS/TEXT.DAT` (or only that, with `--text`): the item
 and weapon descriptions of the menus, pulled from the disc's executable. The
 decompilation targets MGS Integral and carries its Japanese descriptions as
@@ -68,6 +75,8 @@ mgs/STAGE.DIR,boxart/mgs.jpg,Metal Gear Solid
   the title's load) go to `/sdcard/saves/mgs_card1.mcd`, a raw 128 KB card
   image as PC emulators use, made the first time the game looks. Unlike
   save states they survive any rebuild.
+- Both discs: the disc change screen swaps to `DISC2` and the game goes on
+  to disc 2's first stage; a save state taken on disc 2 reinserts it.
 - Not done: full-motion video (MDEC,
   movies are skipped). 56 of the 96 stages have decompiled actors upstream.
 
