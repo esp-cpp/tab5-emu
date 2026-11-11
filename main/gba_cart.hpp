@@ -8,6 +8,8 @@
 
 class GbaCart : public Cart {
 public:
+  // an emulator core: a state loads right after the game starts
+  virtual bool supports_resume() const override { return true; }
   explicit GbaCart(const Cart::Config &config) : Cart(config) {
     // the ROM cache takes its first blocks from the ROM arena (gba.cpp
     // gpsp_rom_block_alloc), so the arena stays where it is

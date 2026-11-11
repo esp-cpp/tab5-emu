@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -16,6 +17,27 @@ struct RomInfo {
   Emulator platform;
   bool operator==(const RomInfo &) const = default;
 };
+
+/// The console a game is played as, in the order the game list shows them
+/// (several emulators can share one, e.g. Genesis / Mega Drive; the PC and
+/// PlayStation ports count as the console the game came out on).
+enum class Console : uint8_t { SNES, GAME_BOY_ADVANCE, GENESIS, PLAYSTATION, PC, PICO8, UNKNOWN };
+
+/// The shape the firmware draws for a console that has no art on the SD card.
+enum class ConsoleShape : uint8_t { GAMEPAD, HANDHELD_TALL, HANDHELD_WIDE, DISC, COMPUTER, FANTASY };
+
+struct ConsoleInfo {
+  const char *name;       ///< shown in the list header and the badge
+  const char *short_name; ///< for a small screen's badge
+  const char *key;        ///< art on the SD card: boxart/consoles/<key>.jpg
+  uint32_t color;     ///< badge / header accent (0xRRGGBB)
+  ConsoleShape shape;
+};
+
+/// The console `platform` games are grouped under.
+Console console_of(Emulator platform);
+/// Name, art key and colors of `console`.
+const ConsoleInfo &console_info(Console console);
 
 /// Parse the metadata csv (rom_path, boxart_path, name) relative to the SD
 /// card mount point. The platform is picked from the rom path's extension /

@@ -92,3 +92,39 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
   fmt::print("Loaded {} roms from metadata file {}\n", infos.size(), metadata_path);
   return infos;
 }
+
+Console console_of(Emulator platform) {
+  switch (platform) {
+  case Emulator::SNES:
+    return Console::SNES;
+  case Emulator::GBA:
+    return Console::GAME_BOY_ADVANCE;
+  case Emulator::SEGA_GENESIS:
+  case Emulator::SEGA_MEGA_DRIVE:
+    return Console::GENESIS;
+  case Emulator::MGS:
+  case Emulator::TPM:
+    return Console::PLAYSTATION;
+  case Emulator::JEDI_KNIGHT:
+  case Emulator::DARK_FORCES:
+    return Console::PC;
+  case Emulator::PICO8:
+    return Console::PICO8;
+  default:
+    return Console::UNKNOWN;
+  }
+}
+
+const ConsoleInfo &console_info(Console console) {
+  static const ConsoleInfo infos[] = {
+      {"Super Nintendo", "SNES", "snes", 0x6A5ACD, ConsoleShape::GAMEPAD},
+      {"Game Boy Advance", "GBA", "gba", 0x4B3FA8, ConsoleShape::HANDHELD_WIDE},
+      {"Sega Genesis", "Genesis", "genesis", 0xC8102E, ConsoleShape::GAMEPAD},
+      {"PlayStation", "PlayStation", "playstation", 0x2E6DB4, ConsoleShape::DISC},
+      {"PC", "PC", "pc", 0x5A6B7B, ConsoleShape::COMPUTER},
+      {"PICO-8", "PICO-8", "pico8", 0xFF004D, ConsoleShape::FANTASY},
+      {"Other", "Other", "other", 0x606060, ConsoleShape::GAMEPAD},
+  };
+  const auto i = static_cast<size_t>(console);
+  return infos[i < std::size(infos) ? i : std::size(infos) - 1];
+}

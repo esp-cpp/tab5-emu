@@ -21,6 +21,7 @@
 #include "gui.hpp"
 #include "heap_utils.hpp"
 #include "rom_info.hpp"
+#include "settings.hpp"
 #include "statistics.hpp"
 #include "tab5-emu.hpp"
 
@@ -129,6 +130,26 @@ extern "C" void app_main(void) {
   }
   internal_free_log("initialize_video");
 
+  // the settings kept on the SD card (volume, brightness, video scaling, the
+  // last game and its save slots); the first boot writes the defaults
+  {
+    Settings defaults;
+    defaults.volume = static_cast<uint8_t>(emu.volume());
+    defaults.muted = emu.is_muted();
+    defaults.brightness = static_cast<uint8_t>(emu.brightness());
+    defaults.video_setting = static_cast<uint8_t>(emu.video_setting());
+    auto &settings = AppSettings::get();
+    settings.init(std::string(Tab5Emu::mount_point) + "/settings.bin", defaults);
+    const Settings s = settings.get_settings();
+    emu.volume(s.volume);
+    emu.mute(s.muted);
+    emu.brightness(std::max<int>(5, s.brightness));
+    emu.video_setting(static_cast<VideoSetting>(std::min<int>(s.video_setting, 2)));
+    logger.info("settings: volume {}{}, brightness {}, video {}, resume {}, last game '{}'", s.volume,
+                s.muted ? " (muted)" : "", s.brightness, s.video_setting, s.resume_last_save, s.last_rom);
+  }
+  internal_free_log("settings");
+
   logger.info("initializing gui...");
 
   // initialize the gui
@@ -198,6 +219,8 @@ extern "C" void app_main(void) {
 #endif
     while (!gui.ready_to_play()) {
       std::this_thread::sleep_for(50ms);
+      // settings changed in the GUI are written once the changes stop
+      AppSettings::get().save_if_idle();
     }
 
     gui.pause();
@@ -206,6 +229,8 @@ extern "C" void app_main(void) {
     if (maybe_selected_rom.has_value()) {
       auto selected_rom = maybe_selected_rom.value();
       logger.info("Selected rom:\n\t{}", selected_rom);
+      AppSettings::get().modify([&](Settings &s) { s.last_rom = selected_rom.rom_path; });
+      AppSettings::get().save();
 
       print_heap_state();
 
@@ -213,6 +238,12 @@ extern "C" void app_main(void) {
       {
         std::unique_ptr<Cart> cart(make_cart(selected_rom));
         if (cart) {
+          // start from the save state this game was last saved to / loaded from
+          if (AppSettings::get().get_settings().resume_last_save) {
+            if (const auto slot = AppSettings::get().last_slot(selected_rom.rom_path)) {
+              cart->resume_from_slot(*slot);
+            }
+          }
 #if CONFIG_TAB5_EMU_AUTOSTART_DELAY_MS > 0 && CONFIG_TAB5_EMU_AUTOQUIT_SECONDS > 0
           const auto start = std::chrono::steady_clock::now();
           const auto quit_at = start + std::chrono::seconds(CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
@@ -285,6 +316,15 @@ extern "C" void app_main(void) {
       }
 #endif
     }
+
+    // volume / brightness / video scaling may have changed in the pause menu
+    AppSettings::get().modify([&](Settings &s) {
+      s.volume = static_cast<uint8_t>(emu.volume());
+      s.muted = emu.is_muted();
+      s.brightness = static_cast<uint8_t>(emu.brightness());
+      s.video_setting = static_cast<uint8_t>(emu.video_setting());
+    });
+    AppSettings::get().save();
 
     // print the frame statistics from the previous run
     print_statistics();

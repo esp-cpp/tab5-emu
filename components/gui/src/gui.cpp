@@ -2,6 +2,8 @@
 
 #include "lvgl_private.h"
 
+#include <algorithm>
+
 
 using namespace std::chrono_literals;
 
@@ -79,6 +81,10 @@ void Gui::update_shared_state() {
   else
     lv_obj_remove_state(mute_switch_, LV_STATE_CHECKED);
   lv_dropdown_set_selected(video_dropdown_, (int)emu.video_setting());
+  if (AppSettings::get().get_settings().resume_last_save)
+    lv_obj_add_state(resume_switch_, LV_STATE_CHECKED);
+  else
+    lv_obj_remove_state(resume_switch_, LV_STATE_CHECKED);
 }
 
 void Gui::on_volume(const std::vector<uint8_t> &) {
@@ -120,11 +126,20 @@ void Gui::init_ui() {
   lv_obj_align(rom_list_, LV_ALIGN_TOP_LEFT, 24, 76);
   lv_obj_set_style_text_font(rom_list_, &lv_font_montserrat_24, 0);
 
+  // console of the selected game (center top): its SD card art or a badge
+  console_area_ = lv_obj_create(screen_);
+  lv_obj_remove_style_all(console_area_);
+  lv_obj_remove_flag(console_area_, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_size(console_area_, 400, 56);
+  lv_obj_align(console_area_, LV_ALIGN_TOP_MID, 40, 76);
+  lv_obj_set_flex_flow(console_area_, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(console_area_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
   // boxart + title (center)
   boxart_ = lv_image_create(screen_);
-  lv_obj_set_size(boxart_, 400, 400);
+  lv_obj_set_size(boxart_, 360, 360);
   lv_image_set_inner_align(boxart_, LV_IMAGE_ALIGN_CONTAIN);
-  lv_obj_align(boxart_, LV_ALIGN_TOP_MID, 40, 90);
+  lv_obj_align(boxart_, LV_ALIGN_TOP_MID, 40, 144);
 
   title_label_ = lv_label_create(screen_);
   lv_label_set_text(title_label_, "");
@@ -188,6 +203,10 @@ void Gui::init_ui() {
   lv_obj_set_width(video_dropdown_, lv_pct(90));
   lv_obj_add_event_cb(video_dropdown_, event_callback, LV_EVENT_VALUE_CHANGED, this);
 
+  make_label(LV_SYMBOL_REFRESH "  Resume last save");
+  resume_switch_ = lv_switch_create(settings);
+  lv_obj_add_event_cb(resume_switch_, event_callback, LV_EVENT_VALUE_CHANGED, this);
+
   // gamepad / keyboard focus order (see Tab5Emu::keypad_indev()): the ROM
   // buttons come first (added by update_rom_list), then the controls
   group_ = lv_group_create();
@@ -213,14 +232,37 @@ void Gui::update_rom_list() {
     return;
   }
   metadata_last_modified_ = mtime;
+  // keep the selected game selected across a reload (its index may change);
+  // at boot that is the last game played
+  std::string selected_path;
+  if (focused_rom_ >= 0 && focused_rom_ < (int)rom_infos_.size()) {
+    selected_path = rom_infos_[focused_rom_].rom_path;
+  } else {
+    selected_path = AppSettings::get().get_settings().last_rom;
+  }
   rom_infos_ = parse_metadata(metadata_filename_);
+  // grouped by console, in Console order; metadata.csv order within a console
+  std::stable_sort(rom_infos_.begin(), rom_infos_.end(), [](const RomInfo &a, const RomInfo &b) {
+    return console_of(a.platform) < console_of(b.platform);
+  });
+  focused_rom_ = -1;
+  for (size_t i = 0; i < rom_infos_.size(); i++) {
+    if (rom_infos_[i].rom_path == selected_path) {
+      focused_rom_ = i;
+      break;
+    }
+  }
   lv_obj_clean(rom_list_);
   rom_buttons_.clear();
   if (group_) {
     lv_group_remove_all_objs(group_);
   }
   for (size_t i = 0; i < rom_infos_.size(); i++) {
-    auto btn = lv_list_add_button(rom_list_, LV_SYMBOL_FILE, rom_infos_[i].name.c_str());
+    const Console console = console_of(rom_infos_[i].platform);
+    if (i == 0 || console != console_of(rom_infos_[i - 1].platform)) {
+      add_console_header(console);
+    }
+    auto btn = lv_list_add_button(rom_list_, nullptr, rom_infos_[i].name.c_str());
     lv_obj_set_user_data(btn, reinterpret_cast<void *>(i));
     lv_obj_add_event_cb(btn, event_callback, LV_EVENT_CLICKED, this);
     lv_obj_add_event_cb(btn, event_callback, LV_EVENT_FOCUSED, this);
@@ -228,7 +270,8 @@ void Gui::update_rom_list() {
     if (group_) lv_group_add_obj(group_, btn);
   }
   if (group_) {
-    for (auto *o : {play_button_, volume_slider_, mute_switch_, brightness_slider_, usb_switch_, video_dropdown_}) {
+    for (auto *o : {play_button_, volume_slider_, mute_switch_, brightness_slider_, usb_switch_, video_dropdown_,
+                    resume_switch_}) {
       if (o) lv_group_add_obj(group_, o);
     }
   }
@@ -237,9 +280,60 @@ void Gui::update_rom_list() {
     focused_rom_ = -1;
     lv_label_set_text(title_label_, "");
     lv_image_set_src(boxart_, nullptr);
+    lv_obj_clean(console_area_);
+    shown_console_ = -1;
   } else {
     select_rom(std::clamp<int>(focused_rom_, 0, rom_infos_.size() - 1));
   }
+}
+
+// A non-selectable row in the game list starting a console's group: the
+// console's icon and name on its accent color.
+void Gui::add_console_header(Console console) {
+  const auto &info = console_info(console);
+  auto *hdr = lv_obj_create(rom_list_);
+  lv_obj_remove_style_all(hdr);
+  lv_obj_remove_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_size(hdr, lv_pct(100), 44);
+  lv_obj_set_style_bg_color(hdr, lv_color_hex(info.color), 0);
+  lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_hor(hdr, 12, 0);
+  lv_obj_set_style_pad_column(hdr, 12, 0);
+  lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  console_icon_create(hdr, info, 26);
+  auto *label = lv_label_create(hdr);
+  lv_label_set_text(label, info.name);
+  lv_obj_set_style_text_color(label, lv_color_white(), 0);
+  lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+}
+
+// Above the boxart: the SD card art of the selected game's console
+// (boxart/consoles/<key>.jpg) if there is one, else the firmware's badge.
+// Only on this screen: in a game the screen is the game's.
+void Gui::show_console(Console console) {
+  if (shown_console_ == static_cast<int>(console)) {
+    return;
+  }
+  shown_console_ = static_cast<int>(console);
+  lv_obj_clean(console_area_);
+  if (console_art_buf_) {
+    lv_draw_buf_destroy(console_art_buf_);
+    console_art_buf_ = nullptr;
+  }
+  const auto &info = console_info(console);
+  if (const auto art = console_art_path(Tab5Emu::mount_point, info); !art.empty()) {
+    console_art_buf_ = decode_image(art);
+    if (console_art_buf_) {
+      auto *img = lv_image_create(console_area_);
+      lv_obj_set_size(img, lv_pct(100), lv_pct(100));
+      lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CONTAIN);
+      lv_image_set_src(img, console_art_buf_);
+      return;
+    }
+  }
+  console_badge_create(console_area_, info, 48, &lv_font_montserrat_24);
 }
 
 bool Gui::select_rom_matching(std::string_view text) {
@@ -272,6 +366,7 @@ void Gui::select_rom(int index) {
   }
   const auto &rom = rom_infos_[index];
   lv_label_set_text(title_label_, rom.name.c_str());
+  show_console(console_of(rom.platform));
   load_boxart(rom.boxart_path);
 }
 
@@ -288,25 +383,24 @@ void Gui::load_boxart(const std::string &path) {
   if (path.empty()) {
     return;
   }
+  boxart_buf_ = decode_image(path);
+  if (boxart_buf_) {
+    lv_image_set_src(boxart_, boxart_buf_);
+  }
+}
+
+lv_draw_buf_t *Gui::decode_image(const std::string &path) {
   const std::string src = "S:" + path;
   lv_image_decoder_dsc_t dsc{};
   if (lv_image_decoder_open(&dsc, src.c_str(), nullptr) != LV_RESULT_OK) {
-    logger_.warn("boxart '{}': cannot decode", path);
-    return;
+    logger_.warn("image '{}': cannot decode", path);
+    return nullptr;
   }
   const uint32_t w = dsc.header.w, h = dsc.header.h;
-  if (dsc.decoded && dsc.decoded->data) {
-    // fully decoded formats: LVGL scales those itself, use the file directly
-    lv_image_decoder_close(&dsc);
-    static std::string file_src;
-    file_src = src;
-    lv_image_set_src(boxart_, file_src.c_str());
-    return;
-  }
   auto *out = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
   if (!out) {
     lv_image_decoder_close(&dsc);
-    return;
+    return nullptr;
   }
   lv_area_t full = {0, 0, static_cast<int32_t>(w) - 1, static_cast<int32_t>(h) - 1};
   lv_area_t area{};
@@ -334,9 +428,8 @@ void Gui::load_boxart(const std::string &path) {
     }
   }
   lv_image_decoder_close(&dsc);
-  boxart_buf_ = out;
-  lv_image_set_src(boxart_, boxart_buf_);
-  logger_.info("boxart '{}': {}x{}", path, w, h);
+  logger_.info("image '{}': {}x{}", path, w, h);
+  return out;
 }
 
 void Gui::event_callback(lv_event_t *e) {
@@ -376,16 +469,29 @@ void Gui::event_callback(lv_event_t *e) {
       }
     }
   } else if (code == LV_EVENT_VALUE_CHANGED) {
+    // (saved to the SD card by the main loop once the changes stop)
+    auto &settings = AppSettings::get();
     if (target == gui->volume_slider_) {
-      emu.volume(lv_slider_get_value(gui->volume_slider_));
+      const int v = lv_slider_get_value(gui->volume_slider_);
+      emu.volume(v);
+      settings.modify([v](Settings &s) { s.volume = v; });
     } else if (target == gui->brightness_slider_) {
-      emu.brightness(lv_slider_get_value(gui->brightness_slider_));
+      const int v = lv_slider_get_value(gui->brightness_slider_);
+      emu.brightness(v);
+      settings.modify([v](Settings &s) { s.brightness = v; });
     } else if (target == gui->mute_switch_) {
-      emu.mute(lv_obj_has_state(gui->mute_switch_, LV_STATE_CHECKED));
+      const bool v = lv_obj_has_state(gui->mute_switch_, LV_STATE_CHECKED);
+      emu.mute(v);
+      settings.modify([v](Settings &s) { s.muted = v; });
     } else if (target == gui->usb_switch_) {
       gui->set_usb_drive(lv_obj_has_state(gui->usb_switch_, LV_STATE_CHECKED));
     } else if (target == gui->video_dropdown_) {
-      emu.video_setting(static_cast<VideoSetting>(lv_dropdown_get_selected(gui->video_dropdown_)));
+      const int v = lv_dropdown_get_selected(gui->video_dropdown_);
+      emu.video_setting(static_cast<VideoSetting>(v));
+      settings.modify([v](Settings &s) { s.video_setting = v; });
+    } else if (target == gui->resume_switch_) {
+      const bool v = lv_obj_has_state(gui->resume_switch_, LV_STATE_CHECKED);
+      settings.modify([v](Settings &s) { s.resume_last_save = v; });
     }
   }
 }
