@@ -144,6 +144,11 @@ public:
   bool initialize_input();
   /// Current gamepad state (merged from all input sources)
   GamepadState gamepad_state();
+  /// gamepad_state() plus every button pressed since the last call, so a
+  /// tap shorter than the caller's polling period still registers (PICO-8
+  /// polls once per 30 fps frame). Presses are latched where touch and USB
+  /// gamepad updates arrive; the USB keyboard is only sampled here.
+  GamepadState gamepad_state_latched();
   /// Latest touch data (in logical / landscape coordinates); a finger is
   /// down when num_touch_points > 0 (btn_state is the GT911's home button)
   TouchpadData touchpad_data() const {
@@ -285,6 +290,16 @@ public:
     uint32_t tiles{0};
   };
   VideoStats video_stats(bool reset = true);
+  /// True if no pushed frame is waiting for the video task, i.e. a frame
+  /// pushed now replaces nothing (emulators skip rendering frames that could
+  /// not be shown).
+  bool frame_slot_free() const;
+  /// Frames push_frame() replaced before the video task took them (monotonic)
+  uint32_t frames_dropped() const { return frames_dropped_.load(std::memory_order_relaxed); }
+  /// Frames the video task presented, and the CPU cycles it spent on them
+  /// (monotonic; esp-box-emu's [genesis perf] report reads per-window deltas)
+  uint32_t frames_blitted() const { return frames_blitted_.load(std::memory_order_relaxed); }
+  uint32_t blit_cycles() const { return blit_cycles_.load(std::memory_order_relaxed); }
   /// Block until the previously pushed frame has been presented
   void wait_frame();
   VideoSetting video_setting() const { return video_setting_; }
@@ -375,6 +390,7 @@ protected:
   std::atomic<int> usb_mice_{0};
   std::atomic<int> usb_gamepads_{0};
   GamepadState usb_gamepad_{};
+  std::atomic<uint16_t> press_latch_{0}; // buttons pressed since gamepad_state_latched()
   GamepadAxes usb_gamepad_axes_{};
   lv_indev_t *keypad_indev_{nullptr};
   uint32_t keypad_last_key_{0};
@@ -398,6 +414,9 @@ protected:
   size_t tile_buf_bytes_{0};
   uint8_t *frame_buffers_[2]{nullptr, nullptr};
   VideoStats video_stats_{};
+  std::atomic<uint32_t> frames_dropped_{0};
+  std::atomic<uint32_t> frames_blitted_{0};
+  std::atomic<uint32_t> blit_cycles_{0};
   size_t native_width_{0};
   size_t native_height_{0};
   size_t native_pitch_{0};

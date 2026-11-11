@@ -27,6 +27,8 @@ set(GBA_COMPONENTS gba)
 set(MGS_COMPONENTS mgs)
 ### Star Wars Episode I: The Phantom Menace (tpm-decomp on psyz, native) ###
 set(TPM_COMPONENTS tpm)
+### PICO-8 (femto8, shared with esp-box-emu) ###
+set(PICO8_COMPONENTS pico8)
 
 ### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
 # set(DARK_FORCES_COMPONENTS "dark_forces")
@@ -49,6 +51,9 @@ endif()
 if(TPM_COMPONENTS)
   add_compile_definitions(ENABLE_TPM)
 endif()
+if(PICO8_COMPONENTS)
+  add_compile_definitions(ENABLE_PICO8)
+endif()
 
 if(DARK_FORCES_COMPONENTS)
   add_compile_definitions(ENABLE_DARK_FORCES)
@@ -61,6 +66,7 @@ set(GAME_COMPONENTS
   ${GBA_COMPONENTS}
   ${MGS_COMPONENTS}
   ${TPM_COMPONENTS}
+  ${PICO8_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
   )
 
