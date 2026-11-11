@@ -1,5 +1,6 @@
 #include "menu.hpp"
 
+#include <cstdio>
 #include <fstream>
 
 Menu::Menu(const Config &config)
@@ -89,21 +90,29 @@ void Menu::update_shared_state() {
 
 bool Menu::load_screenshot(const std::string &path, lv_obj_t *image, std::vector<uint8_t> &storage,
                            lv_image_dsc_t &desc) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file.is_open()) {
+  // stdio, not ifstream: a read error (EIO from the card) makes libstdc++'s
+  // filebuf throw, and exceptions are off, so that would abort
+  FILE *file = fopen(path.c_str(), "rb");
+  if (!file) {
     lv_image_set_src(image, nullptr);
     return false;
   }
   uint8_t header[4];
-  file.read((char *)header, 4);
+  const bool header_ok = fread(header, 1, sizeof(header), file) == sizeof(header);
   uint16_t w = (header[0] << 8) | header[1];
   uint16_t h = (header[2] << 8) | header[3];
-  if (w == 0 || h == 0 || w > 2048 || h > 2048 || (size_t)w * h * 2 > storage.capacity()) {
+  if (!header_ok || w == 0 || h == 0 || w > 2048 || h > 2048 || (size_t)w * h * 2 > storage.capacity()) {
+    fclose(file);
     lv_image_set_src(image, nullptr);
     return false;
   }
   storage.resize((size_t)w * h * 2); // within the reserved capacity: no allocation
-  file.read((char *)storage.data(), storage.size());
+  const bool data_ok = fread(storage.data(), 1, storage.size(), file) == storage.size();
+  fclose(file);
+  if (!data_ok) {
+    lv_image_set_src(image, nullptr);
+    return false;
+  }
   memset(&desc, 0, sizeof(desc));
   desc.header.magic = LV_IMAGE_HEADER_MAGIC;
   desc.header.cf = LV_COLOR_FORMAT_RGB565;

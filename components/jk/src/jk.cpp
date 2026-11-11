@@ -399,7 +399,14 @@ void jk_esp_audio_unlock(void) { g_audio_mutex.unlock(); }
 
 uint32_t jk_esp_time_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 size_t jk_esp_psram_free(void) { return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) + arena_free_size(); }
-void *jk_esp_malloc_dma(size_t bytes) { return heap_caps_malloc(bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL); }
+// The P4's SD host DMAs straight to and from cache-line aligned PSRAM, so the
+// file staging buffer goes there: internal DMA memory is scarce once the USB
+// device is up, and the SD driver needs what is left for its bounce buffers
+// (FATFS's own reads into unaligned buffers, the pause menu's images, saves).
+void *jk_esp_malloc_dma(size_t bytes) {
+  void *p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);
+  return p ? p : heap_caps_malloc(bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+}
 void jk_esp_free_dma(void *ptr) { heap_caps_free(ptr); }
 
 int jk_esp_park_point(void) {

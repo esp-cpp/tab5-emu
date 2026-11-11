@@ -3,6 +3,7 @@
 #include "cart.hpp"
 #if defined(ENABLE_MGS)
 #include "mgs.hpp"
+extern "C" unsigned mgs_dbg_drawotag; // libdg: one DrawOTag per frame drawn
 #endif
 
 /// Cart for Metal Gear Solid, running natively (the decompilation on psyz).
@@ -75,6 +76,10 @@ public:
     std::this_thread::sleep_for(10ms);
     return Cart::run();
   }
+
+#if defined(ENABLE_MGS)
+  uint32_t game_frames() const override { return mgs_dbg_drawotag; }
+#endif
 
 protected:
   void pre_menu() override {

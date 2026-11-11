@@ -68,6 +68,21 @@ void Gui::resume() {
 void Gui::update() {
   if (!paused_) {
     std::lock_guard<std::recursive_mutex> lk(mutex_);
+    // the PC can end the USB drive mode itself (ejecting the drive gives the
+    // card back): follow it with the switch, and pick up what it copied over
+    const bool drive_on = Tab5Emu::get().usb_msc_host_has_card();
+    if (usb_switch_ && drive_on != lv_obj_has_state(usb_switch_, LV_STATE_CHECKED)) {
+      if (drive_on) {
+        lv_obj_add_state(usb_switch_, LV_STATE_CHECKED);
+        lv_obj_add_state(play_button_, LV_STATE_DISABLED);
+        lv_label_set_text(usb_label_, "The PC has the SD card. Eject it there to get it back.");
+      } else {
+        lv_obj_remove_state(usb_switch_, LV_STATE_CHECKED);
+        lv_obj_remove_state(play_button_, LV_STATE_DISABLED);
+        lv_label_set_text(usb_label_, "SD card as a USB drive on the USB-C port");
+        reload_rom_list();
+      }
+    }
     lv_timer_handler();
   }
 }

@@ -51,6 +51,18 @@ public:
   void resume();
 
   void update_rom_list();
+  /// Re-read metadata.csv even if its modification time did not change (FAT
+  /// times are coarse, and without a set clock they may not move at all).
+  void reload_rom_list() {
+    std::lock_guard<std::recursive_mutex> lk(mutex_);
+    metadata_last_modified_ = std::filesystem::file_time_type::min();
+    update_rom_list();
+  }
+  /// The games in list order (grouped by console).
+  std::vector<RomInfo> rom_infos() const {
+    std::lock_guard<std::recursive_mutex> lk(mutex_);
+    return rom_infos_;
+  }
 
   /// Select the first game whose name or rom path contains `text`
   bool select_rom_matching(std::string_view text);

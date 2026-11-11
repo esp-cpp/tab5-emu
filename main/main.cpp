@@ -18,8 +18,10 @@
 #include "task_monitor.hpp"
 
 #include "carts.hpp"
+#include "devlink.hpp"
 #include "gui.hpp"
 #include "heap_utils.hpp"
+#include "remote_control.hpp"
 #include "rom_info.hpp"
 #include "settings.hpp"
 #include "statistics.hpp"
@@ -156,6 +158,27 @@ extern "C" void app_main(void) {
   Gui gui({.log_level = espp::Logger::Verbosity::WARN});
   internal_free_log("gui");
 
+  // the USB link's services (core dump, system, monitor) and the test control
+  // (see tools/emulink); its requests for the launcher / the game run here, on
+  // the main loop, through main_queue
+  // the composite USB device on the USB-C port: the console moves to its CDC
+  // port, the link services get its vendor interface, the SD card its drive
+  // function (the card stays ours until handed over). Started last, as the
+  // launcher's USB drive switch used to.
+  if (!emu.initialize_usb_device()) {
+    logger.warn("USB composite device not available (console stays on USB-Serial-JTAG)");
+  }
+  internal_free_log("initialize_usb_device");
+
+  MainQueue main_queue;
+  RemoteControl control(gui, main_queue);
+  DevLink devlink({.device_name = "Tab5 Emu", .firmware = esp_app_get_description()->version});
+  devlink.register_module(control);
+  internal_free_log("devlink");
+  // up and running: an update that got this far is good (else the bootloader
+  // rolls back to the updater on the next reset)
+  DevLink::mark_app_valid();
+
   print_heap_state();
 
 #if CONFIG_TAB5_EMU_USB_MSC_AT_BOOT
@@ -221,6 +244,7 @@ extern "C" void app_main(void) {
       std::this_thread::sleep_for(50ms);
       // settings changed in the GUI are written once the changes stop
       AppSettings::get().save_if_idle();
+      main_queue.poll();
     }
 
     gui.pause();
@@ -238,6 +262,7 @@ extern "C" void app_main(void) {
       {
         std::unique_ptr<Cart> cart(make_cart(selected_rom));
         if (cart) {
+          control.set_cart(cart.get());
           // start from the save state this game was last saved to / loaded from
           if (AppSettings::get().get_settings().resume_last_save) {
             if (const auto slot = AppSettings::get().last_slot(selected_rom.rom_path)) {
@@ -274,8 +299,9 @@ extern "C" void app_main(void) {
           }
 #else
           while (cart->run())
-            ;
+            main_queue.poll();
 #endif
+          control.set_cart(nullptr);
         } else {
           logger.error("Failed to create cart!");
         }

@@ -1,6 +1,7 @@
 idf_component_register(
   INCLUDE_DIRS "include"
   SRC_DIRS "src"
+  LDFRAGMENTS "linker.lf"
   REQUIRES
   "driver"
   "heap"

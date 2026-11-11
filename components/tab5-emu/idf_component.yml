@@ -17,7 +17,12 @@ dependencies:
   espp/timer: '>=1.3'
   # USB mass storage (the SD card as a USB drive), brings esp_tinyusb; needs
   # UsbDevice::Config::port (the Tab5's USB-C is the P4's full-speed port)
-  espp/usb_device: '>=1.3.5'
+  espp/usb_device:
+    # TEMP: take_msc_from_ejected_host() (esp-cpp/espp#898); back to the
+    # registry once it is released
+    git: https://github.com/esp-cpp/espp.git
+    path: components/usb_device
+    version: feat/usb-msc-host-eject
   espp/sdcard: '>=1.0'
   # crash reports + core dump download at boot
   espp/coredump: '>=1.3.5'

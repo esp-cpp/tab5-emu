@@ -1,0 +1,15 @@
+# TinyUSB's per-interface software FIFOs (the vendor link's and the CDC
+# console's tu_fifo storage, ~8.7 KB) live in PSRAM: the CPU copies through
+# them, no DMA touches them. Their endpoint buffers (CFG_TUD_MEM_SECTION,
+# .data) stay internal and DMA-capable. Internal RAM is what the games run
+# short of (the SD card's DMA bounce buffers come from it).
+[scheme:tab5_extram_bss]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+
+[mapping:tab5_tinyusb_fifos]
+archive: libespressif__esp_tinyusb.a
+entries:
+    vendor_device (tab5_extram_bss)
+    cdc_device (tab5_extram_bss)

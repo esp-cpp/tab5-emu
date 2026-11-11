@@ -73,7 +73,7 @@ set(GAME_COMPONENTS
 set(
   COMPONENTS
   main esptool_py esp_lcd esp_psram task format display display_drivers monitor timer
-  ${GAME_COMPONENTS} tab5-emu gui menu rom_info statistics
+  ${GAME_COMPONENTS} tab5-emu gui menu rom_info statistics settings devlink
   CACHE STRING
   "List of components to include"
   FORCE

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cmath>
 #include <filesystem>
+#include <cstdio>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -133,6 +134,39 @@ public:
     running_ = false;
   }
 
+  /// Save the state to `slot` (with its screenshot) the way the pause menu's
+  /// Save does, without showing the menu; for the USB link's test control.
+  /// Call from the task that runs the cart (between run() calls).
+  void save_from_host(int slot) {
+    menu_->select_slot(slot);
+    pre_menu();
+    screenshot(get_paused_image_path());
+    save();
+    remember_slot();
+    if (running_)
+      post_menu();
+  }
+
+  /// Load the state in `slot` the way the pause menu's Load does; false if
+  /// the slot is empty. Same rules as save_from_host().
+  bool load_from_host(int slot) {
+    menu_->select_slot(slot);
+    if (get_save_path().empty()) {
+      return false;
+    }
+    pre_menu();
+    load();
+    remember_slot();
+    if (running_)
+      post_menu();
+    return true;
+  }
+
+  const RomInfo &rom_info() const { return info_; }
+  /// Frames the game has drawn so far (for the USB link's status: frame-rate
+  /// tests); 0 where the cart does not count them.
+  virtual uint32_t game_frames() const { return 0; }
+
   /// Open the pause menu over the game, click the button of `action` there
   /// and resume, as a player would; for the automated launch tests.
   void menu_action_as_from_menu(Menu::Action action) {
@@ -154,7 +188,16 @@ public:
   }
 
   /// Run one iteration of the game loop; returns false once the user quits.
+  /// Quit the game at the next run() call, as the pause menu's Quit does
+  /// (for the USB link's test control; any task).
+  void request_quit() { quit_requested_ = true; }
+
   virtual bool run() {
+    if (quit_requested_) {
+      pre_menu();
+      running_ = false;
+      return false;
+    }
     running_ = true;
     auto &emu = Tab5Emu::get();
     if (resume_pending_ && ++frames_run_ > resume_after_frames()) {
@@ -206,9 +249,18 @@ protected:
     if (std::filesystem::exists(to, ec)) {
       std::filesystem::remove(to, ec);
     }
-    std::ifstream src(from, std::ios::binary);
-    std::ofstream dst(to, std::ios::binary);
-    dst << src.rdbuf();
+    // stdio: an ifstream read error (EIO) throws, which aborts here
+    FILE *src = fopen(from.c_str(), "rb");
+    if (!src) return;
+    FILE *dst = fopen(to.c_str(), "wb");
+    if (dst) {
+      char buf[1024];
+      size_t n;
+      while ((n = fread(buf, 1, sizeof(buf), src)) > 0 && fwrite(buf, 1, n, dst) == n) {
+      }
+      fclose(dst);
+    }
+    fclose(src);
   }
 
   virtual void on_menu_action(Menu::Action action) {
@@ -330,6 +382,7 @@ protected:
 
   std::atomic<bool> running_{false};
   bool resume_pending_{false};
+  std::atomic<bool> quit_requested_{false};
   int frames_run_{0};
   size_t rom_size_bytes_{0};
   uint8_t *romdata_{nullptr};
