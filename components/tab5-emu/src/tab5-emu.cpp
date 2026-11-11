@@ -8,6 +8,7 @@
 #include <esp_cache.h>
 #include <esp_cpu.h>
 #include <esp_heap_caps.h>
+#include <esp_private/esp_cache_private.h>
 
 #include "statistics.hpp"
 
@@ -81,6 +82,33 @@ bool Tab5Emu::initialize_sdcard() {
     return false;
   }
   sdcard_ = bsp.sdcard();
+  // A read into a buffer that is not cache-line aligned (most of the games'
+  // own) goes through a bounce buffer, which the driver otherwise mallocs
+  // from DMA-capable internal RAM on every call, one sector at a time. That
+  // RAM is the scarcest there is with the USB device up (a failed bounce
+  // allocation is a failed read), and the P4's SDMMC can DMA to PSRAM: give
+  // it a permanent PSRAM one, used 16 KB per command.
+  if (sdcard_) {
+    constexpr size_t bounce_bytes = 16 * 1024;
+    void *bounce = heap_caps_calloc(1, bounce_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);
+    // the driver sizes its transfers (and cache syncs) by the allocated size,
+    // which has to be whole cache lines too
+    size_t line = 0;
+    esp_cache_get_alignment(MALLOC_CAP_SPIRAM, &line);
+    if (bounce && line && (heap_caps_get_allocated_size(bounce) % line || (uintptr_t)bounce % line)) {
+      logger_.warn("The SD card's bounce buffer at {} ({} B) is not cache-line aligned", bounce,
+                   heap_caps_get_allocated_size(bounce));
+      heap_caps_free(bounce);
+      bounce = nullptr;
+    }
+    if (bounce) {
+      sdcard_->host.dma_aligned_buffer = bounce;
+      sdcard_->host.unaligned_multi_block_rw_max_chunk_size = bounce_bytes / 512;
+      logger_.info("SD card: {} KB bounce buffer in PSRAM", bounce_bytes / 1024);
+    } else {
+      logger_.warn("No PSRAM for the SD card's {} byte bounce buffer", bounce_bytes);
+    }
+  }
   uint32_t size_mb = 0, free_mb = 0;
   if (bsp.get_sd_card_info(&size_mb, &free_mb)) {
     logger_.info("SD card: {} MB total, {} MB free", size_mb, free_mb);

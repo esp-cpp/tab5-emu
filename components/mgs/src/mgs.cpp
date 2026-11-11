@@ -61,6 +61,7 @@ void Mgs_PauseVblank(void);
 void Mgs_ResumeVblank(void);
 void Mgs_StopVblank(void);
 void Psyz_GpuSync(void);              // psyz libgpu.c: wait for the raster worker
+void Draw_ClutCacheInit(void);        // psyz soft_raster: the palette caches
 // The game's arena (port/esp32_arena.c): one PSRAM block for the PSX's RAM
 // image, the codec faces, VRAM, the SPU, the GPU queues and the thread
 // stacks. Defined here, outside the statics reset between launches, so the
@@ -311,6 +312,9 @@ bool init(const Config &config) {
   }
   Mgs_ArenaBind();
   Draw_Reset();
+  // the rasterizer's palette caches, while the main SRAM still has room (after
+  // the reset, which would drop the pointers; the GPU shutdown frees them)
+  Draw_ClutCacheInit();
   g_preserve.clear();
   Mgs_ThreadsSnapshotSetup();
   Mgs_CdSnapshotSetup();
