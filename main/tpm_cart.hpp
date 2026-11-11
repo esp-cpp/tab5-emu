@@ -75,6 +75,16 @@ public:
   }
 
 protected:
+  void capture_hold(bool hold) override {
+#if defined(ENABLE_TPM)
+    if (hold) {
+      tpm::pause();
+    } else {
+      tpm::resume();
+    }
+#endif
+  }
+
   void pre_menu() override {
     Cart::pre_menu();
 #if defined(ENABLE_TPM)

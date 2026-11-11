@@ -82,6 +82,16 @@ public:
 #endif
 
 protected:
+  void capture_hold(bool hold) override {
+#if defined(ENABLE_MGS)
+    if (hold) {
+      mgs::pause();
+    } else {
+      mgs::resume();
+    }
+#endif
+  }
+
   void pre_menu() override {
     Cart::pre_menu();
 #if defined(ENABLE_MGS)

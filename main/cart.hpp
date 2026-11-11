@@ -167,6 +167,16 @@ public:
   /// tests); 0 where the cart does not count them.
   virtual uint32_t game_frames() const { return 0; }
 
+  /// The frame a screenshot captures: its size and its RGB565 pixels (for
+  /// the USB link's screenshot, which copies it without going through a file)
+  std::pair<size_t, size_t> frame_size() const { return get_video_size(); }
+  std::span<uint8_t> frame_pixels() const { return get_video_buffer(); }
+  /// Hold the game still (true) while the USB link reads a screenshot
+  /// straight from its frame buffer, and let it go on (false). The main loop
+  /// is held meanwhile, which is enough for a core that runs in run(); a core
+  /// with its own tasks pauses them, as for the pause menu.
+  virtual void capture_hold(bool hold) {}
+
   /// Open the pause menu over the game, click the button of `action` there
   /// and resume, as a player would; for the automated launch tests.
   void menu_action_as_from_menu(Menu::Action action) {

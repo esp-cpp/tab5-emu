@@ -78,6 +78,16 @@ public:
   }
 
 protected:
+  void capture_hold(bool hold) override {
+#if defined(ENABLE_JK)
+    if (hold) {
+      jk::pause();
+    } else {
+      jk::resume();
+    }
+#endif
+  }
+
   void pre_menu() override {
     Cart::pre_menu();
 #if defined(ENABLE_JK)

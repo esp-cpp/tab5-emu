@@ -4,6 +4,7 @@
 // See tab5-emu.hpp for the ownership rules.
 #include "tab5-emu.hpp"
 
+#include <cstdio>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -126,6 +127,11 @@ bool Tab5Emu::initialize_usb_device() {
     return false;
   }
   logger_.info("USB: composite device up (console, link{})", have_sd ? ", SD card drive" : "");
+  // espp routes only stdout to the CDC console; send stderr (the cores' error
+  // messages) there too. /dev/usbcons is the console device espp registers.
+  if (usb_device_->is_console_routed_to_cdc() && freopen("/dev/usbcons", "w", stderr)) {
+    setvbuf(stderr, nullptr, _IONBF, 0);
+  }
   return true;
 }
 
