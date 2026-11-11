@@ -75,6 +75,10 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 #if defined(ENABLE_MGS)
       platform = Emulator::MGS;
 #endif
+    } else if (endsWith(lp, ".p8") || endsWith(lp, ".p8.png")) { // pico-8
+#if defined(ENABLE_PICO8)
+      platform = Emulator::PICO8;
+#endif
     } else if (endsWith(lp, "slus_008.84")) { // star wars episode i: the phantom menace
 #if defined(ENABLE_TPM)
       platform = Emulator::TPM;

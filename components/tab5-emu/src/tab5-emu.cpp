@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include <esp_cache.h>
+#include <esp_cpu.h>
 #include <esp_heap_caps.h>
 
 #include "statistics.hpp"
@@ -398,6 +399,8 @@ void Tab5Emu::on_touch(const TouchpadData &raw) {
   } else if (data.num_touch_points > 0) {
     press(data.x, data.y, state); // a driver that only reports the primary point
   }
+  press_latch_.fetch_or(static_cast<uint16_t>(state.buttons & ~touch_gamepad_.state.buttons),
+                        std::memory_order_relaxed);
   touch_gamepad_.state = state;
 }
 
@@ -437,6 +440,12 @@ GamepadState Tab5Emu::gamepad_state() {
   return state;
 }
 
+GamepadState Tab5Emu::gamepad_state_latched() {
+  GamepadState state = gamepad_state();
+  state.buttons |= press_latch_.exchange(0, std::memory_order_relaxed);
+  return state;
+}
+
 GamepadState Tab5Emu::touch_gamepad_state() const {
   std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
   return touch_gamepad_.state;
@@ -455,6 +464,8 @@ GamepadAxes Tab5Emu::gamepad_axes() const {
 void Tab5Emu::on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes) {
   {
     std::lock_guard<std::mutex> lk(hid_mutex_);
+    press_latch_.fetch_or(static_cast<uint16_t>(state.buttons & ~usb_gamepad_.buttons),
+                          std::memory_order_relaxed);
     usb_gamepad_ = state;
     usb_gamepad_axes_ = axes;
   }
@@ -632,7 +643,14 @@ void Tab5Emu::push_frame(const void *frame, const void *overlay, size_t overlay_
   // overwrite: if the video task hasn't consumed the previous frame yet, the
   // game is running faster than the display and we drop the older one
   VideoFrame vf{frame, overlay, overlay_row_begin, overlay_row_end};
+  if (uxQueueMessagesWaiting(video_queue_) != 0) {
+    frames_dropped_.fetch_add(1, std::memory_order_relaxed);
+  }
   xQueueOverwrite(video_queue_, &vf);
+}
+
+bool Tab5Emu::frame_slot_free() const {
+  return video_queue_ == nullptr || uxQueueMessagesWaiting(video_queue_) == 0;
 }
 
 Tab5Emu::VideoStats Tab5Emu::video_stats(bool reset) {
@@ -781,6 +799,7 @@ bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bo
     return false;
   }
   const auto t0 = esp_timer_get_time();
+  const uint32_t c0 = esp_cpu_get_cycle_count();
   const auto lo = layout();
   const size_t sw = staging_width();
   const size_t sh = staging_height();
@@ -817,6 +836,8 @@ bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bo
   video_stats_.frames++;
   video_stats_.tiles += tiles;
   update_frame_time(esp_timer_get_time() - t0);
+  blit_cycles_.fetch_add(esp_cpu_get_cycle_count() - c0, std::memory_order_relaxed);
+  frames_blitted_.fetch_add(1, std::memory_order_relaxed);
   xSemaphoreGive(frame_done_);
   return false;
 }
