@@ -256,10 +256,12 @@ expect a reboot whenever the console re-enumerates (after the USB drive).
 
 Settings > "USB drive" exposes the SD card as a USB mass storage device on
 the USB-C port, so ROMs, boxart and game data can be copied without pulling
-the card. While the drive is on the serial console is off (the Tab5's
-USB-C carries the P4's full-speed USB PHY, which the console and the USB
-device controller share) and the launcher cannot start games; switch it off
-(eject first) to get the card, the console and the ROM list back.
+the card. The console and the USB link stay up meanwhile (all three are
+functions of one composite USB device), but nothing on the Tab5 can use the
+card, so the launcher cannot start games. Ejecting the drive on the PC does
+not hand it back by itself: eject it there, then switch "USB drive" off to
+get the card and the updated ROM list back. `emulink drive on` / `emulink
+drive off` do the same from a script (drive off ejects it first on macOS).
 
 ## License
 
