@@ -252,6 +252,9 @@ public:
   bool is_usb_msc_enabled() const { return usb_msc_host_has_card(); }
   /// True while a PC holds the card (the volume is not mounted here)
   bool usb_msc_host_has_card() const;
+  /// Called (under lvgl_mutex()) just before the card goes to the PC, from
+  /// whichever task hands it over: the USB link closes a file it is writing.
+  void set_before_sd_handover(std::function<void()> fn) { before_sd_handover_ = std::move(fn); }
   bool button_state() const { return Bsp::get().button_state(); }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -401,6 +404,7 @@ protected:
   UsbHid *usb_hid_{nullptr};
   // the composite usb device (see usb_device.cpp)
   std::unique_ptr<espp::UsbDevice> usb_device_;
+  std::function<void()> before_sd_handover_;
   std::function<void(std::span<const uint8_t>)> vendor_rx_;
   std::mutex vendor_tx_mutex_;
   mutable std::mutex hid_mutex_;

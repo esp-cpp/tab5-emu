@@ -156,6 +156,7 @@ bool Tab5Emu::initialize_usb_msc() {
   // the launcher reads the card (metadata, boxart) under the LVGL lock: hold
   // it so the volume is not unmounted under one of its reads
   std::lock_guard<std::recursive_mutex> lk(lvgl_mutex());
+  if (before_sd_handover_) before_sd_handover_();
   std::error_code ec;
   if (!usb_device_->set_msc_owner(0, espp::UsbDevice::MscOwner::Host, ec)) {
     logger_.error("USB drive: could not hand the SD card to the PC: {}", ec.message());

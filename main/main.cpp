@@ -242,8 +242,12 @@ extern "C" void app_main(void) {
 #endif
     while (!gui.ready_to_play()) {
       std::this_thread::sleep_for(50ms);
-      // settings changed in the GUI are written once the changes stop
-      AppSettings::get().save_if_idle();
+      // settings changed in the GUI are written once the changes stop (not
+      // while the PC has the card; the launcher hands it over under this lock)
+      {
+        std::lock_guard<std::recursive_mutex> lk(Tab5Emu::lvgl_mutex());
+        if (!emu.usb_msc_host_has_card()) AppSettings::get().save_if_idle();
+      }
       main_queue.poll();
     }
 
@@ -291,6 +295,7 @@ extern "C" void app_main(void) {
               state_step++;
             }
 #endif
+            main_queue.poll();
             if (std::chrono::steady_clock::now() >= quit_at) {
               logger.warn("AUTOQUIT after {} s", CONFIG_TAB5_EMU_AUTOQUIT_SECONDS);
               cart->quit_as_from_menu();
