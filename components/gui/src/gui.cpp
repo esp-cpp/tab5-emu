@@ -357,11 +357,16 @@ void Gui::show_console(Console console) {
 
 bool Gui::select_rom_matching(std::string_view text) {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
-  for (size_t i = 0; i < rom_infos_.size(); i++) {
-    const auto &rom = rom_infos_[i];
-    if (rom.name.find(text) != std::string::npos || rom.rom_path.find(text) != std::string::npos) {
-      select_rom(i);
-      return true;
+  // an exact path or name first (one ROM's path can contain another's), then
+  // the first game containing the text
+  for (const bool exact : {true, false}) {
+    for (size_t i = 0; i < rom_infos_.size(); i++) {
+      const auto &rom = rom_infos_[i];
+      if (exact ? (rom.rom_path == text || rom.name == text)
+                : (rom.name.find(text) != std::string::npos || rom.rom_path.find(text) != std::string::npos)) {
+        select_rom(i);
+        return true;
+      }
     }
   }
   return false;

@@ -30,10 +30,13 @@ jobs:
         esp_idf_version: ${{ env.IDF_VERSION }}
         target: esp32p4
         path: '.'
+        # the updater (ota_1) first: the emulator's build adds it to flash_args
+        # / flasher_args.json, so USB updates have an app to reboot into
+        command: 'idf.py -C updater build && idf.py build'
 
     - name: Zip up firmware binaries
       run: |
-        zip -j -r firmware-binaries.zip build/tab5-emu.bin build/bootloader/bootloader.bin build/partition_table/partition-table.bin build/flash_args build/flasher_args.json
+        zip -j -r firmware-binaries.zip build/tab5-emu.bin build/bootloader/bootloader.bin build/partition_table/partition-table.bin build/ota_data_initial.bin build/updater/tab5-emu-updater.bin build/flash_args build/flasher_args.json
 
     - name: Upload Build Outputs
       uses: actions/upload-artifact@v4

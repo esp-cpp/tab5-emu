@@ -185,8 +185,13 @@ git clone --recurse-submodules=components/jk/OpenJKDF2 \
           https://github.com/esp-cpp/tab5-emu
 cd tab5-emu
 idf.py set-target esp32p4
+idf.py -C updater build   # once: the updater app, which goes in ota_1
 idf.py build flash monitor
 ```
+
+The updater (`updater/`) is what over-USB updates (`tools/emulink`) reboot
+into, and what a bad update rolls back to; with it built first, `idf.py
+flash` writes it along with the emulator.
 
 (Do not recurse into the engine's own submodules; they are desktop-only
 dependencies.)
