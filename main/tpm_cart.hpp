@@ -75,6 +75,9 @@ public:
   }
 
 protected:
+  // (the disc files are read as the game goes)
+  bool uses_rom_folder() const override { return true; }
+
   void capture_hold(bool hold) override {
 #if defined(ENABLE_TPM)
     if (hold) {

@@ -82,6 +82,9 @@ public:
 #endif
 
 protected:
+  // (the stage data is read as the game goes)
+  bool uses_rom_folder() const override { return true; }
+
   void capture_hold(bool hold) override {
 #if defined(ENABLE_MGS)
     if (hold) {

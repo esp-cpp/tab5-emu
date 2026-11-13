@@ -184,6 +184,10 @@ public:
   /// with its own tasks pauses them, as for the pause menu.
   virtual void capture_hold(bool hold) {}
 
+  /// The game reads other files from its ROM's folder while it runs (a PC
+  /// port's data files): the USB link then leaves that folder alone
+  virtual bool uses_rom_folder() const { return false; }
+
   /// Open the pause menu over the game, click the button of `action` there
   /// and resume, as a player would; for the automated launch tests.
   void menu_action_as_from_menu(Menu::Action action) {
