@@ -337,18 +337,22 @@ void Tab5Emu::keypad_read(lv_indev_t *indev, lv_indev_data_t *data) {
     st.right |= key(79);
     st.a |= key(40) | key(88) | key(44); // enter, keypad enter, space
     st.b |= key(41);                     // escape
+    st.x |= key(9);                      // f: the launcher's console filter
   }
   // left / right adjust a focused slider or dropdown, otherwise move focus
   bool horizontal_widget = false;
   if (auto *group = lv_indev_get_group(indev)) {
     if (auto *focused = lv_group_get_focused(group)) {
+      // (an object flagged LV_OBJ_FLAG_USER_1 takes left / right as keys too:
+      // the launcher's games change the console with them)
       horizontal_widget = lv_obj_check_type(focused, &lv_slider_class) || lv_obj_check_type(focused, &lv_dropdown_class) ||
-                          lv_obj_check_type(focused, &lv_switch_class);
+                          lv_obj_check_type(focused, &lv_switch_class) || lv_obj_has_flag(focused, LV_OBJ_FLAG_USER_1);
     }
   }
   uint32_t key = 0;
   if (st.a) key = LV_KEY_ENTER;
   else if (st.b) key = LV_KEY_ESC;
+  else if (st.x) key = LV_KEY_HOME; // (the launcher's console picker)
   else if (st.up) key = LV_KEY_PREV;
   else if (st.down) key = LV_KEY_NEXT;
   else if (st.left) key = horizontal_widget ? LV_KEY_LEFT : LV_KEY_PREV;
