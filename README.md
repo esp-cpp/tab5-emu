@@ -260,6 +260,18 @@ Note that a terminal which opens the console port with DTR low and RTS high
 resets the chip (`rst:0x17 CHIP_USB_UART_RESET`); keep both asserted, or
 expect a reboot whenever the console re-enumerates (after the USB drive).
 
+## Web Console
+
+Plug the emulator into a computer and Chrome or Edge offers its web console,
+[esp-cpp.github.io/tab5-emu](https://esp-cpp.github.io/tab5-emu/) (the firmware's
+WebUSB landing page; the source is in [`web/`](./web)). Nothing to install:
+it talks to the device over USB to show what runs (frame rate, memory,
+firmware, the last crash), the game's or the launcher's screen with an
+on-screen controller, the games by console with their boxart (play, filter,
+add, remove), the SD card's files (download, upload, delete), the launcher's
+settings, the system (restart, firmware update through the updater) and the
+console log. It uses the same link as `tools/emulink`, so close that first.
+
 ## USB drive (file transfer)
 
 Settings > "USB drive" exposes the SD card as a USB mass storage device on
