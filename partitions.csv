@@ -1,5 +1,12 @@
-# Name,   Type, SubType, Offset,  Size
-nvs,      data, nvs,     0xa000,  0x6000
-phy_init, data, phy,     ,        0x1000
-factory,  app,  factory, ,        12M
-coredump, data, coredump, ,       64K
+# Name,   Type, SubType,  Offset,  Size
+# ota_0: the emulator (at the old factory offset, so `idf.py flash` writes it
+# there). ota_1: the small updater app (updater/), which an update reboots
+# into: it takes the new emulator image over USB, writes ota_0 and boots it.
+# With rollback on, an emulator image that resets before marking itself valid
+# falls back to the updater.
+nvs,      data, nvs,      0xa000,  0x6000
+otadata,  data, ota,      ,        0x2000
+phy_init, data, phy,      ,        0x1000
+ota_0,    app,  ota_0,    0x20000, 13M
+ota_1,    app,  ota_1,    ,        2M
+coredump, data, coredump, ,        64K

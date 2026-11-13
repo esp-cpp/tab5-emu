@@ -353,22 +353,31 @@ void run_gba_rom() {
   }
 }
 
-void load_gba(std::string_view save_path) {
-  if (!g_initialized || save_path.empty()) return;
+bool load_gba(std::string_view save_path) {
+  if (!g_initialized || save_path.empty()) return false;
   std::ifstream f(save_path.data(), std::ios::binary);
-  if (!f) return;
+  if (!f) return false;
   std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
   if (!retro_unserialize(buf.data(), buf.size())) {
     fmt::print("gba: state load failed ({} bytes, expected {})\n", buf.size(), retro_serialize_size());
+    return false;
   }
+  return true;
 }
 
-void save_gba(std::string_view save_path) {
-  if (!g_initialized || save_path.empty()) return;
+bool save_gba(std::string_view save_path) {
+  if (!g_initialized || save_path.empty()) return false;
   std::vector<uint8_t> buf(retro_serialize_size());
-  if (!retro_serialize(buf.data(), buf.size())) return;
-  std::ofstream f(save_path.data(), std::ios::binary);
-  f.write(reinterpret_cast<const char *>(buf.data()), buf.size());
+  if (!retro_serialize(buf.data(), buf.size())) return false;
+  // (stdio: a short write or a failed flush at close is reported)
+  FILE *f = fopen(std::string(save_path).c_str(), "wb");
+  if (!f) return false;
+  const bool ok = fwrite(buf.data(), 1, buf.size(), f) == buf.size();
+  if (fclose(f) != 0 || !ok) {
+    fmt::print("gba: state save to {} failed\n", save_path);
+    return false;
+  }
+  return true;
 }
 
 std::span<uint8_t> get_gba_video_buffer() {

@@ -214,6 +214,9 @@ bool Tab5Emu::initialize_usb_host() {
       .on_device_connected = [hid](const auto &device) { hid->on_connected(device); },
       .on_device_disconnected = [hid](const auto &device) { hid->on_disconnected(device); },
       .auto_start = true,
+      // controller 0: the high-speed OTG 2.0, wired to the USB-A jack (the
+      // full-speed one is the composite device on the USB-C port)
+      .port = 0,
       .task_priority = 5,
       .dispatch_task_stack_size = 8 * 1024,
       .full_speed_only = true, // devices behind a hub: IDF has no transaction translator

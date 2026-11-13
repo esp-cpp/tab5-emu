@@ -78,6 +78,19 @@ public:
   }
 
 protected:
+  // (the game data is read as the game goes)
+  bool uses_rom_folder() const override { return true; }
+
+  void capture_hold(bool hold) override {
+#if defined(ENABLE_JK)
+    if (hold) {
+      jk::pause();
+    } else {
+      jk::resume();
+    }
+#endif
+  }
+
   void pre_menu() override {
     Cart::pre_menu();
 #if defined(ENABLE_JK)

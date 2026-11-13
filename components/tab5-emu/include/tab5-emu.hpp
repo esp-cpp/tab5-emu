@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <memory>
+#include <functional>
 #include <mutex>
 #include <span>
 #include <string>
@@ -149,6 +150,9 @@ public:
   /// polls once per 30 fps frame). Presses are latched where touch and USB
   /// gamepad updates arrive; the USB keyboard is only sampled here.
   GamepadState gamepad_state_latched();
+  /// Buttons held by the USB link's test control (scripted input), merged
+  /// into gamepad_state() like any other input (GamepadState::buttons bits).
+  void set_remote_buttons(uint16_t buttons);
   /// Latest touch data (in logical / landscape coordinates); a finger is
   /// down when num_touch_points > 0 (btn_state is the GT911's home button)
   TouchpadData touchpad_data() const {
@@ -206,33 +210,51 @@ public:
     static std::recursive_mutex m;
     return m;
   }
-  /// Stop the USB host library (keyboard / mouse stop working). The USB
-  /// controller is shared with device mode (see initialize_usb_msc()).
+  /// Stop the USB host library (keyboard / mouse stop working).
   void deinitialize_usb_host();
   bool is_usb_host_enabled() const { return usb_hid_ != nullptr; }
 
   /////////////////////////////////////////////////////////////////////////////
-  // USB mass storage: expose the SD card to a PC as a USB drive
+  // The composite USB device on the USB-C port
   //
-  // The card's FAT volume is unmounted here while a PC has it, so nothing on
-  // the device may use /sdcard in that time (the GUI shows a "USB drive" mode
-  // and reloads the ROM list afterwards). The P4 has one USB OTG controller,
-  // so the USB host (keyboard / mouse) is stopped while the drive is on and
-  // restarted afterwards.
+  // - CDC: the console (stdout is routed there, teed to UART0). The
+  //   USB-Serial-JTAG console is parked meanwhile (it shares the pins).
+  // - vendor (WebUSB): a framed byte stream for the link services (OTA, core
+  //   dump, system, test control): set_vendor_rx() / vendor_write().
+  // - MSC: the SD card as a USB drive. The device owns the card (mounted at
+  //   mount_point) until it is handed to the PC with initialize_usb_msc();
+  //   while the PC has it nothing on the device may use /sdcard (the GUI shows
+  //   a "USB drive" mode and reloads the ROM list afterwards).
+  // The USB host (USB-A jack) runs on the other (high-speed) controller.
   /////////////////////////////////////////////////////////////////////////////
 
+  /// Start the composite device (after initialize_sdcard()).
+  bool initialize_usb_device();
+  bool is_usb_device_enabled() const { return usb_device_ != nullptr; }
+  /// Bytes received on the vendor interface (TinyUSB task context: do not
+  /// block; hand them to a DispatcherWorker). Set before the host talks.
+  void set_vendor_rx(std::function<void(std::span<const uint8_t>)> fn) { vendor_rx_ = std::move(fn); }
+  /// Send one frame on the vendor interface (all or nothing; serialized).
+  bool vendor_write(std::span<const uint8_t> frame);
+  /// Before a reboot into the ROM download mode: hand the USB-C pins back to
+  /// the USB-Serial-JTAG controller (the pin mapping survives the reset).
+  void usb_prepare_for_rom_download();
+  /// Hand the SD card to the PC as a USB drive
   bool initialize_usb_msc();
+  /// Take the SD card back from the PC (mounted at mount_point again)
   void deinitialize_usb_msc();
   /// Give the USB-C pins back to the serial console if a previous run left
   /// them on the OTG controller (called once at construction).
   void usb_msc_restore_console();
-  /// A crash while the console is unavailable (e.g. during the USB drive
-  /// hand-over) leaves its core dump in flash: print it base64 to the console
-  /// (decode on the PC with esp-coredump info_corefile), then erase it.
+  /// Print the last crash's report (if any) to the console. The core dump
+  /// itself stays in flash for the link's core dump service.
   static void dump_core_dump_to_console();
-  bool is_usb_msc_enabled() const { return usb_device_ != nullptr; }
+  bool is_usb_msc_enabled() const { return usb_msc_host_has_card(); }
   /// True while a PC holds the card (the volume is not mounted here)
   bool usb_msc_host_has_card() const;
+  /// Called (under lvgl_mutex()) just before the card goes to the PC, from
+  /// whichever task hands it over: the USB link closes a file it is writing.
+  void set_before_sd_handover(std::function<void()> fn) { before_sd_handover_ = std::move(fn); }
   bool button_state() const { return Bsp::get().button_state(); }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -380,9 +402,11 @@ protected:
   // usb hid (see usb_hid.cpp)
   struct UsbHid;
   UsbHid *usb_hid_{nullptr};
-  // usb msc (see usb_msc.cpp)
+  // the composite usb device (see usb_device.cpp)
   std::unique_ptr<espp::UsbDevice> usb_device_;
-  bool usb_host_was_enabled_{false};
+  std::function<void()> before_sd_handover_;
+  std::function<void(std::span<const uint8_t>)> vendor_rx_;
+  std::mutex vendor_tx_mutex_;
   mutable std::mutex hid_mutex_;
   KeyboardState keyboard_{};
   MouseState mouse_{};
@@ -390,7 +414,8 @@ protected:
   std::atomic<int> usb_mice_{0};
   std::atomic<int> usb_gamepads_{0};
   GamepadState usb_gamepad_{};
-  std::atomic<uint16_t> press_latch_{0}; // buttons pressed since gamepad_state_latched()
+  std::atomic<uint16_t> press_latch_{0};
+  std::atomic<uint16_t> remote_buttons_{0}; // buttons pressed since gamepad_state_latched()
   GamepadAxes usb_gamepad_axes_{};
   lv_indev_t *keypad_indev_{nullptr};
   uint32_t keypad_last_key_{0};

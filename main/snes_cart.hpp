@@ -8,6 +8,8 @@
 
 class SnesCart : public Cart {
 public:
+  // an emulator core: a state loads right after the game starts
+  virtual bool supports_resume() const override { return true; }
   explicit SnesCart(const Cart::Config &config) : Cart(config) {
     handle_video_setting();
     init();
@@ -23,15 +25,20 @@ public:
 #endif
   }
   void load() override {
-    Cart::load();
 #if defined(ENABLE_SNES)
-    load_snes(get_save_path());
+    // (the base marks the state done: only once the core took it)
+    if (load_snes(get_save_path()))
+      Cart::load();
+#else
+    Cart::load();
 #endif
   }
   void save() override {
-    Cart::save();
 #if defined(ENABLE_SNES)
-    save_snes(get_save_path(true));
+    if (save_snes(get_save_path(true)))
+      Cart::save();
+#else
+    Cart::save();
 #endif
   }
   void init() {

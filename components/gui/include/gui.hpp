@@ -14,12 +14,16 @@
 #include "high_resolution_timer.hpp"
 #include "logger.hpp"
 
+#include "console_art.hpp"
 #include "rom_info.hpp"
+#include "settings.hpp"
 #include "tab5-emu.hpp"
 
-/// The launcher GUI: a list of games (from metadata.csv on the SD card) with
-/// boxart, plus settings (volume, brightness, video scaling). Hand-written
-/// LVGL, laid out for the Tab5's 1280x720 landscape screen.
+/// The launcher GUI: a list of games (from metadata.csv on the SD card),
+/// grouped under a header per console, with the selected game's boxart and
+/// console, plus settings (volume, brightness, video scaling, resume), which
+/// are kept in AppSettings. Hand-written LVGL, laid out for the Tab5's
+/// 1280x720 landscape screen.
 class Gui {
 public:
   struct Config {
@@ -47,6 +51,18 @@ public:
   void resume();
 
   void update_rom_list();
+  /// Re-read metadata.csv even if its modification time did not change (FAT
+  /// times are coarse, and without a set clock they may not move at all).
+  void reload_rom_list() {
+    std::lock_guard<std::recursive_mutex> lk(mutex_);
+    metadata_last_modified_ = std::filesystem::file_time_type::min();
+    update_rom_list();
+  }
+  /// The games in list order (grouped by console).
+  std::vector<RomInfo> rom_infos() const {
+    std::lock_guard<std::recursive_mutex> lk(mutex_);
+    return rom_infos_;
+  }
 
   /// Select the first game whose name or rom path contains `text`
   bool select_rom_matching(std::string_view text);
@@ -72,6 +88,15 @@ protected:
   lv_obj_t *boxart_{nullptr};
   lv_draw_buf_t *boxart_buf_{nullptr}; ///< decoded boxart the image widget shows
   void load_boxart(const std::string &path);
+  /// Decode a JPEG on the SD card into a new RGB565 draw buffer (nullptr if it cannot)
+  lv_draw_buf_t *decode_image(const std::string &path);
+
+  // the console the selected game runs on: its SD card art, or a badge
+  lv_obj_t *console_area_{nullptr};
+  lv_draw_buf_t *console_art_buf_{nullptr};
+  int shown_console_{-1};
+  void show_console(Console console);
+  void add_console_header(Console console);
   lv_obj_t *title_label_{nullptr};
   lv_obj_t *play_button_{nullptr};
   lv_obj_t *volume_slider_{nullptr};
@@ -81,6 +106,7 @@ protected:
   lv_obj_t *usb_label_{nullptr};
   void set_usb_drive(bool on);
   lv_obj_t *video_dropdown_{nullptr};
+  lv_obj_t *resume_switch_{nullptr};
   lv_obj_t *battery_label_{nullptr};
   std::vector<lv_obj_t *> rom_buttons_;
 

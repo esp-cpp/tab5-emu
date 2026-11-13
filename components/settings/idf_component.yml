@@ -1,0 +1,5 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf: '>=6.0'
+  # versioned settings file with forward migration
+  espp/persistent_data: '>=1.4.2'
