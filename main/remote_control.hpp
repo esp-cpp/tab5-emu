@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cerrno>
 #include <condition_variable>
 #include <cstring>
@@ -508,13 +509,13 @@ public:
         }
         const std::string name(text.substr(0, eq));
         const std::string value(text.substr(eq + 1));
-        char *end = nullptr;
-        const long v = std::strtol(value.c_str(), &end, 10);
-        if (value.empty() || *end) {
+        int v = 0;
+        const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
+        if (value.empty() || ec != std::errc() || end != value.data() + value.size()) {
           fail(fmt::format("{}: '{}' is not a number", name, value));
           break;
         }
-        if (!gui_.set_setting(name, static_cast<int>(v))) {
+        if (!gui_.set_setting(name, v)) {
           fail(fmt::format("unknown setting '{}' (or {} is out of range)", name, v));
           break;
         }

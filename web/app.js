@@ -229,7 +229,7 @@ function renderStatus(prev) {
   const fps = state.fpsHistory.at(-1);
   $("fps").textContent = fps == null ? "—" : fps.toFixed(1) + " / s";
   $("dropped").textContent = st.frames_dropped;
-  $("gameFrames").textContent = st.game_frames || "—";
+  $("gameFrames").textContent = st.state === "game" ? st.game_frames : "—";
   drawSpark($("fpsSpark"), [state.fpsHistory], ["#3e8ef7"]);
   const memRow = (label, free, largest, min) => h("div", { class: "mem-row" },
     h("span", {}, label),
@@ -783,7 +783,10 @@ function init() {
   }, state.status?.usb_drive ? "The emulator has the SD card again" : "The PC has the SD card");
   $("captureBtn").onclick = () => capture();
   $("liveToggle").onchange = (e) => { state.live = e.target.checked; if (state.live) liveLoop(); };
-  $("savePngBtn").onclick = () => $("screen").toBlob((b) => download(`screenshot-${Date.now()}.png`, b, "image/png"), "image/png");
+  $("savePngBtn").onclick = () => $("screen").toBlob((b) => {
+    if (b) download(`screenshot-${Date.now()}.png`, b, "image/png");
+    else toast("The PNG could not be made", true);
+  }, "image/png");
   $("slot").replaceChildren(...[0, 1, 2, 3, 4, 5].map((s) => h("option", { value: s, selected: s === 1 }, "Slot " + s)));
   $("saveBtn").onclick = () => guarded(() => state.ctl.save(Number($("slot").value)), "Saved to slot " + $("slot").value);
   $("loadBtn").onclick = () => guarded(() => state.ctl.load(Number($("slot").value)), "Loaded slot " + $("slot").value);

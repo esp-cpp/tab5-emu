@@ -287,6 +287,8 @@ export class Control {
   }
 
   remote(path) {
+    // (the device takes any path: keep this page's on the card)
+    if (path && path.split("/").includes("..")) throw new ControlError(`no '..' in a path: ${path}`);
     if (!path || path === "/" || path === ".") return ROOT;
     if (path.startsWith(ROOT)) return path;
     return ROOT + "/" + path.replace(/^\/+/, "");
@@ -378,7 +380,9 @@ export class Control {
   writeFile(path, data, progress) { return this.exclusive(() => this.writeFileNow(path, data, progress)); }
   async writeFileNow(path, data, progress) {
     const p = enc.encode(this.remote(path));
-    const chunk = 3584 - p.length; // the frame payload is at most 4096 bytes
+    // path + data at most 3584 bytes a frame, as emulink: under the 4096-byte
+    // payload (MAX_PAYLOAD) with room to spare
+    const chunk = 3584 - p.length;
     if (chunk < 256) throw new ControlError("path too long");
     let off = 0;
     do {

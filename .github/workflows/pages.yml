@@ -28,8 +28,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check the scripts parse
-        run: for f in web/*.js; do node --check "$f"; done
+      - name: Check the scripts parse (as ES modules)
+        run: for f in web/*.js; do node --input-type=module --check < "$f" || exit 1; done
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
