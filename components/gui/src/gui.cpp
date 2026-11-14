@@ -49,6 +49,9 @@ void Gui::pause() {
 
 void Gui::resume() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
+  // a game started from the PC (emulink launch) leaves the console picker open
+  // behind it: back from the game, the list has the keypad, so close it
+  close_console_picker();
   update_rom_list();
   update_shared_state();
   lv_screen_load(screen_);

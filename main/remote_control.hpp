@@ -133,8 +133,9 @@ public:
     RELOAD_ROMS = 0x0A, ///< () re-read metadata.csv
     ENTER_UPDATER = 0x0B, ///< () reboot into the updater app (ota_1) for an update
     SCREENSHOT_READ = 0x0C, ///< (u32 offset, u16 length) -> raw bytes of the held SCREENSHOT (short at the end)
-    /// (console key: text, e.g. "snes"; empty or "all" for every console) ->
-    /// {filter, consoles: [keys]}: the launcher's list shows only that console's games
+    /// (console key: text, e.g. "snes"; empty or "all" for every console; "?"
+    /// changes nothing, only reports) -> {filter, consoles: [keys]}: the
+    /// launcher's list shows only that console's games
     CONSOLE_FILTER = 0x0D,
     /// (empty, or "name=value" to change one) -> {settings: {name: value},
     /// limits: {name: [min, max]}}: the launcher's settings (volume,
@@ -474,6 +475,10 @@ public:
       std::string key(text);
       std::transform(key.begin(), key.end(), key.begin(),
                      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (key == "?") { // a query: report the filter without touching the list
+        json(filter_json());
+        break;
+      }
       const auto present = gui_.consoles();
       bool done = false;
       if (key.empty() || key == "all") {
