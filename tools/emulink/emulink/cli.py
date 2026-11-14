@@ -143,7 +143,7 @@ def cmd_screenshot(args) -> int:
 def cmd_filter(args) -> int:
     with _open(args) as link:
         r = Control(link).console_filter(args.console)
-    print(f"filter: {r['filter'] or 'all'}  (consoles: {', '.join(r['consoles'])})")
+    print(f"filter: {r.get('filter') or 'all'}  (consoles: {', '.join(r.get('consoles', [])) or 'none'})")
     return 0
 
 
