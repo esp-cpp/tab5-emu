@@ -316,7 +316,7 @@ void Gui::build_list(int keep_rom) {
       add_console_header(console);
     }
     auto btn = lv_list_add_button(rom_list_, nullptr, rom_infos_[i].name.c_str());
-    lv_obj_set_user_data(btn, reinterpret_cast<void *>(i));
+    lv_obj_set_user_data(btn, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     lv_obj_add_event_cb(btn, event_callback, LV_EVENT_CLICKED, this);
     lv_obj_add_event_cb(btn, event_callback, LV_EVENT_FOCUSED, this);
     lv_obj_add_event_cb(btn, event_callback, LV_EVENT_KEY, this);
@@ -598,12 +598,14 @@ bool Gui::select_rom_matching(std::string_view text) {
       const auto &rom = rom_infos_[i];
       if (exact ? (rom.rom_path == text || rom.name == text)
                 : (rom.name.find(text) != std::string::npos || rom.rom_path.find(text) != std::string::npos)) {
-        // a game the console filter hides: show them all
+        // a game the console filter hides: show them all (build_list()
+        // selects it)
         if (filter_ >= 0 && static_cast<int>(console_of(rom.platform)) != filter_) {
           filter_ = -1;
           build_list(i);
+        } else {
+          select_rom(i);
         }
-        select_rom(i);
         return true;
       }
     }
