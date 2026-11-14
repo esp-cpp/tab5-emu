@@ -80,6 +80,11 @@ public:
   size_t copy_file_to_romdata(const std::string &filename);
   uint8_t *romdata() const { return romdata_; }
   void free_romdata();
+  /// Make romdata() an empty block of `bytes` (zeroed) instead of a copied
+  /// file: the cores shared with esp-box-emu that run their own allocator in
+  /// the box's fixed 4 MB ROM block (MSX, Doom, Dark Forces) use it that way.
+  /// Freed with the cart like a ROM. Returns false if there is no room.
+  bool reserve_romdata(size_t bytes);
   /// A permanent PSRAM block reserved at boot for cores that need one big
   /// contiguous ROM buffer (the SNES core wants 6 MB); the general heap gets
   /// too fragmented by GUI allocations to guarantee that later. Returns
@@ -105,6 +110,9 @@ public:
 
   bool initialize_audio();
   bool is_muted() const { return Bsp::get().is_muted(); }
+  /// The Tab5 has no haptic motor; for the glue shared with esp-box-emu
+  void play_haptic_effect() {}
+  void play_haptic_effect(int) {}
   void mute(bool v);
   void volume(float volume);
   float volume() const { return Bsp::get().volume(); }

@@ -94,6 +94,16 @@ plan and its history are in [docs/PLAN.md](docs/PLAN.md).
 | Genesis / Mega Drive | gwenesis (shared with esp-box-emu) | full speed |
 | SNES | snes9x2005 | full speed |
 | Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
+| NES | nofrendo (shared with esp-box-emu) | new, not yet benchmarked |
+| Game Boy / Color | gnuboy (shared with esp-box-emu) | new, not yet benchmarked |
+| Master System / Game Gear | SMS Plus (shared with esp-box-emu) | new, not yet benchmarked |
+| MSX | fMSX (shared with esp-box-emu) | new, not yet benchmarked |
+| Doom | PrBoom (shared with esp-box-emu) | new, not yet benchmarked |
+| Dark Forces | The Force Engine (shared with esp-box-emu) | new, not yet benchmarked |
+
+The cores shared with esp-box-emu are submodules (the core plus its `port/`
+glue, written against `BoxEmu`, which the Tab5 aliases to `Tab5Emu`), so a
+fix in one firmware reaches the other.
 
 https://github.com/user-attachments/assets/641a64b0-b3af-429b-8582-a38fc9a5cdad
 
@@ -175,6 +185,9 @@ components/
   mgs/              Metal Gear Solid: mgs_reversing + psyz submodules + the Tab5 platform layer
   tpm/              The Phantom Menace: tpm-decomp submodule (static recompiler + runtime) + glue
   gba/ genesis/ snes/   the emulator cores and their glue
+  nes/ gbc/ sms/ msx/ doom/ darkforces/ pico8/
+                    the cores shared with esp-box-emu (submodules: core + port/ glue)
+  pool_allocator/   the allocator MSX, Doom and Dark Forces run in their 4 MB block
 docs/PLAN.md        the Jedi Knight plan and history
 ```
 
@@ -197,6 +210,9 @@ docs/PLAN.md        the Jedi Knight plan and history
   mgs/                        # Metal Gear Solid, extracted from your own US disc
     STAGE.DIR RADIO.DAT FACE.DAT ZMOVIE.STR VOX.DAT DEMO.DAT BRF.DAT
                               # (components/mgs/mgs_reversing/port/extract_disc.py)
+  doom/                       # doom1.wad, doom.wad, doom2.wad, ... (the IWADs)
+  darkforces/                 # your Dark Forces install: DARK.GOB, SOUNDS.GOB, TEXTURES.GOB, SPRITES.GOB, LFDs
+  nes/ gbc/ sms/ gg/ msx/ ... # cartridge ROMs (any folder: metadata.csv has the paths)
   tpm/                        # The Phantom Menace, USA Rev 1: the .bin of a bin/cue rip
     Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin
   saves/                      # save states and their screenshots; the PlayStation
@@ -206,8 +222,10 @@ docs/PLAN.md        the Jedi Knight plan and history
 
 Example `metadata.csv` (one line per game: rom path, boxart, name; the
 platform comes from the path: `.md`/`.gen` Genesis, `.sfc`/`.smc` SNES,
-`.gba` Game Boy Advance, `jk.cd` Jedi Knight, `STAGE.DIR` Metal Gear Solid,
-`SLUS_008.84` The Phantom Menace):
+`.gba` Game Boy Advance, `.nes` NES, `.gb`/`.gbc` Game Boy / Color, `.sms`
+Master System, `.gg` Game Gear, `.rom` MSX, `.wad` Doom, `DARK.GOB` Dark
+Forces, `.p8`/`.p8.png` PICO-8, `jk.cd` Jedi Knight, `STAGE.DIR` Metal Gear
+Solid, `SLUS_008.84` The Phantom Menace):
 
 ```
 jk/jk.cd, boxart/jk.jpg, Star Wars: Jedi Knight - Dark Forces II
@@ -277,8 +295,8 @@ console's games. Tapping the console above the boxart (or X on a gamepad, F
 on a keyboard) opens the console picker, which shows only one console's
 games, or all of them again; an outline on the console means the list is
 filtered, and left / right then move the filter to the next console.
-`emulink filter <console>` (snes, gba, genesis, playstation, pc, pico8 or
-all) does the same over USB.
+`emulink filter <console>` (nes, snes, gb, gbc, gba, sms, gg, genesis, msx,
+playstation, pc, pico8 or all) does the same over USB.
 
 Jedi Knight gets the full keyboard and mouse look; on a gamepad the left
 stick strafes, the right stick looks, R = fire, L = secondary fire, A =

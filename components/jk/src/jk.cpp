@@ -563,7 +563,7 @@ size_t g_pool_allocs = 0, g_pool_fallbacks = 0;
 inline bool pool_owns(const void *p) {
   return g_pool_base && p >= g_pool_base && p < g_pool_base + POOL_BYTES;
 }
-void *pool_alloc(size_t size) {
+void *jk_pool_alloc(size_t size) {
   size_t c = 0;
   while (c < POOL_NUM_CLASSES && POOL_CLASSES[c] < size) c++;
   if (c == POOL_NUM_CLASSES) return nullptr;
@@ -582,11 +582,11 @@ void *pool_alloc(size_t size) {
   portEXIT_CRITICAL(&g_pool_lock);
   return blk;
 }
-size_t pool_block_size(const void *p) {
+size_t jk_pool_block_size(const void *p) {
   const uint32_t *hdr = static_cast<const uint32_t *>(p) - 2;
   return hdr[1] == POOL_MAGIC && hdr[0] < POOL_NUM_CLASSES ? POOL_CLASSES[hdr[0]] : 0;
 }
-void pool_free(void *p) {
+void jk_pool_free(void *p) {
   const uint32_t *hdr = static_cast<const uint32_t *>(p) - 2;
   if (hdr[1] != POOL_MAGIC || hdr[0] >= POOL_NUM_CLASSES) return; // not ours (corrupt header)
   portENTER_CRITICAL(&g_pool_lock);
@@ -707,7 +707,7 @@ size_t arena_largest_free() {
 // evicting every frame. Whatever else in the firmware allocates while the
 // engine runs must do so up front (the frame buffers are) or cope with NULL.
 void *jk_esp_malloc_site(size_t size, const void *site) {
-  void *p = size <= POOL_CLASSES[POOL_NUM_CLASSES - 1] ? pool_alloc(size) : nullptr;
+  void *p = size <= POOL_CLASSES[POOL_NUM_CLASSES - 1] ? jk_pool_alloc(size) : nullptr;
   if (!p) p = arena_alloc(size);
   if (!p) p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (p) memset(p, 0, size);
@@ -725,14 +725,14 @@ void *jk_esp_realloc_site(void *ptr, size_t size, const void *site) {
 #endif
   void *p;
   if (ptr && pool_owns(ptr)) {
-    const size_t old = pool_block_size(ptr);
+    const size_t old = jk_pool_block_size(ptr);
     if (size <= old) {
       p = ptr; // still fits its class
     } else {
       p = jk_esp_malloc_site(size, site);
       if (p) {
         memcpy(p, ptr, old);
-        pool_free(ptr);
+        jk_pool_free(ptr);
       }
 #if defined(JK_ESP_FS_DEBUG)
       return p; // already tracked by jk_esp_malloc_site
@@ -782,7 +782,7 @@ void jk_esp_free(void *ptr) {
   alloc_untrack(ptr);
 #endif
   if (pool_owns(ptr)) {
-    pool_free(ptr);
+    jk_pool_free(ptr);
   } else if (arena_owns(ptr)) {
     arena_free(ptr);
   } else {

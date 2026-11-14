@@ -122,6 +122,9 @@ sdmmc_card_t *Tab5Emu::sdcard() const { return sdcard_; }
 // Memory
 /////////////////////////////////////////////////////////////////////////////
 
+// the ROM the cart copied in, for nofrendo (shared with esp-box-emu)
+extern "C" uint8_t *osd_getromdata() { return Tab5Emu::get().romdata(); }
+
 size_t Tab5Emu::copy_file_to_romdata(const std::string &filename) {
   std::ifstream file(filename, std::ios::binary | std::ios::ate);
   if (!file.is_open()) {
@@ -146,6 +149,23 @@ size_t Tab5Emu::copy_file_to_romdata(const std::string &filename) {
   file.read(reinterpret_cast<char *>(romdata_), size);
   romdata_size_ = size;
   return size;
+}
+
+bool Tab5Emu::reserve_romdata(size_t bytes) {
+  free_romdata();
+  romdata_ = static_cast<uint8_t *>(heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!romdata_ && rom_arena_ && bytes <= ROM_ARENA_BYTES) {
+    logger_.warn("No contiguous PSRAM block of {} bytes; using the ROM arena", bytes);
+    romdata_ = rom_arena_;
+    romdata_in_arena_ = true;
+    memset(romdata_, 0, bytes);
+  }
+  if (!romdata_) {
+    logger_.error("Could not allocate a {} byte block", bytes);
+    return false;
+  }
+  romdata_size_ = bytes;
+  return true;
 }
 
 void Tab5Emu::free_romdata() {

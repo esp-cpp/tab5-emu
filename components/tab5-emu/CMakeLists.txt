@@ -18,6 +18,7 @@ idf_component_register(
   "input_drivers"
   "gt911"
   "event_manager"
+  "pool_allocator"
   "task"
   "timer"
   "m5stack-tab5"

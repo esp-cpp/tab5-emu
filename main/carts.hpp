@@ -2,11 +2,17 @@
 
 #include <memory>
 
+#include "darkforces_cart.hpp"
+#include "doom_cart.hpp"
 #include "gba_cart.hpp"
+#include "gbc_cart.hpp"
 #include "genesis_cart.hpp"
 #include "jk_cart.hpp"
 #include "mgs_cart.hpp"
+#include "msx_cart.hpp"
+#include "nes_cart.hpp"
 #include "pico8_cart.hpp"
+#include "sms_cart.hpp"
 #include "snes_cart.hpp"
 #include "tpm_cart.hpp"
 
@@ -50,6 +56,26 @@ inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
   case Emulator::PICO8:
     return std::make_unique<Pico8Cart>(Cart::Config{
         .info = info, .copy_romdata = true, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::NES:
+    return std::make_unique<NesCart>(Cart::Config{
+        .info = info, .copy_romdata = true, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::GAMEBOY:
+  case Emulator::GAMEBOY_COLOR:
+    return std::make_unique<GbcCart>(Cart::Config{
+        .info = info, .copy_romdata = true, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::SEGA_MASTER_SYSTEM:
+  case Emulator::SEGA_GAME_GEAR:
+    return std::make_unique<SmsCart>(Cart::Config{
+        .info = info, .copy_romdata = true, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::MSX:
+    return std::make_unique<MsxCart>(Cart::Config{
+        .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::DOOM:
+    return std::make_unique<DoomCart>(Cart::Config{
+        .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::DARK_FORCES:
+    return std::make_unique<DarkForcesCart>(Cart::Config{
+        .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
   default:
     return nullptr;
   }
