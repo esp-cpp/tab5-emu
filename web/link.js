@@ -261,7 +261,16 @@ export class ControlError extends Error {}
 
 /** The emulator's control module (0x20) and the espp system service (7). */
 export class Control {
-  constructor(link) { this.link = link; }
+  constructor(link) { this.link = link; this.fileQueue = Promise.resolve(); }
+
+  /** Run `fn` after every earlier file change has finished: the device has one
+   *  open file across FILE_WRITE / FILE_CLOSE, and a metadata.csv edit is a
+   *  read-modify-write that another edit must not interleave with. */
+  exclusive(fn) {
+    const run = this.fileQueue.then(fn, fn);
+    this.fileQueue = run.catch(() => {});
+    return run;
+  }
 
   async call(type, payload = new Uint8Array(0), { timeoutMs = 15000, raw = false } = {}) {
     if (typeof payload === "string") payload = enc.encode(payload);
@@ -358,7 +367,7 @@ export class Control {
     }
   }
   mkdir(path) { return this.call(T.MKDIR, this.remote(path)); }
-  rm(path) { return this.call(T.FILE_DELETE, this.remote(path), { timeoutMs: 120000 }); }
+  rm(path) { return this.exclusive(() => this.call(T.FILE_DELETE, this.remote(path), { timeoutMs: 120000 })); }
 
   async readFile(path, progress) {
     const p = enc.encode(this.remote(path));
@@ -366,7 +375,8 @@ export class Control {
     return this.readChunks(st.size, (off, n) => this.call(T.FILE_READ, cat(u32le(off), u16le(n), p), { raw: true }), progress);
   }
 
-  async writeFile(path, data, progress) {
+  writeFile(path, data, progress) { return this.exclusive(() => this.writeFileNow(path, data, progress)); }
+  async writeFileNow(path, data, progress) {
     const p = enc.encode(this.remote(path));
     const chunk = 3584 - p.length; // the frame payload is at most 4096 bytes
     if (chunk < 256) throw new ControlError("path too long");
@@ -381,7 +391,10 @@ export class Control {
   }
 
   /** Add (or remove) a metadata.csv line; returns the number of games after the reload. */
-  async addRom(romPath, name, boxart = "", remove = false) {
+  addRom(romPath, name, boxart = "", remove = false) {
+    return this.exclusive(() => this.addRomNow(romPath, name, boxart, remove));
+  }
+  async addRomNow(romPath, name, boxart, remove) {
     const rel = romPath.startsWith(ROOT + "/") ? romPath.slice(ROOT.length + 1) : romPath;
     for (const [field, value] of [["ROM path", rel], ["boxart path", boxart], ["name", name]]) {
       if (/[\r\n]/.test(value) || (field !== "name" && value.includes(",")))
@@ -392,7 +405,7 @@ export class Control {
     const text = (await this.stat(meta)) ? dec.decode(await this.readFile(meta)) : "";
     const lines = text.split(/\r?\n/).filter((l) => l.trim() && l.split(",")[0].trim() !== rel);
     if (!remove) lines.push(`${rel}, ${boxart}, ${name}`);
-    await this.writeFile(meta, enc.encode(lines.join("\n") + "\n"));
+    await this.writeFileNow(meta, enc.encode(lines.join("\n") + "\n"));
     return (await this.reloadRoms()).total;
   }
 

@@ -29,6 +29,9 @@ const state = {
   tab: "dashboard", statusTimer: null, lastFrames: null, fpsHistory: [], memHistory: [],
   filter: "", search: "", cwd: ROOT, files: [], live: false, lastShot: null, slot: 1,
   boxart: new Map(), boxartQueue: [], boxartBusy: false, settings: null, serial: null,
+  // a device that comes back after the link was lost is opened again; off after
+  // a disconnect asked for here or a hand-off to another app (which takes it)
+  reconnect: true, reconnectGen: 0,
 };
 
 // ------------------------------------------------------------------ helpers --
@@ -95,7 +98,10 @@ async function connect(device) {
   }
   state.link = link;
   state.ctl = new Control(link);
+  state.reconnect = true;
   link.onclose = () => onLinkLost();
+  // input a page lost track of (its link died with a button held) is let go
+  state.ctl.buttons(0, 0).catch(() => {});
   try { state.discovery = await link.discover(); } catch (_) { state.discovery = null; }
   try { localStorage.setItem("emu-console-serial", link.serial); } catch (_) {}
   $("connectBtn").hidden = true; $("disconnectBtn").hidden = false;
@@ -114,9 +120,13 @@ async function connect(device) {
 async function disconnect() {
   clearInterval(state.statusTimer); state.statusTimer = null;
   stopLive();
-  const link = state.link;
+  const link = state.link, ctl = state.ctl;
+  // a button still held here would stay pressed in the game
+  if (heldMask && ctl && link?.reading) { try { await ctl.buttons(0, 0); } catch (_) {} }
+  releasePad();
   state.link = null; state.ctl = null; state.status = null; state.romsLoaded = false; state.settings = null;
   if (link) { link.onclose = null; await link.close(); }
+  forgetDevice();
   $("connectBtn").hidden = false; $("disconnectBtn").hidden = true;
   $("welcome").hidden = false;
   for (const p of document.querySelectorAll("[data-panel]")) p.hidden = true;
@@ -133,12 +143,31 @@ function onLinkLost() {
   });
 }
 
+// What this page knew about the device's card (box art, the last capture):
+// dropped with the link, so another board (or the same card changed meanwhile)
+// is not shown stale pictures. Reads still in flight check their session.
+function forgetDevice() {
+  for (const url of state.boxart.values()) if (url) URL.revokeObjectURL(url);
+  state.boxart.clear(); state.boxartQueue = [];
+  state.lastShot = null;
+  const c = $("screen"); c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  $("screenInfo").textContent = ""; $("savePngBtn").disabled = true;
+}
+
+// A disconnect asked for (the button, a hand-off): no automatic reconnection,
+// also not for a connect event already scheduled.
+async function disconnectByUser() {
+  state.reconnect = false; state.reconnectGen++; state.waitingFor = null;
+  await disconnect();
+}
+
 // a device that comes back (after a restart) is opened again without the chooser
 if (navigator.usb) {
   navigator.usb.addEventListener("connect", (ev) => {
-    if (state.link || !DEVICES[ev.device.serialNumber]) return;
+    if (state.link || !state.reconnect || !DEVICES[ev.device.serialNumber]) return;
     if (state.waitingFor && ev.device.serialNumber !== state.waitingFor) return;
-    setTimeout(() => connect(ev.device), 1200);
+    const gen = state.reconnectGen;
+    setTimeout(() => { if (!state.link && state.reconnect && gen === state.reconnectGen) connect(ev.device); }, 1200);
   });
 }
 
@@ -220,11 +249,13 @@ function renderStatus(prev) {
   $("panicCard").hidden = !st.last_panic;
   $("panicText").textContent = st.last_panic || "";
   $("coredumpLink").href = handoffUrl("coredump_console.html", MODULE.COREDUMP);
+  $("coredumpLink").onclick = (ev) => { ev.preventDefault(); handOff("coredump_console.html", MODULE.COREDUMP); };
   // the game started or ended: the list, the screen and the buttons follow
   if (prev && (prev.state !== st.state || prev.rom !== st.rom)) {
     if (state.tab === "library") renderLibrary();
     if (state.tab === "screen" && !state.live) capture();
   }
+  if (prev?.usb_drive && !st.usb_drive) forgetBoxartFailures();
   if (prev && prev.filter !== st.filter && state.tab === "library") { state.filter = st.filter || ""; renderLibrary(); }
 }
 
@@ -291,6 +322,11 @@ async function liveLoop() {
 function stopLive() { state.live = false; $("liveToggle").checked = false; }
 
 let heldMask = 0;
+// forget the held buttons and their pressed look (the link is going away)
+function releasePad() {
+  heldMask = 0;
+  for (const b of document.querySelectorAll("#pad .down-now")) b.classList.remove("down-now");
+}
 const setButtons = (mask) => {
   heldMask = mask;
   if (state.ctl) state.ctl.buttons(mask, 0).catch((e) => toast("Buttons: " + (e.message || e), true));
@@ -327,6 +363,7 @@ async function loadLibrary(force = false) {
     const roms = await guarded(() => state.ctl.roms());
     if (!roms) return;
     state.roms = roms; state.romsLoaded = true;
+    forgetBoxartFailures();
     state.filter = state.status?.filter || "";
     const folders = [...new Set(roms.map((r) => dirname(r.path).slice(ROOT.length + 1)).filter(Boolean))].sort();
     $("folders").replaceChildren(...folders.map((f) => h("option", { value: f })));
@@ -405,6 +442,12 @@ function observeArt() {
   for (const img of document.querySelectorAll("#lib img[data-art]")) if (!img.src) artObserver.observe(img);
 }
 
+// Missing box art is not asked for again on every status poll, only once the
+// card may have changed: the library reloaded, or the card back from the PC.
+function forgetBoxartFailures() {
+  for (const [path, url] of state.boxart) if (!url) state.boxart.delete(path);
+}
+
 function queueBoxart(path, done) {
   if (state.boxart.has(path)) { done(state.boxart.get(path)); return; }
   state.boxartQueue.push({ path, done });
@@ -416,13 +459,16 @@ async function pumpBoxart() {
   while (state.boxartQueue.length && state.ctl) {
     const { path, done } = state.boxartQueue.shift();
     if (state.boxart.has(path)) { done(state.boxart.get(path)); continue; }
+    const ctl = state.ctl;
     try {
-      const data = await state.ctl.readFile(path);
+      const data = await ctl.readFile(path);
+      if (ctl !== state.ctl) continue; // the link changed meanwhile: not this device's
       const url = URL.createObjectURL(new Blob([data], { type: "image/jpeg" }));
       state.boxart.set(path, url);
       done(url);
     } catch (_) {
-      state.boxart.set(path, null);
+      if (ctl !== state.ctl) continue;
+      state.boxart.set(path, null); // (forgotten again by forgetBoxartFailures())
       done(null);
     }
   }
@@ -631,7 +677,7 @@ async function handOff(app, moduleId) {
   const tab = window.open("about:blank", "_blank");
   if (!tab) { toast("Allow pop-ups for this page to open the app", true); return; }
   const url = handoffUrl(app, moduleId);
-  await disconnect();
+  await disconnectByUser();
   tab.location.href = url;
   toast("The device was handed to " + app + "; connect again here when you are done.");
 }
@@ -641,8 +687,10 @@ async function updateFirmware() {
   const tab = window.open("about:blank", "_blank");
   if (!tab) { toast("Allow pop-ups for this page to open the OTA console", true); return; }
   const url = handoffUrl("ota_console.html", MODULE.OTA);
-  try { await state.ctl.enterUpdater(); } catch (e) { tab.close(); toast(e.message || String(e), true); return; }
-  await disconnect();
+  // the updater comes up with the same serial: it is the OTA console's, not ours
+  state.reconnect = false; state.reconnectGen++;
+  try { await state.ctl.enterUpdater(); } catch (e) { state.reconnect = true; tab.close(); toast(e.message || String(e), true); return; }
+  await disconnectByUser();
   tab.location.href = url;
 }
 
@@ -724,7 +772,7 @@ function renderLog(fresh) {
 function init() {
   if (!navigator.usb) { $("unsupported").hidden = false; $("connectBtn").disabled = true; $("welcomeConnectBtn").disabled = true; }
   $("connectBtn").onclick = $("welcomeConnectBtn").onclick = () => connect();
-  $("disconnectBtn").onclick = () => disconnect();
+  $("disconnectBtn").onclick = () => disconnectByUser();
   for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => showTab(b.dataset.tab);
   for (const b of document.querySelectorAll("[data-goto]")) b.onclick = () => showTab(b.dataset.goto);
   $("nowQuitBtn").onclick = $("quitBtn").onclick = () => guarded(() => state.ctl.quit(), "Quit");
