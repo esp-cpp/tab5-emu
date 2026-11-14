@@ -203,9 +203,10 @@ class Control:
 
     def console_filter(self, console: str | None = None) -> dict:
         """Set the launcher's console filter (a console key such as "snes", or
-        "all"); with None, only report it. -> {filter, consoles}"""
+        "all"); with None, only report it (an empty request changes nothing on
+        the device). -> {filter, consoles}"""
         if console is None:
-            return self._call(CONSOLE_FILTER, b"?")  # a query: changes nothing
+            return self._call(CONSOLE_FILTER, b"")
         return self._call(CONSOLE_FILTER, (console or "all").encode())
 
     def reload_roms(self) -> int:

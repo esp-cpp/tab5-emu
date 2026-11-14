@@ -258,6 +258,8 @@ void Gui::update_rom_list() {
     return;
   }
   metadata_last_modified_ = mtime;
+  // (an open picker's consoles and counts are the old list's)
+  close_console_picker();
   // keep the selected game selected across a reload (its index may change);
   // at boot that is the last game played
   std::string selected_path;

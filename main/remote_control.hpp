@@ -132,9 +132,9 @@ public:
     RELOAD_ROMS = 0x0A, ///< () re-read metadata.csv
     ENTER_UPDATER = 0x0B, ///< () reboot into the updater app (ota_1) for an update
     SCREENSHOT_READ = 0x0C, ///< (u32 offset, u16 length) -> raw bytes of the held SCREENSHOT (short at the end)
-    /// (console key: text, e.g. "snes"; empty or "all" for every console; "?"
-    /// changes nothing, only reports) -> {filter, consoles: [keys]}: the
-    /// launcher's list shows only that console's games
+    /// (console key: text, e.g. "snes"; "all" for every console) -> {filter,
+    /// consoles: [keys]}: the launcher's list shows only that console's games.
+    /// An empty payload only reports them (nothing changes on the device).
     CONSOLE_FILTER = 0x0D,
     FILE_LIST = 0x10,  ///< (path[\0offset]) -> {entries: [{name, dir, size}], truncated?, next?}
     FILE_READ = 0x11,  ///< (u32 offset, u16 length, path) -> raw bytes (short at the end)
@@ -468,28 +468,33 @@ public:
       std::string key(text);
       std::transform(key.begin(), key.end(), key.begin(),
                      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-      if (key == "?") { // a query: report the filter without touching the list
-        json(filter_json());
+      if (key.empty()) {
+        json(filter_json()); // a query
         break;
       }
-      const auto present = gui_.consoles();
-      bool done = false;
-      if (key.empty() || key == "all") {
-        done = gui_.set_console_filter(std::nullopt);
-      } else {
-        const auto it = std::find_if(present.begin(), present.end(),
-                                     [&](Console c) { return key == console_info(c).key; });
-        if (it == present.end()) {
-          fail(fmt::format("no games for console '{}'", key));
-          break;
-        }
-        done = gui_.set_console_filter(*it);
-      }
-      if (!done) {
-        fail("the filter could not be set");
+      // On the main loop, as LAUNCH: a launch it has taken (ready_to_play, no
+      // cart yet) reads the selected game next, which a new filter can change.
+      // The GUI lock keeps a tap on the screen from starting one meanwhile.
+      bool pending = false, unknown = false, done = false;
+      if (!on_main([&] {
+            std::lock_guard<std::recursive_mutex> lk(BoxEmu::lvgl_mutex());
+            if ((pending = gui_.ready_to_play() && !current_cart())) return;
+            if (key == "all") {
+              done = gui_.set_console_filter(std::nullopt);
+              return;
+            }
+            const auto present = gui_.consoles();
+            const auto it = std::find_if(present.begin(), present.end(),
+                                         [&](Console c) { return key == console_info(c).key; });
+            if ((unknown = it == present.end())) return;
+            done = gui_.set_console_filter(*it);
+          }, std::chrono::seconds(2))) {
         break;
       }
-      json(filter_json());
+      if (pending) fail("a game is starting");
+      else if (unknown) fail(fmt::format("no games for console '{}'", key));
+      else if (!done) fail("the filter could not be set");
+      else json(filter_json());
       break;
     }
     case Type::FILE_LIST: {
