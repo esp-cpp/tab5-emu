@@ -29,9 +29,10 @@ const state = {
   tab: "dashboard", statusTimer: null, lastFrames: null, fpsHistory: [], memHistory: [],
   filter: "", search: "", cwd: ROOT, files: [], live: false, lastShot: null, slot: 1,
   boxart: new Map(), boxartQueue: [], boxartBusy: false, settings: null, serial: null,
-  // a device that comes back after the link was lost is opened again; off after
-  // a disconnect asked for here or a hand-off to another app (which takes it)
-  reconnect: true, reconnectGen: 0,
+  // a device that comes back is opened again without the chooser, unless the
+  // page let go of it on purpose (Disconnect, or a hand-off to another app)
+  autoReconnect: true,
+  session: 0, // bumped on every disconnect: replies for an older one are dropped
 };
 
 // ------------------------------------------------------------------ helpers --
@@ -42,26 +43,25 @@ function toast(text, err = false) {
   toast.timer = setTimeout(() => (t.hidden = true), err ? 6000 : 3000);
 }
 
-// One question at a time: the rest of the page is inert (no focus, no clicks)
-// while it is open, and focus goes back to where it was afterwards.
 function confirmModal(title, text, ok = "OK") {
   return new Promise((resolve) => {
-    confirmModal.pending?.(false); // (a question still open is answered "no")
-    const back = document.activeElement;
-    const others = [...document.body.children].filter((e) => e !== $("modal") && e !== $("toast") && !e.inert);
     $("modalTitle").textContent = title; $("modalText").textContent = text; $("modalOk").textContent = ok;
-    for (const e of others) e.inert = true;
+    // the page behind is inert (no Tab or clicks into it) until the answer
+    confirmModal.pending?.(false); // (a question still open is answered "no")
+    const back = [...document.body.children].filter((e) => e !== $("modal") && e !== $("toast") && !e.inert);
+    const opener = document.activeElement;
+    for (const e of back) e.inert = true;
     $("modal").hidden = false; $("modalOk").focus();
     const done = (v) => {
       confirmModal.pending = null;
       $("modal").hidden = true; $("modalOk").onclick = $("modalCancel").onclick = $("modal").onkeydown = null;
-      for (const e of others) e.inert = false;
-      if (back instanceof HTMLElement && back.isConnected) back.focus();
+      for (const e of back) e.inert = false;
+      opener?.focus?.();
       resolve(v);
     };
-    confirmModal.pending = done;
     $("modalOk").onclick = () => done(true);
     $("modalCancel").onclick = () => done(false);
+    confirmModal.pending = done;
     $("modal").onkeydown = (ev) => {
       if (ev.key === "Escape") { ev.preventDefault(); done(false); }
       // Tab stays on the two buttons
@@ -116,11 +116,12 @@ async function connect(device) {
   }
   state.link = link;
   state.ctl = new Control(link);
-  state.reconnect = true;
-  link.onclose = () => onLinkLost();
+  state.autoReconnect = true;
   // input a page lost track of (its link died with a button held) is let go
   state.ctl.buttons(0, 0).catch(() => {});
+  link.onclose = () => onLinkLost();
   try { state.discovery = await link.discover(); } catch (_) { state.discovery = null; }
+  if (state.link !== link) return; // (lost while discovering: already shown as disconnected)
   try { localStorage.setItem("emu-console-serial", link.serial); } catch (_) {}
   $("connectBtn").hidden = true; $("disconnectBtn").hidden = false;
   $("welcome").hidden = true;
@@ -139,12 +140,15 @@ async function disconnect() {
   clearInterval(state.statusTimer); state.statusTimer = null;
   stopLive();
   const link = state.link, ctl = state.ctl;
-  // a button still held here would stay pressed in the game
-  if (heldMask && ctl && link?.reading) { try { await ctl.buttons(0, 0); } catch (_) {} }
-  releasePad();
+  state.session++;
   state.link = null; state.ctl = null; state.status = null; state.romsLoaded = false; state.settings = null;
+  // a button held from this page would stay pressed in the game
+  if (heldMask && ctl) {
+    await Promise.race([ctl.buttons(0, 0).catch(() => {}), new Promise((r) => setTimeout(r, 500))]);
+  }
+  releasePad();
+  clearDeviceCaches();
   if (link) { link.onclose = null; await link.close(); }
-  forgetDevice();
   $("connectBtn").hidden = false; $("disconnectBtn").hidden = true;
   $("welcome").hidden = false;
   for (const p of document.querySelectorAll("[data-panel]")) p.hidden = true;
@@ -156,36 +160,29 @@ function onLinkLost() {
   const serial = state.link?.serial;
   disconnect().then(() => {
     setPill("warn", "Disconnected");
+    if (!state.autoReconnect) return; // (handed off: the updater went down with it)
     toast("The device went away (restarted or unplugged); it reconnects when it is back.");
     state.waitingFor = serial;
   });
 }
 
-// What this page knew about the device's card (box art, the last capture):
-// dropped with the link, so another board (or the same card changed meanwhile)
-// is not shown stale pictures. Reads still in flight check their session.
-function forgetDevice() {
+// Images and the last screenshot belong to the device (and SD card) they came
+// from: another board can have the same paths.
+function clearDeviceCaches() {
   for (const url of state.boxart.values()) if (url) URL.revokeObjectURL(url);
-  state.boxart.clear(); state.boxartQueue = [];
+  state.boxart.clear();
+  for (const { done } of state.boxartQueue.splice(0)) done(null);
   state.lastShot = null;
   const c = $("screen"); c.getContext("2d").clearRect(0, 0, c.width, c.height);
   $("screenInfo").textContent = ""; $("savePngBtn").disabled = true;
 }
 
-// A disconnect asked for (the button, a hand-off): no automatic reconnection,
-// also not for a connect event already scheduled.
-async function disconnectByUser() {
-  state.reconnect = false; state.reconnectGen++; state.waitingFor = null;
-  await disconnect();
-}
-
 // a device that comes back (after a restart) is opened again without the chooser
 if (navigator.usb) {
   navigator.usb.addEventListener("connect", (ev) => {
-    if (state.link || !state.reconnect || !DEVICES[ev.device.serialNumber]) return;
-    if (state.waitingFor && ev.device.serialNumber !== state.waitingFor) return;
-    const gen = state.reconnectGen;
-    setTimeout(() => { if (!state.link && state.reconnect && gen === state.reconnectGen) connect(ev.device); }, 1200);
+    const ok = () => state.autoReconnect && !state.link && DEVICES[ev.device.serialNumber] &&
+      (!state.waitingFor || ev.device.serialNumber === state.waitingFor);
+    if (ok()) setTimeout(() => { if (ok()) connect(ev.device); }, 1200);
   });
 }
 
@@ -267,7 +264,6 @@ function renderStatus(prev) {
   $("panicCard").hidden = !st.last_panic;
   $("panicText").textContent = st.last_panic || "";
   $("coredumpLink").href = handoffUrl("coredump_console.html", MODULE.COREDUMP);
-  $("coredumpLink").onclick = (ev) => { ev.preventDefault(); handOff("coredump_console.html", MODULE.COREDUMP); };
   // the game started or ended: the list, the screen and the buttons follow
   if (prev && (prev.state !== st.state || prev.rom !== st.rom)) {
     if (state.tab === "library") renderLibrary();
@@ -314,9 +310,10 @@ async function capture() {
   if (!state.ctl || capture.busy) return;
   capture.busy = true;
   const prog = $("screenProgress");
-  const t0 = performance.now();
+  const t0 = performance.now(), session = state.session;
   try {
     const f = await state.ctl.frame((n, total) => { prog.hidden = false; prog.max = total; prog.value = n; });
+    if (session !== state.session) return; // (disconnected meanwhile)
     const c = $("screen");
     c.width = f.width; c.height = f.height;
     c.getContext("2d").putImageData(rgb565ToImageData(f.data, f.width, f.height, f.format === "rgb565be"), 0, 0);
@@ -340,15 +337,15 @@ async function liveLoop() {
 function stopLive() { state.live = false; $("liveToggle").checked = false; }
 
 let heldMask = 0;
-// forget the held buttons and their pressed look (the link is going away)
-function releasePad() {
-  heldMask = 0;
-  for (const b of document.querySelectorAll("#pad .down-now")) b.classList.remove("down-now");
-}
 const setButtons = (mask) => {
   heldMask = mask;
   if (state.ctl) state.ctl.buttons(mask, 0).catch((e) => toast("Buttons: " + (e.message || e), true));
 };
+// forget the held buttons (the link is going: the device side is released by the caller)
+function releasePad() {
+  heldMask = 0;
+  for (const b of document.querySelectorAll("#pad .down-now")) b.classList.remove("down-now");
+}
 function initPad() {
   for (const b of document.querySelectorAll("#pad [data-btn]")) {
     const bit = BUTTONS[b.dataset.btn];
@@ -358,11 +355,22 @@ function initPad() {
     b.addEventListener("pointerup", up);
     b.addEventListener("pointercancel", up);
     b.addEventListener("lostpointercapture", up);
+    // the keyboard's activation keys on a focused pad button press that button
+    const activate = (ev) => ev.key === "Enter" || ev.key === " ";
+    b.addEventListener("keydown", (ev) => {
+      if (!activate(ev)) return;
+      ev.preventDefault(); ev.stopPropagation();
+      if (!ev.repeat) { b.classList.add("down-now"); setButtons(heldMask | bit); }
+    });
+    b.addEventListener("keyup", (ev) => { if (activate(ev)) { ev.stopPropagation(); up(); } });
+    b.addEventListener("blur", up);
   }
   const keys = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "a", x: "b", a: "x", s: "y", q: "l", w: "r", Enter: "start", Shift: "select" };
   const keyBit = (ev) => BUTTONS[keys[ev.key] || keys[ev.key.toLowerCase()]];
   addEventListener("keydown", (ev) => {
     if (state.tab !== "screen" || (ev.target instanceof Element && ev.target.matches("input, select, textarea")) || ev.repeat) return;
+    // (Enter / Space on a focused control activate it: Save, Load, Capture...)
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target instanceof Element && ev.target.closest("button, a")) return;
     const bit = keyBit(ev);
     if (!bit) return;
     ev.preventDefault(); setButtons(heldMask | bit);
@@ -477,16 +485,15 @@ async function pumpBoxart() {
   while (state.boxartQueue.length && state.ctl) {
     const { path, done } = state.boxartQueue.shift();
     if (state.boxart.has(path)) { done(state.boxart.get(path)); continue; }
-    const ctl = state.ctl;
+    const session = state.session;
     try {
-      const data = await ctl.readFile(path);
-      if (ctl !== state.ctl) continue; // the link changed meanwhile: not this device's
+      const data = await state.ctl.readFile(path);
+      if (session !== state.session) { done(null); continue; } // (another connection's now)
       const url = URL.createObjectURL(new Blob([data], { type: "image/jpeg" }));
       state.boxart.set(path, url);
       done(url);
     } catch (_) {
-      if (ctl !== state.ctl) continue;
-      state.boxart.set(path, null); // (forgotten again by forgetBoxartFailures())
+      if (session === state.session) state.boxart.set(path, null);
       done(null);
     }
   }
@@ -502,15 +509,23 @@ async function addGame(ev) {
   const romPath = `${ROOT}/${folder}/${rom.name}`;
   const artPath = art ? `${ROOT}/boxart/${art.name}` : "";
   const msg = $("addMsg");
+  // every step on the board it started on (see uploadFiles)
+  const ctl = state.ctl;
+  const still = () => { if (state.ctl !== ctl) throw new Error("Disconnected: the game was not added"); };
   try {
     msg.textContent = "Copying the ROM…";
-    await state.ctl.writeFile(romPath, new Uint8Array(await rom.arrayBuffer()), (n, t) => (msg.textContent = `ROM ${Math.round((n / t) * 100)}%`));
+    const romData = new Uint8Array(await rom.arrayBuffer());
+    still();
+    await ctl.writeFile(romPath, romData, (n, t) => (msg.textContent = `ROM ${Math.round((n / t) * 100)}%`));
     if (art) {
       msg.textContent = "Copying the boxart…";
-      await state.ctl.writeFile(artPath, new Uint8Array(await art.arrayBuffer()));
+      const artData = new Uint8Array(await art.arrayBuffer());
+      still();
+      await ctl.writeFile(artPath, artData);
     }
+    still();
     msg.textContent = "Adding to metadata.csv…";
-    const total = await state.ctl.addRom(romPath, name, artPath ? artPath.slice(ROOT.length + 1) : "");
+    const total = await ctl.addRom(romPath, name, artPath ? artPath.slice(ROOT.length + 1) : "");
     msg.textContent = `Added: ${total} games now.`;
     $("addGame").reset();
     loadLibrary(true);
@@ -571,17 +586,22 @@ async function downloadFile(path, size) {
 }
 
 async function uploadFiles(files) {
+  // where they were dropped, on the device they were dropped on (the folder
+  // shown can change while they are copied)
+  const dir = state.cwd, ctl = state.ctl;
   for (const f of files) {
+    if (state.ctl !== ctl) break; // (disconnected)
     try {
       const data = new Uint8Array(await f.arrayBuffer());
-      await state.ctl.writeFile(state.cwd + "/" + f.name, data, (n, t) => transfer(`Copying ${f.name} (${fmtBytes(n)} of ${fmtBytes(t)})`, n, t));
+      if (state.ctl !== ctl) break;
+      await ctl.writeFile(dir + "/" + f.name, data, (n, t) => transfer(`Copying ${f.name} (${fmtBytes(n)} of ${fmtBytes(t)})`, n, t));
     } catch (e) {
       toast(`${f.name}: ${e.message || e}`, true);
       break;
     }
   }
   transfer("");
-  loadFiles(state.cwd);
+  if (state.ctl === ctl) loadFiles(state.cwd);
 }
 
 async function deletePath(path, dir) {
@@ -604,7 +624,11 @@ async function loadSettings() {
   const r = await guarded(() => state.ctl.settings());
   if (!r) { $("settingsForm").replaceChildren(h("p", { class: "muted" }, "This firmware has no settings over USB (control protocol 4).")); return; }
   state.settings = r;
-  const send = debounce((name, value) => guarded(() => state.ctl.settings(`${name}=${value}`)), 250);
+  // (a change still waiting when this connection ends is dropped, not sent to the next one)
+  const ctl = state.ctl, session = state.session;
+  const send = debounce((name, value) => {
+    if (state.session === session) guarded(() => ctl.settings(`${name}=${value}`));
+  }, 250);
   $("settingsForm").replaceChildren(...Object.entries(r.settings).map(([name, value]) => {
     const info = SETTING_INFO[name] || { label: name };
     const [min, max] = r.limits[name] || [0, 100];
@@ -695,7 +719,8 @@ async function handOff(app, moduleId) {
   const tab = window.open("about:blank", "_blank");
   if (!tab) { toast("Allow pop-ups for this page to open the app", true); return; }
   const url = handoffUrl(app, moduleId);
-  await disconnectByUser();
+  state.autoReconnect = false; // (the app has it now)
+  await disconnect();
   tab.location.href = url;
   toast("The device was handed to " + app + "; connect again here when you are done.");
 }
@@ -705,10 +730,10 @@ async function updateFirmware() {
   const tab = window.open("about:blank", "_blank");
   if (!tab) { toast("Allow pop-ups for this page to open the OTA console", true); return; }
   const url = handoffUrl("ota_console.html", MODULE.OTA);
-  // the updater comes up with the same serial: it is the OTA console's, not ours
-  state.reconnect = false; state.reconnectGen++;
-  try { await state.ctl.enterUpdater(); } catch (e) { state.reconnect = true; tab.close(); toast(e.message || String(e), true); return; }
-  await disconnectByUser();
+  // the updater comes up with the same serial: it is the OTA console's to open
+  state.autoReconnect = false;
+  try { await state.ctl.enterUpdater(); } catch (e) { state.autoReconnect = true; tab.close(); toast(e.message || String(e), true); return; }
+  await disconnect();
   tab.location.href = url;
 }
 
@@ -790,7 +815,9 @@ function renderLog(fresh) {
 function init() {
   if (!navigator.usb) { $("unsupported").hidden = false; $("connectBtn").disabled = true; $("welcomeConnectBtn").disabled = true; }
   $("connectBtn").onclick = $("welcomeConnectBtn").onclick = () => connect();
-  $("disconnectBtn").onclick = () => disconnectByUser();
+  $("disconnectBtn").onclick = () => { state.autoReconnect = false; disconnect(); };
+  // (as the System tab's Open app buttons: the core dump console needs the device)
+  $("coredumpLink").onclick = (e) => { e.preventDefault(); handOff("coredump_console.html", MODULE.COREDUMP); };
   for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => showTab(b.dataset.tab);
   for (const b of document.querySelectorAll("[data-goto]")) b.onclick = () => showTab(b.dataset.goto);
   $("nowQuitBtn").onclick = $("quitBtn").onclick = () => guarded(() => state.ctl.quit(), "Quit");

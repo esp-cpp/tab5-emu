@@ -214,12 +214,13 @@ export class UsbLink {
     });
     const frame = buildFrame(module, type, payload, corr);
     const sent = this.sendQueue.then(() => this.send(frame));
-    this.sendQueue = sent.catch(() => {});
-    return sent.then(() => reply, (e) => {
+    this.sendQueue = sent.catch(() => {
       const w = this.waiters.get(corr);
       if (w) { clearTimeout(w.timer); this.waiters.delete(corr); }
-      throw e;
     });
+    // (both observed at once: a timeout or a lost link while the frame is
+    // still queued rejects now, and never as an unhandled rejection)
+    return Promise.all([sent, reply]).then(([, f]) => f);
   }
 
   /** The dispatcher's module list: {name, firmware, modules: [{id, name, protocol, version, ...}]}. */
@@ -261,22 +262,29 @@ export class ControlError extends Error {}
 
 /** The emulator's control module (0x20) and the espp system service (7). */
 export class Control {
-  constructor(link) { this.link = link; this.fileQueue = Promise.resolve(); this.mainQueue = Promise.resolve(); }
+  constructor(link) {
+    this.link = link;
+    this.ops = Promise.resolve(); // see exclusive()
+    this.mainOps = Promise.resolve(); // see onMain()
+  }
 
-  static queue(owner, key, fn) {
-    const run = owner[key].then(fn, fn);
-    owner[key] = run.catch(() => {});
+  /** Requests that need the device's main loop run one at a time: a screenshot
+   *  holds the game (the main loop) until its last chunk is read, so a save,
+   *  load, quit or launch sent meanwhile would stall the capture. */
+  onMain(fn) {
+    const run = this.mainOps.then(() => fn());
+    this.mainOps = run.catch(() => {});
     return run;
   }
-  /** Run `fn` after every earlier file operation has finished: the device has
-   *  one open file across FILE_WRITE / FILE_CLOSE (which a read of the same
-   *  file closes), and a metadata.csv edit is a read-modify-write that another
-   *  edit must not interleave with. */
-  exclusive(fn) { return Control.queue(this, "fileQueue", fn); }
-  /** Run `fn` after the earlier requests that need the device's main loop: a
-   *  screenshot holds the game (the main loop) until its last chunk is read,
-   *  so a save, load, quit or launch sent meanwhile would stall the capture. */
-  onMain(fn) { return Control.queue(this, "mainQueue", fn); }
+
+  // Operations made of several requests that share the device's state (a file
+  // written in parts, metadata.csv read, changed and written back) run one at
+  // a time: two at once would interleave their writes or lose an edit.
+  exclusive(fn) {
+    const run = this.ops.then(() => fn());
+    this.ops = run.catch(() => {});
+    return run;
+  }
 
   async call(type, payload = new Uint8Array(0), { timeoutMs = 15000, raw = false } = {}) {
     if (typeof payload === "string") payload = enc.encode(payload);
@@ -378,6 +386,7 @@ export class Control {
   mkdir(path) { return this.call(T.MKDIR, this.remote(path)); }
   rm(path) { return this.exclusive(() => this.call(T.FILE_DELETE, this.remote(path), { timeoutMs: 120000 })); }
 
+  // (queued too: a read alongside a write of the same file could see part of it)
   readFile(path, progress) { return this.exclusive(() => this.readFileNow(path, progress)); }
   async readFileNow(path, progress) {
     const p = enc.encode(this.remote(path));
