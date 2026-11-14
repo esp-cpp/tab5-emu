@@ -101,6 +101,54 @@ https://github.com/user-attachments/assets/641a64b0-b3af-429b-8582-a38fc9a5cdad
 <img src="docs/images/gba-title.jpg" width="32%"> <img src="docs/images/gba-town.jpg" width="32%">
 </p>
 
+## Web Console
+
+Plug the Tab5 into a computer and it brings its own control panel. Chrome or
+Edge pops up a notification for
+**[esp-cpp.github.io/tab5-emu](https://esp-cpp.github.io/tab5-emu/)**, the
+firmware's WebUSB landing page: click it, pick the Tab5, and the page talks
+to the device straight from the browser. There's nothing to install and no
+server in between.
+
+<p>
+<img src="docs/images/web-console-screen.jpg" alt="Web console Screen tab: a capture of Donkey Kong Country next to an on-screen controller and save-state buttons" width="49%"> <img src="docs/images/web-console-library.jpg" alt="Web console Library tab: Super Nintendo games with boxart, console filters and Play / Remove buttons" width="49%">
+</p>
+
+- **Dashboard**: what's running (with its boxart), live frame-rate and
+  memory graphs, the firmware and partition, the last reset reason, and a
+  button that hands the SD card to the PC as a USB drive.
+- **Screen**: capture the game's or the launcher's screen (or keep it
+  **Live**), save it as a PNG, play with the on-screen controller or the
+  keyboard (arrows, Z / X / A / S, Q / W for L / R, Enter = Start), save and
+  load states, quit.
+- **Library**: the games by console with their boxart and counts. Search,
+  filter (the launcher too, if you like), **Play** any of them, or **Add a
+  game**: choose the ROM and its cover and the page uploads both and adds the
+  `metadata.csv` line. **Remove** undoes it.
+- **Files**: browse the SD card, download, upload by drag and drop, new
+  folder, delete.
+- **Settings**: volume, mute, brightness, video scaling and resume last save,
+  shown in the launcher at once and saved to the card a moment later.
+- **System**: chip, memory, ESP-IDF, OTA state and the services on the link;
+  restart (or into download mode), and **Update firmware**, which restarts
+  into the updater and opens the espp OTA console for `build/tab5-emu.bin`.
+- **Console**: the log over Web Serial (pick the console's port), filtered,
+  followed, saved to a file.
+
+<p>
+<img src="docs/images/web-console-dashboard.jpg" alt="Web console Dashboard: Donkey Kong Country running, with performance, memory, device and SD card panels" width="32%"> <img src="docs/images/web-console-settings.jpg" alt="Web console Settings tab: volume, mute, brightness, video scaling and resume last save" width="32%"> <img src="docs/images/web-console-system.jpg" alt="Web console System tab: ESP32-P4 details, firmware update and restart" width="32%">
+</p>
+
+How it works: the composite USB device has a vendor (WebUSB) interface that
+carries the same link as `tools/emulink`, and its descriptor names the
+landing page, which is how the browser knows where to go. The page is plain
+HTML, CSS and ES modules in [`web/`](./web) (shared with esp-box-emu, no build
+step), published to GitHub Pages from `main`. One program owns the link at a
+time, so close `emulink` before opening the page and the other way round. To
+work on the page, `python3 -m http.server -d web 8000` and open
+http://localhost:8000 (WebUSB needs https or localhost); [`web/README.md`](./web/README.md)
+has the details.
+
 ## Hardware
 
 | | |

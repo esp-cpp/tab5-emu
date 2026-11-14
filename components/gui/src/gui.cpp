@@ -1,5 +1,7 @@
 #include "gui.hpp"
 
+#include <cmath>
+
 #include "lvgl_private.h"
 
 #include <algorithm>
@@ -508,6 +510,54 @@ void Gui::picker_event(lv_event_t *e) {
     gui->close_console_picker();
     gui->set_console_filter(console < 0 ? std::nullopt : std::optional<Console>(static_cast<Console>(console)));
   }
+}
+
+namespace {
+struct SettingLimit {
+  const char *name;
+  int min, max;
+};
+// (the same ranges as the launcher's own sliders)
+constexpr SettingLimit kSettingLimits[] = {
+    {"volume", 0, 100}, {"muted", 0, 1}, {"brightness", 5, 100}, {"video", 0, 2}, {"resume", 0, 1}};
+} // namespace
+
+std::string Gui::settings_json() const {
+  auto &emu = Tab5Emu::get();
+  const auto s = AppSettings::get().get_settings();
+  std::string limits;
+  for (const auto &l : kSettingLimits) {
+    limits += fmt::format("{}\"{}\":[{},{}]", limits.empty() ? "" : ",", l.name, l.min, l.max);
+  }
+  return fmt::format("{{\"settings\":{{\"volume\":{},\"muted\":{},\"brightness\":{},\"video\":{},\"resume\":{}}},"
+                     "\"limits\":{{{}}}}}",
+                     (int)std::lround(emu.volume()), emu.is_muted() ? 1 : 0, (int)std::lround(emu.brightness()),
+                     (int)emu.video_setting(),
+                     s.resume_last_save ? 1 : 0, limits);
+}
+
+bool Gui::set_setting(const std::string &name, int value) {
+  const auto *limit = std::find_if(std::begin(kSettingLimits), std::end(kSettingLimits),
+                                   [&](const SettingLimit &l) { return name == l.name; });
+  if (limit == std::end(kSettingLimits) || value < limit->min || value > limit->max) {
+    return false;
+  }
+  std::lock_guard<std::recursive_mutex> lk(mutex_);
+  auto &emu = Tab5Emu::get();
+  // (saved to the SD card by the main loop once the changes stop, as from the launcher)
+  AppSettings::get().modify([&](Settings &s) {
+    if (name == "volume") s.volume = value;
+    else if (name == "muted") s.muted = value != 0;
+    else if (name == "brightness") s.brightness = value;
+    else if (name == "video") s.video_setting = value;
+    else if (name == "resume") s.resume_last_save = value != 0;
+  });
+  if (name == "volume") emu.volume(value);
+  else if (name == "muted") emu.mute(value != 0);
+  else if (name == "brightness") emu.brightness(value);
+  else if (name == "video") emu.video_setting(static_cast<VideoSetting>(value));
+  update_shared_state(); // the launcher's controls show it
+  return true;
 }
 
 Gui::Snapshot Gui::snapshot() {
