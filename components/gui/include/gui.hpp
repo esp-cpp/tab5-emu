@@ -64,14 +64,36 @@ public:
     return rom_infos_;
   }
 
-  /// Select the first game whose name or rom path contains `text`
+  /// Select the first game whose name or rom path contains `text` (a game
+  /// the console filter hides lifts the filter)
   bool select_rom_matching(std::string_view text);
+
+  /// The consoles that have games, in list order.
+  std::vector<Console> consoles() const;
+  /// The console whose games the list shows, if it is filtered.
+  std::optional<Console> console_filter() const;
+  /// Show only `console`'s games (nullopt: every console's); false if it has none.
+  bool set_console_filter(std::optional<Console> console);
+
+  /// The launcher screen (RGB565, little endian, rows packed), for the USB
+  /// link's screenshot when no game runs; empty if it cannot be drawn.
+  struct Snapshot {
+    size_t width{0}, height{0};
+    std::vector<uint8_t> pixels;
+  };
+  Snapshot snapshot();
 
 protected:
   void init_ui();
   void deinit_ui();
   void update_shared_state();
   void select_rom(int index);
+  void build_list(int keep_rom);
+  void step_console(int dir);
+  void update_filter_marker();
+  void open_console_picker();
+  void close_console_picker();
+  static void picker_event(lv_event_t *e);
   void update();
 
   void on_volume(const std::vector<uint8_t> &data);
@@ -108,7 +130,13 @@ protected:
   lv_obj_t *video_dropdown_{nullptr};
   lv_obj_t *resume_switch_{nullptr};
   lv_obj_t *battery_label_{nullptr};
-  std::vector<lv_obj_t *> rom_buttons_;
+  std::vector<lv_obj_t *> rom_buttons_; ///< per game (rom_infos_ index); nullptr if filtered out
+
+  // the console filter: the Console whose games the list shows, -1 all
+  int filter_{-1};
+  lv_obj_t *picker_{nullptr};        ///< the console picker, while it is open
+  lv_group_t *picker_group_{nullptr};
+  std::vector<int> picker_consoles_; ///< the picker's rows: Console, -1 all
 
   std::string metadata_filename_;
   std::filesystem::file_time_type metadata_last_modified_{};

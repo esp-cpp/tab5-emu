@@ -224,6 +224,14 @@ DualShock numbering, Backbone Pro quirks. Keyboards: arrows, Z/X/A/S, Enter,
 Shift/Backspace, Q/W (L/R) and E/R (L2/R2) map to the gamepad for the
 emulators.
 
+In the launcher, left / right on the game list go to the previous / next
+console's games. Tapping the console above the boxart (or X on a gamepad, F
+on a keyboard) opens the console picker, which shows only one console's
+games, or all of them again; an outline on the console means the list is
+filtered, and left / right then move the filter to the next console.
+`emulink filter <console>` (snes, gba, genesis, playstation, pc, pico8 or
+all) does the same over USB.
+
 Jedi Knight gets the full keyboard and mouse look; on a gamepad the left
 stick strafes, the right stick looks, R = fire, L = secondary fire, A =
 activate, B = jump, X = crouch, Y = use item.
