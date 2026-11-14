@@ -107,6 +107,10 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 #if defined(ENABLE_MSX)
       platform = Emulator::MSX;
 #endif
+    } else if (endsWith(lp, ".scummvm")) { // scummvm (star trek: 25th anniversary, ...)
+#if defined(ENABLE_SCUMMVM)
+      platform = Emulator::SCUMMVM;
+#endif
     } else if (endsWith(lp, "slus_008.84")) { // star wars episode i: the phantom menace
 #if defined(ENABLE_TPM)
       platform = Emulator::TPM;
@@ -148,6 +152,7 @@ Console console_of(Emulator platform) {
   case Emulator::JEDI_KNIGHT:
   case Emulator::DARK_FORCES:
   case Emulator::DOOM:
+  case Emulator::SCUMMVM:
     return Console::PC;
   case Emulator::PICO8:
     return Console::PICO8;

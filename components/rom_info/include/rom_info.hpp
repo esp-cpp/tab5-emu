@@ -10,7 +10,7 @@
 
 enum class Emulator {
   UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA, MGS, TPM, PICO8,
-  NES, GAMEBOY, GAMEBOY_COLOR, SEGA_MASTER_SYSTEM, SEGA_GAME_GEAR, MSX, DOOM
+  NES, GAMEBOY, GAMEBOY_COLOR, SEGA_MASTER_SYSTEM, SEGA_GAME_GEAR, MSX, DOOM, SCUMMVM
 };
 
 struct RomInfo {
@@ -57,6 +57,9 @@ const ConsoleInfo &console_info(Console console);
 ///   - "*.gb" / "*.gbc"               : Game Boy / Game Boy Color
 ///   - "*.sms" / "*.gg"               : Master System / Game Gear
 ///   - "*.rom"                        : MSX
+///   - "*.scummvm"                    : a ScummVM game (a marker file: the
+///                                      directory containing it holds the
+///                                      game's files; ScummVM detects which)
 ///   - "STAGE.DIR" / "*.mgs"          : Metal Gear Solid (the directory containing
 ///                                      the file holds the extracted disc files)
 ///   - "*.p8" / "*.p8.png"            : PICO-8 cart
@@ -98,6 +101,8 @@ template <> struct fmt::formatter<Emulator> {
       return fmt::format_to(ctx.out(), "MSX");
     case Emulator::DOOM:
       return fmt::format_to(ctx.out(), "DOOM");
+    case Emulator::SCUMMVM:
+      return fmt::format_to(ctx.out(), "SCUMMVM");
     default:
       return fmt::format_to(ctx.out(), "UNKNOWN");
     }

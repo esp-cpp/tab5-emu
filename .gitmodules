@@ -45,3 +45,7 @@
 	path = components/darkforces/TheForceEngine
 	url = https://github.com/esp-cpp/TheForceEngine.git
 	branch = main
+[submodule "components/scummvm/scummvm"]
+	path = components/scummvm/scummvm
+	url = https://github.com/esp-cpp/scummvm.git
+	branch = esp32p4

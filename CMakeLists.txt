@@ -43,6 +43,8 @@ set(MSX_COMPONENTS msx)
 set(DOOM_COMPONENTS doom)
 ### Dark Forces (The Force Engine) ###
 set(DARK_FORCES_COMPONENTS darkforces)
+### ScummVM (esp-cpp/scummvm: Star Trek: 25th Anniversary / Judgment Rites) ###
+set(SCUMMVM_COMPONENTS scummvm)
 
 if(JK_COMPONENTS)
   add_compile_definitions(ENABLE_JK)
@@ -84,6 +86,9 @@ endif()
 if(DARK_FORCES_COMPONENTS)
   add_compile_definitions(ENABLE_DARKFORCES)
 endif()
+if(SCUMMVM_COMPONENTS)
+  add_compile_definitions(ENABLE_SCUMMVM)
+endif()
 
 set(GAME_COMPONENTS
   ${JK_COMPONENTS}
@@ -99,6 +104,7 @@ set(GAME_COMPONENTS
   ${MSX_COMPONENTS}
   ${DOOM_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
+  ${SCUMMVM_COMPONENTS}
   )
 
 set(

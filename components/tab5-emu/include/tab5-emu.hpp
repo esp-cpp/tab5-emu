@@ -290,6 +290,8 @@ public:
   /// Set the on-screen size (in logical landscape pixels) the native frame is
   /// scaled to. It is centered on the screen.
   void display_size(size_t width, size_t height);
+  /// The size the frame is shown at (centered on the display)
+  std::pair<size_t, size_t> display_size() const { return {display_width_, display_height_}; }
   /// Set the native (game) frame size; pitch is in pixels (defaults to width)
   void native_size(size_t width, size_t height, int pitch = -1);
   const uint16_t *palette() const { return palette_; }

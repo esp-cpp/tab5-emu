@@ -12,6 +12,7 @@
 #include "msx_cart.hpp"
 #include "nes_cart.hpp"
 #include "pico8_cart.hpp"
+#include "scummvm_cart.hpp"
 #include "sms_cart.hpp"
 #include "snes_cart.hpp"
 #include "tpm_cart.hpp"
@@ -75,6 +76,9 @@ inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
         .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
   case Emulator::DARK_FORCES:
     return std::make_unique<DarkForcesCart>(Cart::Config{
+        .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
+  case Emulator::SCUMMVM:
+    return std::make_unique<ScummvmCart>(Cart::Config{
         .info = info, .copy_romdata = false, .verbosity = espp::Logger::Verbosity::INFO});
   default:
     return nullptr;
