@@ -27,3 +27,8 @@ add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
           ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --data
   COMMENT "Moving ScummVM's .bss and .data to PSRAM"
   VERBATIM)
+# ScummVM's allocations prefer PSRAM (backends/platform/esp32/esp32-system.cpp)
+add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+  COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${SVM}/backends/platform/esp32/psram_alloc.syms $<TARGET_FILE:${COMPONENT_LIB}>
+  COMMENT "Sending ScummVM's allocations to PSRAM"
+  VERBATIM)
