@@ -94,12 +94,12 @@ plan and its history are in [docs/PLAN.md](docs/PLAN.md).
 | Genesis / Mega Drive | gwenesis (shared with esp-box-emu) | full speed |
 | SNES | snes9x2005 | full speed |
 | Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
-| NES | nofrendo (shared with esp-box-emu) | new, not yet benchmarked |
-| Game Boy / Color | gnuboy (shared with esp-box-emu) | new, not yet benchmarked |
-| Master System / Game Gear | SMS Plus (shared with esp-box-emu) | new, not yet benchmarked |
-| MSX | fMSX (shared with esp-box-emu) | new, not yet benchmarked |
-| Doom | PrBoom (shared with esp-box-emu) | new, not yet benchmarked |
-| Dark Forces | The Force Engine (shared with esp-box-emu) | new, not yet benchmarked |
+| NES | nofrendo (shared with esp-box-emu) | full speed (~3 ms a frame) |
+| Game Boy / Color | gnuboy (shared with esp-box-emu) | full speed |
+| Master System / Game Gear | SMS Plus (shared with esp-box-emu) | full speed |
+| MSX | fMSX (shared with esp-box-emu) | runs (Metal Gear) |
+| Doom | PrBoom (shared with esp-box-emu) | ~35 fps (shareware demo) |
+| Dark Forces | The Force Engine (shared with esp-box-emu) | ~50 fps in the first level |
 
 The cores shared with esp-box-emu are submodules (the core plus its `port/`
 glue, written against `BoxEmu`, which the Tab5 aliases to `Tab5Emu`), so a
