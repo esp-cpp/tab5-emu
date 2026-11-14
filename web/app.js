@@ -42,13 +42,31 @@ function toast(text, err = false) {
   toast.timer = setTimeout(() => (t.hidden = true), err ? 6000 : 3000);
 }
 
+// One question at a time: the rest of the page is inert (no focus, no clicks)
+// while it is open, and focus goes back to where it was afterwards.
 function confirmModal(title, text, ok = "OK") {
   return new Promise((resolve) => {
+    confirmModal.pending?.(false); // (a question still open is answered "no")
+    const back = document.activeElement;
+    const others = [...document.body.children].filter((e) => e !== $("modal") && e !== $("toast") && !e.inert);
     $("modalTitle").textContent = title; $("modalText").textContent = text; $("modalOk").textContent = ok;
+    for (const e of others) e.inert = true;
     $("modal").hidden = false; $("modalOk").focus();
-    const done = (v) => { $("modal").hidden = true; $("modalOk").onclick = $("modalCancel").onclick = null; resolve(v); };
+    const done = (v) => {
+      confirmModal.pending = null;
+      $("modal").hidden = true; $("modalOk").onclick = $("modalCancel").onclick = $("modal").onkeydown = null;
+      for (const e of others) e.inert = false;
+      if (back instanceof HTMLElement && back.isConnected) back.focus();
+      resolve(v);
+    };
+    confirmModal.pending = done;
     $("modalOk").onclick = () => done(true);
     $("modalCancel").onclick = () => done(false);
+    $("modal").onkeydown = (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); done(false); }
+      // Tab stays on the two buttons
+      if (ev.key === "Tab") { ev.preventDefault(); (document.activeElement === $("modalOk") ? $("modalCancel") : $("modalOk")).focus(); }
+    };
   });
 }
 

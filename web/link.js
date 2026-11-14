@@ -261,16 +261,22 @@ export class ControlError extends Error {}
 
 /** The emulator's control module (0x20) and the espp system service (7). */
 export class Control {
-  constructor(link) { this.link = link; this.fileQueue = Promise.resolve(); }
+  constructor(link) { this.link = link; this.fileQueue = Promise.resolve(); this.mainQueue = Promise.resolve(); }
 
-  /** Run `fn` after every earlier file change has finished: the device has one
-   *  open file across FILE_WRITE / FILE_CLOSE, and a metadata.csv edit is a
-   *  read-modify-write that another edit must not interleave with. */
-  exclusive(fn) {
-    const run = this.fileQueue.then(fn, fn);
-    this.fileQueue = run.catch(() => {});
+  static queue(owner, key, fn) {
+    const run = owner[key].then(fn, fn);
+    owner[key] = run.catch(() => {});
     return run;
   }
+  /** Run `fn` after every earlier file operation has finished: the device has
+   *  one open file across FILE_WRITE / FILE_CLOSE (which a read of the same
+   *  file closes), and a metadata.csv edit is a read-modify-write that another
+   *  edit must not interleave with. */
+  exclusive(fn) { return Control.queue(this, "fileQueue", fn); }
+  /** Run `fn` after the earlier requests that need the device's main loop: a
+   *  screenshot holds the game (the main loop) until its last chunk is read,
+   *  so a save, load, quit or launch sent meanwhile would stall the capture. */
+  onMain(fn) { return Control.queue(this, "mainQueue", fn); }
 
   async call(type, payload = new Uint8Array(0), { timeoutMs = 15000, raw = false } = {}) {
     if (typeof payload === "string") payload = enc.encode(payload);
@@ -306,13 +312,13 @@ export class Control {
     }
   }
 
-  launch(match) { return this.call(T.LAUNCH, match, { timeoutMs: 30000 }); }
-  quit() { return this.call(T.QUIT, undefined, { timeoutMs: 30000 }); }
+  launch(match) { return this.onMain(() => this.call(T.LAUNCH, match, { timeoutMs: 30000 })); }
+  quit() { return this.onMain(() => this.call(T.QUIT, undefined, { timeoutMs: 30000 })); }
   buttons(mask, holdMs = 0) { return this.call(T.BUTTONS, cat(u16le(mask), u16le(holdMs)), { timeoutMs: holdMs + 5000 }); }
-  save(slot) { return this.call(T.SAVE, new Uint8Array([slot]), { timeoutMs: 60000 }); }
-  load(slot) { return this.call(T.LOAD, new Uint8Array([slot]), { timeoutMs: 60000 }); }
-  usbDrive(host) { return this.call(T.USB_DRIVE, new Uint8Array([host ? 1 : 0]), { timeoutMs: 20000 }); }
-  reloadRoms() { return this.call(T.RELOAD_ROMS); }
+  save(slot) { return this.onMain(() => this.call(T.SAVE, new Uint8Array([slot]), { timeoutMs: 60000 })); }
+  load(slot) { return this.onMain(() => this.call(T.LOAD, new Uint8Array([slot]), { timeoutMs: 60000 })); }
+  usbDrive(host) { return this.onMain(() => this.call(T.USB_DRIVE, new Uint8Array([host ? 1 : 0]), { timeoutMs: 20000 })); }
+  reloadRoms() { return this.onMain(() => this.call(T.RELOAD_ROMS)); }
   enterUpdater() { return this.call(T.ENTER_UPDATER); }
   consoleFilter(key) { return this.call(T.CONSOLE_FILTER, key || "all"); }
   settings(change) { return this.call(T.SETTINGS, change || ""); }
@@ -338,7 +344,8 @@ export class Control {
   }
 
   /** The running game's frame, or the launcher's screen: {width, height, format, source, data}. */
-  async frame(progress) {
+  frame(progress) { return this.onMain(() => this.frameNow(progress)); }
+  async frameNow(progress) {
     const info = await this.call(T.SCREENSHOT, undefined, { timeoutMs: 15000 });
     // (the last chunk read lets the game go on: it must be the last one asked for)
     const last = Math.max(0, info.size - 4000 > 0 ? info.size - ((info.size % 4000) || 4000) : 0);
@@ -371,7 +378,8 @@ export class Control {
   mkdir(path) { return this.call(T.MKDIR, this.remote(path)); }
   rm(path) { return this.exclusive(() => this.call(T.FILE_DELETE, this.remote(path), { timeoutMs: 120000 })); }
 
-  async readFile(path, progress) {
+  readFile(path, progress) { return this.exclusive(() => this.readFileNow(path, progress)); }
+  async readFileNow(path, progress) {
     const p = enc.encode(this.remote(path));
     const st = await this.call(T.FILE_STAT, p);
     return this.readChunks(st.size, (off, n) => this.call(T.FILE_READ, cat(u32le(off), u16le(n), p), { raw: true }), progress);
@@ -406,7 +414,7 @@ export class Control {
     }
     const meta = "metadata.csv";
     // only a missing file starts an empty list: a failed read must not rewrite it
-    const text = (await this.stat(meta)) ? dec.decode(await this.readFile(meta)) : "";
+    const text = (await this.stat(meta)) ? dec.decode(await this.readFileNow(meta)) : "";
     const lines = text.split(/\r?\n/).filter((l) => l.trim() && l.split(",")[0].trim() !== rel);
     if (!remove) lines.push(`${rel}, ${boxart}, ${name}`);
     await this.writeFileNow(meta, enc.encode(lines.join("\n") + "\n"));
