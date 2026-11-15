@@ -62,6 +62,10 @@ public:
       return false;
     }
 #endif
+    // the screen's size is only known once the engine has set it up (and a
+    // game can change it): the video setting follows it
+    if (get_video_size() != video_size_)
+      handle_video_setting();
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
     return Cart::run();
   }
@@ -109,6 +113,14 @@ protected:
 #endif
   }
 
+  void handle_video_setting() override {
+    video_size_ = get_video_size();
+    // (not set up yet: 0x0)
+    if (video_size_.first == 0 || video_size_.second == 0)
+      return;
+    Cart::handle_video_setting();
+  }
+
   // the DOS games' 320x200 was drawn for a 4:3 screen
   void set_original_video_setting() override {
     const auto [w, h] = get_video_size();
@@ -121,4 +133,6 @@ protected:
   void set_fill_video_setting() override { display_fill(); }
 
   std::string get_save_extension() const override { return "_scummvm.sav"; }
+
+  std::pair<size_t, size_t> video_size_{0, 0};
 };
