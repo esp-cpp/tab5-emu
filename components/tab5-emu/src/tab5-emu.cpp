@@ -280,8 +280,10 @@ size_t Tab5Emu::play_audio(const uint8_t *data, size_t size) {
   audio_bytes_dropped_ += out_size - sent;
   const auto now = esp_timer_get_time();
   if (now - audio_last_report_us_ > 30'000'000) {
+    // (debug only: this runs on the game's audio task, whose stack can be
+    // small -- Doom's is 2 KB -- and formatting the line overflowed it)
     if (audio_last_report_us_ != 0) {
-      logger_.info("audio: sent {} KB, dropped {} B, waited {} times ({} -> {} Hz)", audio_bytes_sent_ / 1024,
+      logger_.debug("audio: sent {} KB, dropped {} B, waited {} times ({} -> {} Hz)", audio_bytes_sent_ / 1024,
                    audio_bytes_dropped_, audio_waits_, audio_source_rate_, hw);
     }
     audio_bytes_sent_ = audio_bytes_dropped_ = audio_waits_ = 0;

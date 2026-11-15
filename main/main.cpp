@@ -1,5 +1,9 @@
 #include <sdkconfig.h>
 
+#if defined(ENABLE_SCUMMVM)
+#include "scummvm_port.hpp"
+#endif
+
 #include <chrono>
 #include <cxxabi.h>
 #include <map>
@@ -105,6 +109,12 @@ extern "C" void app_main(void) {
     logger.warn("This may happen if the SD card is not inserted.");
   }
   internal_free_log("initialize_sdcard");
+
+#if defined(ENABLE_SCUMMVM)
+  // now, while the PSRAM heap is empty: its long-lived allocations sit at
+  // the start instead of between the big blocks the games want
+  scummvm_prepare();
+#endif
 
   if (!emu.initialize_audio()) {
     logger.warn("Failed to initialize audio!");

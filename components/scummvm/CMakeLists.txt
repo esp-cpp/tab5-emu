@@ -27,18 +27,14 @@ add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
           ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --data
   COMMENT "Moving ScummVM's .bss and .data to PSRAM"
   VERBATIM)
-# ScummVM's allocations prefer PSRAM (backends/platform/esp32/esp32-system.cpp)
+# ScummVM's allocations: PSRAM, and a game's own arena (backends/platform/esp32/esp32-alloc.cpp)
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${SVM}/backends/platform/esp32/psram_alloc.syms $<TARGET_FILE:${COMPONENT_LIB}>
   COMMENT "Sending ScummVM's allocations to PSRAM"
   VERBATIM)
-# Allocation tracking (idf.py -DSCUMMVM_TRACK_ALLOCS=1 build): free / delete
-# are renamed too, and each game run's leftovers are written to
-# /sdcard/saves/scummvm_leaks.txt (see esp32-alloc.cpp)
+# Allocation tracking (idf.py -DSCUMMVM_TRACK_ALLOCS=1 build; =0 to turn it
+# off again): each game run's leftovers go to /sdcard/saves/scummvm_leaks.txt
+# (see backends/platform/esp32/esp32-alloc.cpp)
 if(SCUMMVM_TRACK_ALLOCS)
   target_compile_definitions(${COMPONENT_LIB} PRIVATE SCUMMVM_ESP32_TRACK_ALLOCS)
-  add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${SVM}/backends/platform/esp32/psram_alloc_track.syms $<TARGET_FILE:${COMPONENT_LIB}>
-    COMMENT "Tracking ScummVM's frees"
-    VERBATIM)
 endif()

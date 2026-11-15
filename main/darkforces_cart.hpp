@@ -52,6 +52,10 @@ public:
   void deinit() {
 #if defined(ENABLE_DARKFORCES)
     deinit_darkforces();
+    // the block goes back to the heap with the cart (~Cart): the game's
+    // free() must stop claiming pointers into it, or the board's other games
+    // leak everything they free there
+    darkforces_forget_block();
 #endif
   }
 
