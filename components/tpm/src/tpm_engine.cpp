@@ -980,8 +980,8 @@ void deinit() {
   // the runtime's buffers are the arena's, kept for the next launch (see
   // release_arena); the pool holds only what did not fit in it
   shared_mem_clear();
-  g_exe.clear();
-  g_exe.shrink_to_fit();
+  // (swapped out: built without exceptions, shrink_to_fit() does nothing)
+  std::vector<uint8_t>().swap(g_exe);
 }
 
 bool running() { return g_game_task && !g_game_done.load(); }

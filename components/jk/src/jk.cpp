@@ -1133,22 +1133,21 @@ void deinit() {
   g_audio_task.reset();
 #endif
   Tab5Emu::get().wait_frame();
-  // the presentation buffers belong to this engine run
+  // the presentation buffers belong to this engine run (~1.8 MB). Swapped
+  // with empty vectors: built without exceptions, libstdc++'s shrink_to_fit()
+  // does nothing, and these stayed allocated after the game (the SNES core
+  // then had too little PSRAM left)
   for (auto &b : g_frame8) {
-    b.clear();
-    b.shrink_to_fit();
+    std::vector<uint8_t>().swap(b);
   }
   for (auto &b : g_overlay8) {
-    b.clear();
-    b.shrink_to_fit();
+    std::vector<uint8_t>().swap(b);
   }
-  g_last_rgb565.clear();
-  g_last_rgb565.shrink_to_fit();
+  std::vector<uint8_t>().swap(g_last_rgb565);
   g_last_frame8 = nullptr;
   g_last_w = g_last_h = 0;
   g_overlay_w = g_overlay_h = 0;
-  g_pattern.clear();
-  g_pattern.shrink_to_fit();
+  std::vector<uint8_t>().swap(g_pattern);
 #if CONFIG_JK_ENGINE
   arena_destroy();
 #endif
