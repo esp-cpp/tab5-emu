@@ -49,3 +49,7 @@
 	path = components/scummvm/scummvm
 	url = https://github.com/esp-cpp/scummvm.git
 	branch = esp32p4
+[submodule "components/emulink"]
+	path = components/emulink
+	url = https://github.com/esp-cpp/emulink.git
+	branch = main

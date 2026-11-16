@@ -2,6 +2,7 @@
 
 #include <sdkconfig.h>
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <functional>
@@ -167,6 +168,27 @@ public:
     std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
     return touch_gamepad_.last;
   }
+  /// A finger held by the USB link's test control (emulink tap / touch /
+  /// drag), in logical (landscape) coordinates; fingers = 0 lifts it. It
+  /// counts as a touch everywhere: touchpad_data(), the touch virtual
+  /// gamepad, touch_pointer() and the LVGL menus.
+  void set_remote_touch(uint8_t fingers, uint16_t x, uint16_t y);
+  /// A finger used as a pointer (logical coordinates); fingers = 0: none
+  struct TouchPoint {
+    uint8_t fingers{0}; ///< fingers on the screen (2 or more: a right click, for games that want one)
+    int x{0};
+    int y{0};
+  };
+  /// The first finger on the screen, or with `skip_gamepad` the first one not
+  /// on the touch virtual gamepad's zones (a game that is driven by the touch
+  /// pad and also wants a pointer, e.g. mouse look in Dark Forces)
+  TouchPoint touch_pointer(bool skip_gamepad) const;
+  /// A point on the screen in the running game's frame (width x height),
+  /// which is drawn at display_size(), centered; clamped to the frame
+  std::pair<int, int> screen_to_frame(int x, int y, int width, int height) const;
+  /// And back: a point of the running game's frame (width x height) on the
+  /// screen (the middle of its pixel)
+  std::pair<int, int> frame_to_screen(int x, int y, int width, int height) const;
   /// True once if the user asked for the in-game menu (BOOT button, or the
   /// touch hot-corner). Reading it clears the request.
   bool menu_requested() { return menu_requested_.exchange(false); }
@@ -377,13 +399,24 @@ protected:
   };
   void *dpi_frame_buffer();
   void on_touch(const TouchpadData &data);
+  // the touch virtual gamepad's zone at (x, y): presses its button(s) in
+  // `state`; false where there is none
+  bool touch_zone(int x, int y, GamepadState &state, bool &menu) const;
+  void update_touch_locked();
+  static void remote_pointer_read(lv_indev_t *indev, lv_indev_data_t *data);
 
   // touch virtual gamepad
   struct TouchGamepad {
+    static constexpr size_t kMaxPoints = 5;
     mutable std::mutex mutex;
-    TouchpadData last{};
+    TouchpadData screen{};   // the touch screen's primary finger
+    std::array<std::pair<int, int>, kMaxPoints> points{}; // and all of its fingers
+    size_t num_points{0};
+    TouchPoint remote{};     // the link's test control's finger
+    TouchpadData last{};     // what touchpad_data() reports (remote over screen)
     GamepadState state{};
   } touch_gamepad_;
+  lv_indev_t *remote_pointer_indev_{nullptr};
 
   // sdcard
   sdmmc_card_t *sdcard_{nullptr};

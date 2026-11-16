@@ -110,11 +110,14 @@ set(GAME_COMPONENTS
 set(
   COMPONENTS
   main esptool_py esp_lcd esp_psram task format display display_drivers monitor timer
-  ${GAME_COMPONENTS} tab5-emu pool_allocator gui menu rom_info statistics settings devlink
+  ${GAME_COMPONENTS} tab5-emu pool_allocator gui menu rom_info statistics settings emulink
   CACHE STRING
   "List of components to include"
   FORCE
   )
+
+# the USB link (components/emulink) builds against this board
+idf_build_set_property(EMULINK_BOARD_COMPONENT tab5-emu)
 
 project(tab5-emu)
 
