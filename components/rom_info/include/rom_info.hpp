@@ -8,7 +8,10 @@
 #include "format.hpp"
 
 
-enum class Emulator { UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA, MGS, TPM, PICO8 };
+enum class Emulator {
+  UNKNOWN, JEDI_KNIGHT, DARK_FORCES, SEGA_GENESIS, SEGA_MEGA_DRIVE, SNES, GBA, MGS, TPM, PICO8,
+  NES, GAMEBOY, GAMEBOY_COLOR, SEGA_MASTER_SYSTEM, SEGA_GAME_GEAR, MSX, DOOM, SCUMMVM
+};
 
 struct RomInfo {
   std::string name;
@@ -21,7 +24,10 @@ struct RomInfo {
 /// The console a game is played as, in the order the game list shows them
 /// (several emulators can share one, e.g. Genesis / Mega Drive; the PC and
 /// PlayStation ports count as the console the game came out on).
-enum class Console : uint8_t { SNES, GAME_BOY_ADVANCE, GENESIS, PLAYSTATION, PC, PICO8, UNKNOWN };
+enum class Console : uint8_t {
+  NES, SNES, GAME_BOY, GAME_BOY_COLOR, GAME_BOY_ADVANCE, MASTER_SYSTEM, GAME_GEAR, GENESIS, MSX, PLAYSTATION, PC, PICO8,
+  UNKNOWN
+};
 
 /// The shape the firmware draws for a console that has no art on the SD card.
 enum class ConsoleShape : uint8_t { GAMEPAD, HANDHELD_TALL, HANDHELD_WIDE, DISC, COMPUTER, FANTASY };
@@ -44,7 +50,16 @@ const ConsoleInfo &console_info(Console console);
 /// file name:
 ///   - "*.jk"  / "jk.cd"  / "JK1.gob" : Jedi Knight (the directory containing
 ///                                      the file is the game install dir)
-///   - "dark.gob" / "*.df"            : Dark Forces
+///   - "dark.gob" / "*.df"            : Dark Forces (the directory containing
+///                                      the file holds the game's GOBs)
+///   - "*.wad"                        : Doom (likewise, for the IWAD)
+///   - "*.nes"                        : NES
+///   - "*.gb" / "*.gbc"               : Game Boy / Game Boy Color
+///   - "*.sms" / "*.gg"               : Master System / Game Gear
+///   - "*.rom"                        : MSX
+///   - "*.scummvm"                    : a ScummVM game (a marker file: the
+///                                      directory containing it holds the
+///                                      game's files; ScummVM detects which)
 ///   - "STAGE.DIR" / "*.mgs"          : Metal Gear Solid (the directory containing
 ///                                      the file holds the extracted disc files)
 ///   - "*.p8" / "*.p8.png"            : PICO-8 cart
@@ -72,6 +87,22 @@ template <> struct fmt::formatter<Emulator> {
       return fmt::format_to(ctx.out(), "TPM");
     case Emulator::PICO8:
       return fmt::format_to(ctx.out(), "PICO8");
+    case Emulator::NES:
+      return fmt::format_to(ctx.out(), "NES");
+    case Emulator::GAMEBOY:
+      return fmt::format_to(ctx.out(), "GAMEBOY");
+    case Emulator::GAMEBOY_COLOR:
+      return fmt::format_to(ctx.out(), "GAMEBOY_COLOR");
+    case Emulator::SEGA_MASTER_SYSTEM:
+      return fmt::format_to(ctx.out(), "SEGA_MASTER_SYSTEM");
+    case Emulator::SEGA_GAME_GEAR:
+      return fmt::format_to(ctx.out(), "SEGA_GAME_GEAR");
+    case Emulator::MSX:
+      return fmt::format_to(ctx.out(), "MSX");
+    case Emulator::DOOM:
+      return fmt::format_to(ctx.out(), "DOOM");
+    case Emulator::SCUMMVM:
+      return fmt::format_to(ctx.out(), "SCUMMVM");
     default:
       return fmt::format_to(ctx.out(), "UNKNOWN");
     }

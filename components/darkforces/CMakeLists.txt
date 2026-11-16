@@ -1,0 +1,111 @@
+# Dark Forces for esp-box-emu, built on The Force Engine (TFE).
+#
+# From the esp-cpp/TheForceEngine submodule: TheForceEngine/tfe is a subset of
+# BSzili's Amiga branch of TFE (based on TFE v1.09.410) with the __AMIGA__
+# platform guards renamed to TFE_ESPBOX (see TheForceEngine/VENDOR.md);
+# TheForceEngine/port/platform provides the ESP32 implementations of the
+# platform interfaces (system timers, render backend, audio, threads, memory
+# regions, stubs).
+set(TFE_SRC_DIRS
+  "TheForceEngine/tfe/TFE_System"
+  "TheForceEngine/tfe/TFE_Memory"
+  "TheForceEngine/tfe/TFE_FileSystem"
+  "TheForceEngine/tfe/TFE_Archive"
+  "TheForceEngine/tfe/TFE_Asset"
+  "TheForceEngine/tfe/TFE_Audio"
+  "TheForceEngine/tfe/TFE_Audio/MidiSynth"
+  "TheForceEngine/tfe/TFE_Input"
+  "TheForceEngine/tfe/TFE_Settings"
+  "TheForceEngine/tfe/TFE_Game"
+  "TheForceEngine/tfe/TFE_Outlaws"
+  "TheForceEngine/tfe/TFE_Jedi/Collision"
+  "TheForceEngine/tfe/TFE_Jedi/IMuse"
+  "TheForceEngine/tfe/TFE_Jedi/InfSystem"
+  "TheForceEngine/tfe/TFE_Jedi/Level"
+  "TheForceEngine/tfe/TFE_Jedi/Math"
+  "TheForceEngine/tfe/TFE_Jedi/Memory"
+  "TheForceEngine/tfe/TFE_Jedi/Serialization"
+  "TheForceEngine/tfe/TFE_Jedi/Task"
+  "TheForceEngine/tfe/TFE_Jedi/Renderer"
+  "TheForceEngine/tfe/TFE_Jedi/Renderer/RClassic_Fixed"
+  "TheForceEngine/tfe/TFE_Jedi/Renderer/RClassic_Fixed/robj3d_fixed"
+  "TheForceEngine/tfe/TFE_DarkForces"
+  "TheForceEngine/tfe/TFE_DarkForces/Actor"
+  "TheForceEngine/tfe/TFE_DarkForces/GameUI"
+  "TheForceEngine/tfe/TFE_DarkForces/Landru"
+  )
+
+idf_component_register(
+  INCLUDE_DIRS "TheForceEngine/port/include"
+  SRC_DIRS "TheForceEngine/port" "TheForceEngine/port/platform" ${TFE_SRC_DIRS}
+  PRIV_INCLUDE_DIRS "TheForceEngine/tfe" "TheForceEngine/port/platform"
+  REQUIRES tab5-emu statistics pool_allocator esp_timer pthread heap esp_system
+  )
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+  TFE_ESPBOX=1
+  TFE_ESPBOX_BASE_DIR="/sdcard/darkforces/"
+  )
+
+target_compile_options(${COMPONENT_LIB} PRIVATE
+  -Os
+  -Wno-error
+  -Wno-type-limits
+  -Wno-ignored-qualifiers
+  -Wno-unused-variable
+  -Wno-unused-but-set-variable
+  -Wno-unused-function
+  -Wno-switch
+  -Wno-sign-compare
+  -Wno-missing-field-initializers
+  -Wno-format
+  -Wno-format-truncation
+  -Wno-error=maybe-uninitialized
+  -Wno-error=array-bounds
+  -Wno-error=stringop-overflow
+  -Wno-error=stringop-truncation
+  -Wno-error=deprecated-declarations
+  -Wno-error=narrowing
+  -Wno-error=address
+  -Wno-error=class-memaccess
+  -Wno-error=reorder
+  -Wno-error=parentheses
+  -Wno-error=misleading-indentation
+  -Wno-error=int-in-bool-context
+  -Wno-error=sequence-point
+  -Wno-error=strict-aliasing
+  -Wno-error=char-subscripts
+  -Wno-error=unused-value
+  -Wno-error=implicit-fallthrough
+  $<$<COMPILE_LANGUAGE:C>:-Wno-error=incompatible-pointer-types>
+  $<$<COMPILE_LANGUAGE:C>:-Wno-error=discarded-qualifiers>
+  )
+
+# The renderer and the OPL3 synthesizer are the hot paths: optimize those for speed.
+file(GLOB_RECURSE DF_HOT_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/TheForceEngine/tfe/TFE_Jedi/Renderer/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/TheForceEngine/tfe/TFE_Jedi/Math/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/TheForceEngine/tfe/TFE_Audio/MidiSynth/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/TheForceEngine/tfe/TFE_Audio/MidiSynth/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/TheForceEngine/tfe/TFE_Jedi/IMuse/imDigitalSound.cpp"
+  )
+set_source_files_properties(${DF_HOT_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2")
+
+# Everything Dark Forces allocates lives in BoxEmu's 4MB ROM block while it runs
+# (TheForceEngine/port/platform/esp_alloc.cpp): rename the allocation functions referenced by
+# this library to the df_* replacements, and route free()/realloc() of block
+# pointers made anywhere in the firmware back to the block.
+add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+  COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${CMAKE_CURRENT_SOURCE_DIR}/TheForceEngine/port/alloc_redirect.syms $<TARGET_FILE:${COMPONENT_LIB}>
+  COMMENT "Redirecting Dark Forces allocations to the ROM block"
+  VERBATIM)
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=free" "-Wl,--wrap=realloc")
+# the core's static state (.bss and .data) lives in PSRAM (see the post-build step; the P4
+# linker script has no ldgen placeholder for external RAM); no gp-relative
+# small data then
+target_compile_options(${COMPONENT_LIB} PRIVATE -msmall-data-limit=0)
+add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+  COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
+          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --data
+  COMMENT "Moving the darkforces core's .bss and .data to PSRAM"
+  VERBATIM)

@@ -52,7 +52,7 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
       platform = Emulator::JEDI_KNIGHT;
 #endif
     } else if (endsWith(lp, ".df") || endsWith(lp, "dark.gob")) {
-#if defined(ENABLE_DARK_FORCES)
+#if defined(ENABLE_DARKFORCES)
       platform = Emulator::DARK_FORCES;
 #endif
     } else if (endsWith(lp, ".gen")) { // sega genesis
@@ -79,6 +79,38 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 #if defined(ENABLE_PICO8)
       platform = Emulator::PICO8;
 #endif
+    } else if (endsWith(lp, ".wad")) { // doom
+#if defined(ENABLE_DOOM)
+      platform = Emulator::DOOM;
+#endif
+    } else if (endsWith(lp, ".nes")) { // nes
+#if defined(ENABLE_NES)
+      platform = Emulator::NES;
+#endif
+    } else if (endsWith(lp, ".gb")) { // game boy
+#if defined(ENABLE_GBC)
+      platform = Emulator::GAMEBOY;
+#endif
+    } else if (endsWith(lp, ".gbc")) { // game boy color
+#if defined(ENABLE_GBC)
+      platform = Emulator::GAMEBOY_COLOR;
+#endif
+    } else if (endsWith(lp, ".sms")) { // sega master system
+#if defined(ENABLE_SMS)
+      platform = Emulator::SEGA_MASTER_SYSTEM;
+#endif
+    } else if (endsWith(lp, ".gg")) { // sega game gear
+#if defined(ENABLE_SMS)
+      platform = Emulator::SEGA_GAME_GEAR;
+#endif
+    } else if (endsWith(lp, ".rom")) { // msx
+#if defined(ENABLE_MSX)
+      platform = Emulator::MSX;
+#endif
+    } else if (endsWith(lp, ".scummvm")) { // scummvm (star trek: 25th anniversary, ...)
+#if defined(ENABLE_SCUMMVM)
+      platform = Emulator::SCUMMVM;
+#endif
     } else if (endsWith(lp, "slus_008.84")) { // star wars episode i: the phantom menace
 #if defined(ENABLE_TPM)
       platform = Emulator::TPM;
@@ -95,8 +127,20 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 
 Console console_of(Emulator platform) {
   switch (platform) {
+  case Emulator::NES:
+    return Console::NES;
   case Emulator::SNES:
     return Console::SNES;
+  case Emulator::GAMEBOY:
+    return Console::GAME_BOY;
+  case Emulator::GAMEBOY_COLOR:
+    return Console::GAME_BOY_COLOR;
+  case Emulator::SEGA_MASTER_SYSTEM:
+    return Console::MASTER_SYSTEM;
+  case Emulator::SEGA_GAME_GEAR:
+    return Console::GAME_GEAR;
+  case Emulator::MSX:
+    return Console::MSX;
   case Emulator::GBA:
     return Console::GAME_BOY_ADVANCE;
   case Emulator::SEGA_GENESIS:
@@ -107,6 +151,8 @@ Console console_of(Emulator platform) {
     return Console::PLAYSTATION;
   case Emulator::JEDI_KNIGHT:
   case Emulator::DARK_FORCES:
+  case Emulator::DOOM:
+  case Emulator::SCUMMVM:
     return Console::PC;
   case Emulator::PICO8:
     return Console::PICO8;
@@ -117,9 +163,15 @@ Console console_of(Emulator platform) {
 
 const ConsoleInfo &console_info(Console console) {
   static const ConsoleInfo infos[] = {
+      {"NES", "NES", "nes", 0xB22222, ConsoleShape::GAMEPAD},
       {"Super Nintendo", "SNES", "snes", 0x6A5ACD, ConsoleShape::GAMEPAD},
+      {"Game Boy", "Game Boy", "gb", 0x5B7F3A, ConsoleShape::HANDHELD_TALL},
+      {"Game Boy Color", "GB Color", "gbc", 0x8E44AD, ConsoleShape::HANDHELD_TALL},
       {"Game Boy Advance", "GBA", "gba", 0x4B3FA8, ConsoleShape::HANDHELD_WIDE},
+      {"Master System", "SMS", "sms", 0x1F5FAF, ConsoleShape::GAMEPAD},
+      {"Game Gear", "Game Gear", "gg", 0x4F6D8F, ConsoleShape::HANDHELD_WIDE},
       {"Sega Genesis", "Genesis", "genesis", 0xC8102E, ConsoleShape::GAMEPAD},
+      {"MSX", "MSX", "msx", 0x3A7D7D, ConsoleShape::COMPUTER},
       {"PlayStation", "PlayStation", "playstation", 0x2E6DB4, ConsoleShape::DISC},
       {"PC", "PC", "pc", 0x5A6B7B, ConsoleShape::COMPUTER},
       {"PICO-8", "PICO-8", "pico8", 0xFF004D, ConsoleShape::FANTASY},

@@ -1,0 +1,3 @@
+hw_reset gnuboy_hw_reset
+rtc gnuboy_rtc
+sound_off gnuboy_sound_off

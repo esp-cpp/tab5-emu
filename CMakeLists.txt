@@ -30,8 +30,21 @@ set(TPM_COMPONENTS tpm)
 ### PICO-8 (femto8, shared with esp-box-emu) ###
 set(PICO8_COMPONENTS pico8)
 
-### Dark Forces (The Force Engine port, shared with esp-box-emu) ###
-# set(DARK_FORCES_COMPONENTS "dark_forces")
+### Cores shared with esp-box-emu (each core + its port/ glue a submodule) ###
+### NES (nofrendo) ###
+set(NES_COMPONENTS nes)
+### Game Boy / Color (gnuboy) ###
+set(GBC_COMPONENTS gbc)
+### Master System / Game Gear (SMS Plus) ###
+set(SMS_COMPONENTS sms)
+### MSX (fMSX) ###
+set(MSX_COMPONENTS msx)
+### Doom (PrBoom) ###
+set(DOOM_COMPONENTS doom)
+### Dark Forces (The Force Engine) ###
+set(DARK_FORCES_COMPONENTS darkforces)
+### ScummVM (esp-cpp/scummvm: Star Trek: 25th Anniversary / Judgment Rites) ###
+set(SCUMMVM_COMPONENTS scummvm)
 
 if(JK_COMPONENTS)
   add_compile_definitions(ENABLE_JK)
@@ -55,8 +68,26 @@ if(PICO8_COMPONENTS)
   add_compile_definitions(ENABLE_PICO8)
 endif()
 
+if(NES_COMPONENTS)
+  add_compile_definitions(ENABLE_NES)
+endif()
+if(GBC_COMPONENTS)
+  add_compile_definitions(ENABLE_GBC)
+endif()
+if(SMS_COMPONENTS)
+  add_compile_definitions(ENABLE_SMS)
+endif()
+if(MSX_COMPONENTS)
+  add_compile_definitions(ENABLE_MSX)
+endif()
+if(DOOM_COMPONENTS)
+  add_compile_definitions(ENABLE_DOOM)
+endif()
 if(DARK_FORCES_COMPONENTS)
-  add_compile_definitions(ENABLE_DARK_FORCES)
+  add_compile_definitions(ENABLE_DARKFORCES)
+endif()
+if(SCUMMVM_COMPONENTS)
+  add_compile_definitions(ENABLE_SCUMMVM)
 endif()
 
 set(GAME_COMPONENTS
@@ -67,13 +98,19 @@ set(GAME_COMPONENTS
   ${MGS_COMPONENTS}
   ${TPM_COMPONENTS}
   ${PICO8_COMPONENTS}
+  ${NES_COMPONENTS}
+  ${GBC_COMPONENTS}
+  ${SMS_COMPONENTS}
+  ${MSX_COMPONENTS}
+  ${DOOM_COMPONENTS}
   ${DARK_FORCES_COMPONENTS}
+  ${SCUMMVM_COMPONENTS}
   )
 
 set(
   COMPONENTS
   main esptool_py esp_lcd esp_psram task format display display_drivers monitor timer
-  ${GAME_COMPONENTS} tab5-emu gui menu rom_info statistics settings devlink
+  ${GAME_COMPONENTS} tab5-emu pool_allocator gui menu rom_info statistics settings devlink
   CACHE STRING
   "List of components to include"
   FORCE
