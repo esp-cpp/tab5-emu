@@ -539,8 +539,30 @@ void Tab5Emu::remote_pointer_read(lv_indev_t *indev, lv_indev_data_t *data) {
   std::lock_guard<std::mutex> lk(self->touch_gamepad_.mutex);
   const auto &r = self->touch_gamepad_.remote;
   if (r.fingers > 0) {
-    data->point.x = r.x;
-    data->point.y = r.y;
+    // LVGL rotates what a pointer reads (the BSP's touch is the panel's
+    // portrait coordinates): hand it the landscape point rotated back
+    // (w x h: the rotated, landscape, resolution)
+    auto *disp = lv_indev_get_display(indev);
+    const int32_t w = lv_display_get_horizontal_resolution(disp);
+    const int32_t h = lv_display_get_vertical_resolution(disp);
+    switch (lv_display_get_rotation(disp)) {
+    case LV_DISPLAY_ROTATION_90:
+      data->point.x = r.y;
+      data->point.y = w - 1 - r.x;
+      break;
+    case LV_DISPLAY_ROTATION_180:
+      data->point.x = w - 1 - r.x;
+      data->point.y = h - 1 - r.y;
+      break;
+    case LV_DISPLAY_ROTATION_270:
+      data->point.x = h - 1 - r.y;
+      data->point.y = r.x;
+      break;
+    default:
+      data->point.x = r.x;
+      data->point.y = r.y;
+      break;
+    }
     data->state = LV_INDEV_STATE_PRESSED;
   } else {
     data->state = LV_INDEV_STATE_RELEASED;
