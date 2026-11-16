@@ -338,6 +338,13 @@ bool Tab5Emu::initialize_input() {
     lv_indev_set_read_cb(keypad_indev_, &Tab5Emu::keypad_read);
     lv_indev_set_user_data(keypad_indev_, this);
   }
+  // the USB link's test control's finger (emulink tap / touch / drag)
+  remote_pointer_indev_ = lv_indev_create();
+  if (remote_pointer_indev_) {
+    lv_indev_set_type(remote_pointer_indev_, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(remote_pointer_indev_, &Tab5Emu::remote_pointer_read);
+    lv_indev_set_user_data(remote_pointer_indev_, this);
+  }
   return true;
 }
 
@@ -403,61 +410,141 @@ void Tab5Emu::on_touch(const TouchpadData &raw) {
   auto data = bsp.touchpad_convert(raw);
   const auto fingers = bsp.touch_state_convert(bsp.touch_state());
   std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
-  touch_gamepad_.last = data;
+  auto &t = touch_gamepad_;
+  t.screen = data;
+  t.num_points = 0;
+  if (fingers.num_touch_points > 0) {
+    for (size_t i = 0; i < fingers.num_touch_points && i < fingers.points.size() && t.num_points < t.kMaxPoints; i++) {
+      t.points[t.num_points++] = {fingers.points[i].x, fingers.points[i].y};
+    }
+  } else if (data.num_touch_points > 0) {
+    t.points[t.num_points++] = {data.x, data.y}; // a driver that only reports the primary point
+  }
+  update_touch_locked();
+}
 
+bool Tab5Emu::touch_zone(int x, int y, GamepadState &state, bool &menu) const {
   // Virtual gamepad layout (landscape, 1280x720):
   //   - top-right hot corner (100x100): menu
   //   - left third of the screen: d-pad, by direction from the zone center
   //   - right third: A (lower-right), B (lower-left), X (upper-right),
   //     Y (upper-left); a touch in the bottom strip of the middle third is
   //     START (right half) / SELECT (left half)
-  // Each finger presses whatever its zone says; the presses are OR'd, so a
-  // thumb on the d-pad and one on A both count.
   const int w = lcd_width(), h = lcd_height();
-  const auto press = [&](int x, int y, GamepadState &state) {
-    if (x >= w - 100 && y < 100) {
-      menu_requested_ = true;
-    } else if (x < w / 3) {
-      const int cx = w / 6, cy = h / 2;
-      const int dx = x - cx, dy = y - cy;
-      constexpr int dead = 40;
-      if (dx > dead && std::abs(dx) > std::abs(dy) / 2)
-        state.right = 1;
-      if (dx < -dead && std::abs(dx) > std::abs(dy) / 2)
-        state.left = 1;
-      if (dy > dead && std::abs(dy) > std::abs(dx) / 2)
-        state.down = 1;
-      if (dy < -dead && std::abs(dy) > std::abs(dx) / 2)
-        state.up = 1;
-    } else if (x >= 2 * w / 3) {
-      const bool right_half = x >= (2 * w / 3 + w / 6);
-      const bool lower_half = y >= h / 2;
-      if (lower_half && right_half)
-        state.a = 1;
-      else if (lower_half)
-        state.b = 1;
-      else if (right_half)
-        state.x = 1;
-      else
-        state.y = 1;
-    } else if (y >= h - 120) {
-      if (x >= w / 2)
-        state.start = 1;
-      else
-        state.select = 1;
-    }
-  };
-  GamepadState state{};
-  if (fingers.num_touch_points > 0) {
-    for (size_t i = 0; i < fingers.num_touch_points && i < fingers.points.size(); i++) {
-      press(fingers.points[i].x, fingers.points[i].y, state);
-    }
-  } else if (data.num_touch_points > 0) {
-    press(data.x, data.y, state); // a driver that only reports the primary point
+  if (x >= w - 100 && y < 100) {
+    menu = true;
+  } else if (x < w / 3) {
+    const int cx = w / 6, cy = h / 2;
+    const int dx = x - cx, dy = y - cy;
+    constexpr int dead = 40;
+    if (dx > dead && std::abs(dx) > std::abs(dy) / 2)
+      state.right = 1;
+    if (dx < -dead && std::abs(dx) > std::abs(dy) / 2)
+      state.left = 1;
+    if (dy > dead && std::abs(dy) > std::abs(dx) / 2)
+      state.down = 1;
+    if (dy < -dead && std::abs(dy) > std::abs(dx) / 2)
+      state.up = 1;
+  } else if (x >= 2 * w / 3) {
+    const bool right_half = x >= (2 * w / 3 + w / 6);
+    const bool lower_half = y >= h / 2;
+    if (lower_half && right_half)
+      state.a = 1;
+    else if (lower_half)
+      state.b = 1;
+    else if (right_half)
+      state.x = 1;
+    else
+      state.y = 1;
+  } else if (y >= h - 120) {
+    if (x >= w / 2)
+      state.start = 1;
+    else
+      state.select = 1;
+  } else {
+    return false;
   }
-  press_latch_.fetch_or(static_cast<uint16_t>(state.buttons & ~touch_gamepad_.state.buttons),
-                        std::memory_order_relaxed);
-  touch_gamepad_.state = state;
+  return true;
+}
+
+void Tab5Emu::update_touch_locked() {
+  // Each finger presses whatever its zone says; the presses are OR'd, so a
+  // thumb on the d-pad and one on A both count. The link's test control's
+  // finger is one more.
+  auto &t = touch_gamepad_;
+  t.last = t.screen;
+  if (t.remote.fingers > 0) {
+    t.last.num_touch_points = t.remote.fingers;
+    t.last.x = t.remote.x;
+    t.last.y = t.remote.y;
+  }
+  GamepadState state{};
+  bool menu = false;
+  for (size_t i = 0; i < t.num_points; i++) {
+    touch_zone(t.points[i].first, t.points[i].second, state, menu);
+  }
+  if (t.remote.fingers > 0) {
+    touch_zone(t.remote.x, t.remote.y, state, menu);
+  }
+  if (menu) {
+    menu_requested_ = true;
+  }
+  press_latch_.fetch_or(static_cast<uint16_t>(state.buttons & ~t.state.buttons), std::memory_order_relaxed);
+  t.state = state;
+}
+
+void Tab5Emu::set_remote_touch(uint8_t fingers, uint16_t x, uint16_t y) {
+  std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
+  touch_gamepad_.remote = {fingers, std::min<int>(x, lcd_width() - 1), std::min<int>(y, lcd_height() - 1)};
+  update_touch_locked();
+}
+
+Tab5Emu::TouchPoint Tab5Emu::touch_pointer(bool skip_gamepad) const {
+  std::lock_guard<std::mutex> lk(touch_gamepad_.mutex);
+  const auto &t = touch_gamepad_;
+  auto off_pad = [&](int x, int y) {
+    GamepadState unused{};
+    bool menu = false;
+    return !skip_gamepad || !touch_zone(x, y, unused, menu);
+  };
+  if (t.remote.fingers > 0 && off_pad(t.remote.x, t.remote.y)) {
+    return t.remote;
+  }
+  for (size_t i = 0; i < t.num_points; i++) {
+    if (off_pad(t.points[i].first, t.points[i].second)) {
+      return {static_cast<uint8_t>(t.num_points), t.points[i].first, t.points[i].second};
+    }
+  }
+  return {};
+}
+
+std::pair<int, int> Tab5Emu::screen_to_frame(int x, int y, int width, int height) const {
+  const int dw = std::max<int>(1, display_width_), dh = std::max<int>(1, display_height_);
+  const int ox = (static_cast<int>(lcd_width()) - dw) / 2, oy = (static_cast<int>(lcd_height()) - dh) / 2;
+  return {std::clamp((x - ox) * width / dw, 0, width - 1), std::clamp((y - oy) * height / dh, 0, height - 1)};
+}
+
+std::pair<int, int> Tab5Emu::frame_to_screen(int x, int y, int width, int height) const {
+  const int dw = std::max<int>(1, display_width_), dh = std::max<int>(1, display_height_);
+  const int ox = (static_cast<int>(lcd_width()) - dw) / 2, oy = (static_cast<int>(lcd_height()) - dh) / 2;
+  width = std::max(1, width);
+  height = std::max(1, height);
+  return {ox + (2 * x + 1) * dw / (2 * width), oy + (2 * y + 1) * dh / (2 * height)};
+}
+
+void Tab5Emu::remote_pointer_read(lv_indev_t *indev, lv_indev_data_t *data) {
+  // the link's test control's finger, for the LVGL menus (the touch screen
+  // has its own input device, from the BSP)
+  auto *self = static_cast<Tab5Emu *>(lv_indev_get_user_data(indev));
+  std::lock_guard<std::mutex> lk(self->touch_gamepad_.mutex);
+  const auto &r = self->touch_gamepad_.remote;
+  if (r.fingers > 0) {
+    data->point.x = r.x;
+    data->point.y = r.y;
+    data->state = LV_INDEV_STATE_PRESSED;
+  } else {
+    data->state = LV_INDEV_STATE_RELEASED;
+  }
 }
 
 GamepadState Tab5Emu::gamepad_state() {
