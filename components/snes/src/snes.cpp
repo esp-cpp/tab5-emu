@@ -36,6 +36,8 @@ constexpr int MAX_SKIP = 3;
 // rendered vs skipped frames (the frame-time statistics blend both)
 static uint64_t g_rendered_frames = 0, g_rendered_us = 0, g_skipped_frames = 0, g_skipped_us = 0;
 static uint64_t g_next_due = 0; // cumulative frame deadline (esp_timer us)
+// the last frame packed for a screenshot (the core's frames have a pitch)
+std::vector<uint8_t> g_packed;
 }
 
 extern "C" uint32_t snes_host_read_joypad(int port) {
@@ -198,8 +200,10 @@ std::pair<size_t, size_t> get_snes_video_size() { return {static_cast<size_t>(g_
 
 std::span<uint8_t> get_snes_video_buffer() {
   if (!g_initialized || !g_last_frame) return {};
-  // the screenshot writer expects a packed frame; repack the pitch
-  static std::vector<uint8_t> packed;
+  // the screenshot writer expects a packed frame; repack the pitch (into a
+  // buffer deinit_snes() frees: a static one stayed in the middle of the
+  // PSRAM heap after the game, splitting its largest block)
+  auto &packed = g_packed;
   packed.resize(static_cast<size_t>(g_last_w) * g_last_h * 2);
   for (int y = 0; y < g_last_h; y++) {
     memcpy(packed.data() + static_cast<size_t>(y) * g_last_w * 2, g_last_frame + static_cast<size_t>(y) * snes_glue_pitch(),
@@ -222,4 +226,5 @@ void deinit_snes() {
   snes_glue_deinit();
   BoxEmu::get().audio_sample_rate(48000);
   g_last_frame = nullptr;
+  std::vector<uint8_t>().swap(g_packed); // the screenshot buffer goes back too
 }
