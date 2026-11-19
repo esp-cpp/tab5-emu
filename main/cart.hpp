@@ -74,6 +74,9 @@ public:
     Tab5Emu::get().free_romdata();
   }
 
+  /// Where the save states are (the launcher counts them)
+  static std::string save_dir() { return FS_PREFIX + "/" + SAVE_DIR; }
+
   std::string get_rom_filename() const { return info_.rom_path; }
 
   virtual void reset() { logger_.info("Base reset"); }

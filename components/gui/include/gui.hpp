@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "lvgl.h"
@@ -30,6 +31,8 @@ class Gui {
 public:
   struct Config {
     std::string metadata_filename = "metadata.csv";
+    /// Where the carts keep their save states (the list shows each game's count)
+    std::string save_dir{std::string(Tab5Emu::mount_point) + "/saves"};
     espp::Logger::Verbosity log_level{espp::Logger::Verbosity::WARN};
   };
 
@@ -53,6 +56,8 @@ public:
   void resume();
 
   void update_rom_list();
+  /// Give the launcher rom_infos_ (with their save counts), keeping `selected_path` selected
+  void show_games(const std::string &selected_path);
   /// Re-read metadata.csv even if its modification time did not change (FAT
   /// times are coarse, and without a set clock they may not move at all).
   void reload_rom_list() {
@@ -116,6 +121,8 @@ protected:
   bool usb_drive_shown_{false};
 
   std::string metadata_filename_;
+  std::string save_dir_;
+  std::unordered_map<std::string, int> save_counts_; ///< per rom stem (emu_ui::count_saves)
   std::filesystem::file_time_type metadata_last_modified_{};
 
   std::atomic<bool> paused_{false};

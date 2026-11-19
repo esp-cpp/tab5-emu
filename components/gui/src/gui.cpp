@@ -1,5 +1,7 @@
 #include "gui.hpp"
 
+#include "emu-ui/saves.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -38,6 +40,7 @@ constexpr SettingLimit kSettingLimits[] = {
 
 Gui::Gui(const Config &config)
     : metadata_filename_(config.metadata_filename)
+    , save_dir_(config.save_dir)
     , logger_({.tag = "Gui", .level = config.log_level}) {
   {
     std::lock_guard<std::recursive_mutex> lk(mutex_);
@@ -198,9 +201,17 @@ void Gui::update_rom_list() {
   std::error_code ec;
   auto path = std::string(Tab5Emu::mount_point) + "/" + metadata_filename_;
   auto mtime = std::filesystem::last_write_time(path, ec);
+  // (the saves are counted each time: a game played since may have saved)
+  auto saves = emu_ui::count_saves(save_dir_);
   if (!ec && mtime == metadata_last_modified_ && !rom_infos_.empty()) {
+    if (saves != save_counts_) {
+      save_counts_ = std::move(saves);
+      const int f = focused_rom_;
+      show_games(f >= 0 && f < (int)rom_infos_.size() ? rom_infos_[f].rom_path : std::string());
+    }
     return;
   }
+  save_counts_ = std::move(saves);
   metadata_last_modified_ = mtime;
   // keep the selected game selected across a reload (its index may change);
   // at boot that is the last game played
@@ -215,14 +226,19 @@ void Gui::update_rom_list() {
   std::stable_sort(rom_infos_.begin(), rom_infos_.end(), [](const RomInfo &a, const RomInfo &b) {
     return console_of(a.platform) < console_of(b.platform);
   });
+  show_games(selected_path);
+}
+
+void Gui::show_games(const std::string &selected_path) {
   int selected = -1;
   std::vector<emu_ui::Game> games;
   games.reserve(rom_infos_.size());
   for (size_t i = 0; i < rom_infos_.size(); i++) {
     const auto &rom = rom_infos_[i];
     const auto &info = console_info(console_of(rom.platform));
+    const auto it = save_counts_.find(std::filesystem::path(rom.rom_path).stem().string());
     games.push_back({.title = rom.name, .console_key = info.key, .console_name = info.name,
-                     .console_short = info.short_name});
+                     .console_short = info.short_name, .saves = it == save_counts_.end() ? 0 : it->second});
     if (selected < 0 && rom.rom_path == selected_path) selected = i;
   }
   focused_rom_ = -1;
