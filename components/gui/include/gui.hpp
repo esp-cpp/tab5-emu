@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -14,16 +15,17 @@
 #include "high_resolution_timer.hpp"
 #include "logger.hpp"
 
-#include "console_art.hpp"
+#include "emu-ui/launcher.hpp"
+
 #include "rom_info.hpp"
 #include "settings.hpp"
 #include "tab5-emu.hpp"
 
-/// The launcher GUI: a list of games (from metadata.csv on the SD card),
-/// grouped under a header per console, with the selected game's boxart and
-/// console, plus settings (volume, brightness, video scaling, resume), which
-/// are kept in AppSettings. Hand-written LVGL, laid out for the Tab5's
-/// 1280x720 landscape screen.
+/// The launcher: the games in metadata.csv on the SD card, grouped by
+/// console, with the selected game's boxart, a console picker and the
+/// settings (kept in AppSettings). The screens are emu-ui's (shared with
+/// esp-box-emu); this is the Tab5's side of them: the games, the images,
+/// the settings and the USB drive.
 class Gui {
 public:
   struct Config {
@@ -93,59 +95,25 @@ public:
   Snapshot snapshot();
 
 protected:
-  void init_ui();
-  void deinit_ui();
-  void update_shared_state();
-  void select_rom(int index);
-  void build_list(int keep_rom);
-  void step_console(int dir);
-  void update_filter_marker();
-  void open_console_picker();
-  void close_console_picker();
-  static void picker_event(lv_event_t *e);
+  std::vector<emu_ui::Row> settings_rows();
+  void set_usb_drive(bool on);
   void update();
-
   void on_volume(const std::vector<uint8_t> &data);
   void on_battery(const std::vector<uint8_t> &data);
 
-  static void event_callback(lv_event_t *e);
+  /// Decode a JPEG on the SD card into a new RGB565 draw buffer (nullptr if it cannot)
+  lv_draw_buf_t *decode_image(const std::string &path);
+  const void *cover(size_t index);
+  const void *console_art(const std::string &key);
 
   std::vector<RomInfo> rom_infos_;
   std::atomic<int> focused_rom_{-1};
-
-  lv_obj_t *screen_{nullptr};
-  lv_group_t *group_{nullptr}; ///< gamepad / keyboard focus order
-  lv_obj_t *rom_list_{nullptr};
-  lv_obj_t *boxart_{nullptr};
-  lv_draw_buf_t *boxart_buf_{nullptr}; ///< decoded boxart the image widget shows
-  void load_boxart(const std::string &path);
-  /// Decode a JPEG on the SD card into a new RGB565 draw buffer (nullptr if it cannot)
-  lv_draw_buf_t *decode_image(const std::string &path);
-
-  // the console the selected game runs on: its SD card art, or a badge
-  lv_obj_t *console_area_{nullptr};
-  lv_draw_buf_t *console_art_buf_{nullptr};
-  int shown_console_{-1};
-  void show_console(Console console);
-  void add_console_header(Console console);
-  lv_obj_t *title_label_{nullptr};
-  lv_obj_t *play_button_{nullptr};
-  lv_obj_t *volume_slider_{nullptr};
-  lv_obj_t *brightness_slider_{nullptr};
-  lv_obj_t *mute_switch_{nullptr};
-  lv_obj_t *usb_switch_{nullptr};
-  lv_obj_t *usb_label_{nullptr};
-  void set_usb_drive(bool on);
-  lv_obj_t *video_dropdown_{nullptr};
-  lv_obj_t *resume_switch_{nullptr};
-  lv_obj_t *battery_label_{nullptr};
-  std::vector<lv_obj_t *> rom_buttons_; ///< per game (rom_infos_ index); nullptr if filtered out
-
-  // the console filter: the Console whose games the list shows, -1 all
-  int filter_{-1};
-  lv_obj_t *picker_{nullptr};        ///< the console picker, while it is open
-  lv_group_t *picker_group_{nullptr};
-  std::vector<int> picker_consoles_; ///< the picker's rows: Console, -1 all
+  std::unique_ptr<emu_ui::Launcher> launcher_;
+  lv_draw_buf_t *boxart_buf_{nullptr}; ///< the selected game's decoded boxart
+  /// boxart/consoles/<key>.jpg, decoded once (nullptr: there is none)
+  std::map<std::string, lv_draw_buf_t *> console_art_;
+  std::string usb_note_;
+  bool usb_drive_shown_{false};
 
   std::string metadata_filename_;
   std::filesystem::file_time_type metadata_last_modified_{};

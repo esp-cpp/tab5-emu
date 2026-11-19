@@ -58,6 +58,8 @@ public:
         .paused_image_path = get_paused_image_path(),
         .action_callback = std::bind(&Cart::on_menu_action, this, std::placeholders::_1),
         .slot_image_callback = [this]() -> std::string { return get_screenshot_path(false); },
+        .game_title = info_.name,
+        .console_key = console_info(console_of(info_.platform)).key,
         .log_level = espp::Logger::Verbosity::WARN});
 
     std::error_code ec;
