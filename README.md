@@ -13,7 +13,7 @@
 > Knight running natively, all from one launcher on a microSD card.
 
 <p align="center">
-  <img src="docs/images/launcher.gif" alt="The tab5-emu launcher: scrolling through the PC games, then left and right through the consoles (PICO-8, NES, Super Nintendo, Game Boy) with their boxart" width="80%">
+  <img src="docs/images/launcher.gif" alt="The tab5-emu launcher: scrolling down the NES games, each with its boxart and save count, then right through the consoles (Super Nintendo, Game Boy, Game Boy Color), each in its own colors" width="80%">
 </p>
 
 > [!TIP]
@@ -48,8 +48,9 @@
 - 🧠 **Native PlayStation and PC games**: Metal Gear Solid from its
   decompilation, The Phantom Menace through a static recompiler, Jedi Knight
   through OpenJKDF2, all running as C on the P4's two 360 MHz RISC-V cores.
-- 🖼️ **Launcher with boxart**: games grouped by console, a console picker
-  and filter, settings beside the list, touch or gamepad.
+- 🖼️ **Launcher with boxart**: games grouped by console in each console's
+  colors, save counts, a console picker and filter, a settings panel, touch
+  or gamepad.
 - 💾 **Save states everywhere**: the pause menu (BOOT button or the top-right
   corner) saves and loads slots with screenshots; the PlayStation games keep
   their own memory-card saves too.
@@ -183,21 +184,25 @@ https://github.com/user-attachments/assets/641a64b0-b3af-429b-8582-a38fc9a5cdad
 ## The launcher
 
 <p align="center">
-  <img src="docs/images/launcher.jpg" alt="The launcher: the NES games in a list on the left, the selected game's boxart and a Play button in the middle, volume, mute, brightness, USB drive, video scaling and resume settings on the right" width="80%">
+  <img src="docs/images/launcher.jpg" alt="The launcher: console tabs along the top, the NES games in a list with their save counts, Super Mario Bros. 3 selected with its boxart, its name and a Play button" width="32%">
+  <img src="docs/images/launcher-picker.jpg" alt="The console picker: a tile per console in its colors with its game count, over the dimmed launcher" width="32%">
+  <img src="docs/images/launcher-settings.jpg" alt="The settings panel slid in from the right: volume, mute, brightness, video scaling, resume last save and USB drive" width="32%">
 </p>
 
-- **Games by console**: the list is grouped by console, each with a colored
-  header. Left / right on the list jump to the previous / next console.
-- **Console picker**: tap the console above the boxart (or X on a gamepad,
-  F on a keyboard) to show only one console's games, or all of them again.
-  An outline on the console means the list is filtered, and left / right
-  then move the filter to the next console. `emulink filter <console>` does
-  the same over USB.
+- **Games by console**: the list is grouped by console, and each console
+  has its own colors and background. The consoles are tabs along the top;
+  left / right on the list jump to the previous / next console.
+- **Save counts**: each game shows how many save states it has.
+- **Console picker**: tap a console tab (or X on a gamepad, F on a keyboard)
+  for a grid of the consoles, to show only one console's games or all of
+  them again; left / right then move the filter to the next console.
+  `emulink filter <console>` does the same over USB.
 - **Boxart and names** come from `metadata.csv` on the card (see
   [SD card layout](#sd-card-layout)). Per-console art can go in
   `boxart/consoles/<key>.jpg`.
-- **Settings** beside the list: volume, mute, brightness, the SD card as a
-  USB drive, video scaling (original, fit, fill) and resume last save.
+- **Settings** (B, or the gear) slide in from the right: volume, mute,
+  brightness, the SD card as a USB drive, video scaling (original, fit,
+  fill) and resume last save.
 - **Pause menu** in game (BOOT button, the top-right corner, select+start on
   a gamepad): resume, save and load slots with screenshots, reset, quit,
   and the same settings.
@@ -414,7 +419,8 @@ espp's `hid-rp-report-map.hpp`.
 main/               app_main, Cart base class, per-game carts
 components/
   tab5-emu/         HAL (Tab5Emu): display / PPA video path, audio, SD, input, USB
-  gui/              LVGL launcher (rom list + boxart + settings)
+  emu-ui/           the launcher and pause menu screens (shared with esp-box-emu)
+  gui/              the launcher's Tab5 side: games, boxart, settings
   menu/             LVGL in-game pause menu (resume/reset/save/load/quit)
   rom_info/         metadata.csv parsing, consoles
   statistics/       frame timing
