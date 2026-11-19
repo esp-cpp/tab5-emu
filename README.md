@@ -1,19 +1,99 @@
 # tab5-emu
 
-Games on the [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5), an
-ESP32-P4 handheld with a 5" 1280x720 display, built with
-[ESPP](https://github.com/esp-cpp/espp). A launcher, a pause menu with save
-states, and a `Cart` per game or emulator core, in the same shape as
-[esp-box-emu](https://github.com/esp-cpp/esp-box-emu) so glue can move
-between the two.
+[![Release](https://img.shields.io/github/v/release/esp-cpp/tab5-emu?sort=semver)](https://github.com/esp-cpp/tab5-emu/releases)
+[![Build](https://github.com/esp-cpp/tab5-emu/actions/workflows/build.yml/badge.svg)](https://github.com/esp-cpp/tab5-emu/actions/workflows/build.yml)
+[![License](https://img.shields.io/github/license/esp-cpp/tab5-emu)](./LICENSE)
+[![Platform: ESP32-P4](https://img.shields.io/badge/platform-ESP32--P4-red)](https://www.espressif.com/en/products/socs/esp32-p4)
+[![Web console](https://img.shields.io/badge/web%20console-esp--cpp.github.io%2Ftab5--emu-blue)](https://esp-cpp.github.io/tab5-emu/)
+
+> Retro games and native PC / PlayStation ports on the
+> [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5), an ESP32-P4
+> handheld with a 5" 1280x720 touch screen. Emulators from the NES to the
+> Game Boy Advance, plus Metal Gear Solid, The Phantom Menace and Jedi
+> Knight running natively, all from one launcher on a microSD card.
+
+<p align="center">
+  <img src="docs/images/launcher.gif" alt="The tab5-emu launcher: scrolling through the PC games, then left and right through the consoles (PICO-8, NES, Super Nintendo, Game Boy) with their boxart" width="80%">
+</p>
+
+> [!TIP]
+> **Sister project: [esp-box-emu](https://github.com/esp-cpp/esp-box-emu)**,
+> the same launcher, cores and web console on a 3D-printed Game Boy Color
+> style handheld built around the ESP32-S3-BOX. The two share their
+> emulator cores, web console and USB link as submodules, so a fix in one
+> reaches the other. See [The esp-cpp handhelds](#the-esp-cpp-handhelds).
+
+**Contents**
+
+- [Highlights](#highlights)
+- [What it plays](#what-it-plays)
+- [Native ports](#native-ports): [Metal Gear Solid](#metal-gear-solid-natively), [The Phantom Menace](#star-wars-episode-i-the-phantom-menace-recompiled), [Jedi Knight](#star-wars-jedi-knight--dark-forces-ii)
+- [Gallery](#gallery)
+- [The launcher](#the-launcher)
+- [Web console](#web-console)
+- [Hardware](#hardware)
+- [Get started](#get-started): [SD card](#sd-card-layout), [build](#build)
+- [Controls](#controls)
+- [Development](#development)
+- [The esp-cpp handhelds](#the-esp-cpp-handhelds)
+- [License](#license)
+
+## Highlights
+
+- 🎮 **One firmware, every system**: NES, Super Nintendo,
+  Game Boy / Color, Game Boy Advance, Master System, Game Gear, Genesis,
+  MSX, PICO-8, Doom, Dark Forces, ScummVM (Star Trek: 25th Anniversary),
+  plus the three native ports below. Each game picks its core from the ROM's
+  file type, and games start from the launcher without a reboot.
+- 🧠 **Native PlayStation and PC games**: Metal Gear Solid from its
+  decompilation, The Phantom Menace through a static recompiler, Jedi Knight
+  through OpenJKDF2, all running as C on the P4's two 360 MHz RISC-V cores.
+- 🖼️ **Launcher with boxart**: games grouped by console, a console picker
+  and filter, settings beside the list, touch or gamepad.
+- 💾 **Save states everywhere**: the pause menu (BOOT button or the top-right
+  corner) saves and loads slots with screenshots; the PlayStation games keep
+  their own memory-card saves too.
+- 🌐 **Web console**: plug into a computer and Chrome or Edge offers a control
+  panel to watch and play the screen, manage games and boxart, browse the
+  SD card, change settings and update the firmware. Nothing to install.
+- 🔌 **USB host**: keyboards, mice and gamepads on the USB-A port, through
+  hubs, decoded from their HID report descriptors.
+- 📁 **SD card as a USB drive**: copy ROMs and saves without pulling the card.
+- 🔁 **Safe updates over USB**: `emulink ota` or the web console, with an
+  updater app to roll back to.
+
+## What it plays
+
+| System | Core | Status |
+|---|---|---|
+| Metal Gear Solid (PlayStation) | [mgs_reversing](https://github.com/FoxdieTeam/mgs_reversing) + [psyz](https://github.com/Xeeynamo/psyz), native | ~28 fps against the game's 30 fps cap |
+| Star Wars Episode I: The Phantom Menace (PlayStation) | [tpm-decomp](https://github.com/esp-cpp/tpm-decomp), statically recompiled | ~27 fps in game, movies at their full 15 fps |
+| Star Wars: Jedi Knight – Dark Forces II (PC) | [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2), native | playable with sound, music and cutscenes |
+| Super Nintendo | snes9x2005 | full speed |
+| Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
+| Genesis / Mega Drive | gwenesis ¹ | full speed |
+| NES | nofrendo ¹ | full speed (~3 ms a frame) |
+| Game Boy / Color | gnuboy ¹ | full speed |
+| Master System / Game Gear | SMS Plus ¹ | full speed |
+| MSX | fMSX ¹ | runs (Metal Gear) |
+| PICO-8 | femto8 ¹ | `.p8` and `.p8.png` carts |
+| Doom | PrBoom ¹ | ~35 fps (shareware demo) |
+| Dark Forces | The Force Engine ¹ | ~50 fps in the first level |
+| Star Trek: 25th Anniversary | [ScummVM](https://github.com/esp-cpp/scummvm) (startrek engine) | intro, bridge, briefings, saves |
+
+¹ Shared with [esp-box-emu](https://github.com/esp-cpp/esp-box-emu): each
+core is a submodule holding the core plus its `port/` glue, written against
+`BoxEmu`, which the Tab5 aliases to `Tab5Emu`.
+
+## Native ports
 
 Three of the carts are not emulators. They are native ports of PC and
 PlayStation games, running the games' own code as C on the two 360 MHz
-RISC-V cores with a software rasterizer: Jedi Knight and Metal Gear Solid from
-decompiled source, The Phantom Menace from a static recompilation of your own
-copy of the game (see below).
+RISC-V cores with a software rasterizer: Jedi Knight and Metal Gear Solid
+from decompiled source, The Phantom Menace from a static recompilation of
+your own copy of the game.
 
-## Metal Gear Solid, natively
+### Metal Gear Solid, natively
 
 https://github.com/user-attachments/assets/24d01f38-ea30-4a68-a6e2-731dbd7e1fb0
 
@@ -33,7 +113,7 @@ drawn by two rasterizer workers, one per core, each taking a band of rows.
 Save and load states from the pause menu. See
 [components/mgs/README.md](components/mgs/README.md).
 
-## Star Wars Episode I: The Phantom Menace, recompiled
+### Star Wars Episode I: The Phantom Menace, recompiled
 
 https://github.com/user-attachments/assets/a1001e13-553d-4048-aa23-dba5409316e3
 
@@ -56,9 +136,9 @@ run from decompiled source. `tpm-decomp/tools/recomp.py` translates every
 MIPS instruction of the executable into C, mechanically. That C is
 effectively Sony's executable in another form, so it is never committed or
 distributed. It is generated in the build directory from **your own** copy
-of the game (`CONFIG_TPM_DISC_PATH`, see Build below), so a playable TPM
-needs a local build. The firmware from CI, built without the executable, carries only the
-cart's load-screen viewer.
+of the game (`CONFIG_TPM_DISC_PATH`, see [Build](#build)), so a playable TPM
+needs a local build. The firmware from CI, built without the executable,
+carries only the cart's load-screen viewer.
 
 The goal is a real, matching decompilation: hand-written C that compiles back
 to the byte-identical executable, as mgs_reversing is for Metal Gear Solid.
@@ -69,7 +149,7 @@ complete, TPM would build from source like the MGS port, with only the game
 data on the card. Contributions are very welcome. See
 [components/tpm/README.md](components/tpm/README.md).
 
-## Star Wars: Jedi Knight – Dark Forces II
+### Star Wars: Jedi Knight – Dark Forces II
 
 https://github.com/user-attachments/assets/2e6b5173-f53a-4591-8347-96aa53e222f2
 
@@ -84,34 +164,45 @@ low internal resolution and the P4's 2D accelerator scales it to the panel,
 with the HUD composited at full resolution. Playable on hardware with
 sound, music, the full-motion cutscenes (Smacker video and audio at the
 movies' full 15 fps; Start skips), saves, and a USB keyboard and mouse or a
-gamepad. The port
-plan and its history are in [docs/PLAN.md](docs/PLAN.md).
+gamepad. The port plan and its history are in [docs/PLAN.md](docs/PLAN.md).
 
-## Emulators
+## Gallery
 
-| Core | Source | Status |
-|---|---|---|
-| Genesis / Mega Drive | gwenesis (shared with esp-box-emu) | full speed |
-| SNES | snes9x2005 | full speed |
-| Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
-| NES | nofrendo (shared with esp-box-emu) | full speed (~3 ms a frame) |
-| Game Boy / Color | gnuboy (shared with esp-box-emu) | full speed |
-| Master System / Game Gear | SMS Plus (shared with esp-box-emu) | full speed |
-| MSX | fMSX (shared with esp-box-emu) | runs (Metal Gear) |
-| Doom | PrBoom (shared with esp-box-emu) | ~35 fps (shareware demo) |
-| Dark Forces | The Force Engine (shared with esp-box-emu) | ~50 fps in the first level |
+Captured on the Tab5 over the USB link (`emulink screenshot`), at the
+games' own resolution, scaled up.
 
-The cores shared with esp-box-emu are submodules (the core plus its `port/`
-glue, written against `BoxEmu`, which the Tab5 aliases to `Tab5Emu`), so a
-fix in one firmware reaches the other.
+| | | |
+|:---:|:---:|:---:|
+| <img src="docs/images/snes-dkc.png" alt="Donkey Kong Country on the Super Nintendo core" width="100%"><br>**Super Nintendo**: Donkey Kong Country | <img src="docs/images/snes-smw.png" alt="Super Mario World's title screen" width="100%"><br>**Super Nintendo**: Super Mario World | <img src="docs/images/snes-chrono-trigger.png" alt="Chrono Trigger's opening" width="100%"><br>**Super Nintendo**: Chrono Trigger |
+| <img src="docs/images/gba-minish-cap.png" alt="The Minish Cap's title screen on the Game Boy Advance core" width="100%"><br>**Game Boy Advance**: The Minish Cap | <img src="docs/images/gba-metroid-fusion.png" alt="Metroid Fusion's title screen" width="100%"><br>**Game Boy Advance**: Metroid Fusion | <img src="docs/images/genesis-sonic3.png" alt="Sonic 3's opening on the Genesis core" width="100%"><br>**Genesis**: Sonic the Hedgehog 3 |
+| <img src="docs/images/nes-smb3.png" alt="Super Mario Bros. 3's world map on the NES core" width="100%"><br>**NES**: Super Mario Bros. 3 | <img src="docs/images/gbc-links-awakening.png" alt="Link's Awakening DX's opening on the Game Boy Color core" width="100%"><br>**Game Boy Color**: Link's Awakening DX | <img src="docs/images/gg-streets-of-rage-2.png" alt="Streets of Rage II's title screen on the Game Gear core" width="100%"><br>**Game Gear**: Streets of Rage II |
+| <img src="docs/images/doom.png" alt="Doom's first level" width="100%"><br>**Doom** (PrBoom) | <img src="docs/images/pico8-celeste.png" alt="Celeste's title screen on the PICO-8 core" width="100%"><br>**PICO-8**: Celeste | <img src="docs/images/gba-title.jpg" alt="A Game Boy Advance game on the Tab5's screen" width="100%"><br>**Game Boy Advance** on the panel |
 
 https://github.com/user-attachments/assets/641a64b0-b3af-429b-8582-a38fc9a5cdad
 
-<p>
-<img src="docs/images/gba-title.jpg" width="32%"> <img src="docs/images/gba-town.jpg" width="32%">
+## The launcher
+
+<p align="center">
+  <img src="docs/images/launcher.jpg" alt="The launcher: the NES games in a list on the left, the selected game's boxart and a Play button in the middle, volume, mute, brightness, USB drive, video scaling and resume settings on the right" width="80%">
 </p>
 
-## Web Console
+- **Games by console**: the list is grouped by console, each with a colored
+  header. Left / right on the list jump to the previous / next console.
+- **Console picker**: tap the console above the boxart (or X on a gamepad,
+  F on a keyboard) to show only one console's games, or all of them again.
+  An outline on the console means the list is filtered, and left / right
+  then move the filter to the next console. `emulink filter <console>` does
+  the same over USB.
+- **Boxart and names** come from `metadata.csv` on the card (see
+  [SD card layout](#sd-card-layout)). Per-console art can go in
+  `boxart/consoles/<key>.jpg`.
+- **Settings** beside the list: volume, mute, brightness, the SD card as a
+  USB drive, video scaling (original, fit, fill) and resume last save.
+- **Pause menu** in game (BOOT button, the top-right corner, select+start on
+  a gamepad): resume, save and load slots with screenshots, reset, quit,
+  and the same settings.
+
+## Web console
 
 Plug the Tab5 into a computer and it brings its own control panel. Chrome or
 Edge pops up a notification for
@@ -124,42 +215,46 @@ server in between.
 <img src="docs/images/web-console-screen.jpg" alt="Web console Screen tab: a capture of Donkey Kong Country next to an on-screen controller and save-state buttons" width="49%"> <img src="docs/images/web-console-library.jpg" alt="Web console Library tab: Super Nintendo games with boxart, console filters and Play / Remove buttons" width="49%">
 </p>
 
-- **Dashboard**: what's running (with its boxart), live frame-rate and
+- 📊 **Dashboard**: what's running (with its boxart), live frame-rate and
   memory graphs, the firmware and partition, the last reset reason, and a
   button that hands the SD card to the PC as a USB drive.
-- **Screen**: capture the game's or the launcher's screen (or keep it
+- 🖥️ **Screen**: capture the game's or the launcher's screen (or keep it
   **Live**), save it as a PNG, play with the on-screen controller or the
   keyboard (arrows, Z / X / A / S, Q / W for L / R, Enter = Start), save and
   load states, quit.
-- **Library**: the games by console with their boxart and counts. Search,
+- 📚 **Library**: the games by console with their boxart and counts. Search,
   filter (the launcher too, if you like), **Play** any of them, or **Add a
   game**: choose the ROM and its cover and the page uploads both and adds the
   `metadata.csv` line. **Remove** undoes it.
-- **Files**: browse the SD card, download, upload by drag and drop, new
+- 📁 **Files**: browse the SD card, download, upload by drag and drop, new
   folder, delete.
-- **Settings**: volume, mute, brightness, video scaling and resume last save,
-  shown in the launcher at once and saved to the card a moment later.
-- **System**: chip, memory, ESP-IDF, OTA state and the services on the link;
-  restart (or into download mode), and **Update firmware**, which restarts
-  into the updater and opens the espp OTA console for `build/tab5-emu.bin`.
-- **Console**: the log over Web Serial (pick the console's port), filtered,
-  followed, saved to a file.
+- ⚙️ **Settings**: volume, mute, brightness, video scaling and resume last
+  save, shown in the launcher at once and saved to the card a moment later.
+- 🔧 **System**: chip, memory, ESP-IDF, OTA state and the services on the
+  link; restart (or into download mode), and **Update firmware**, which
+  restarts into the updater and opens the espp OTA console for
+  `build/tab5-emu.bin`.
+- 📜 **Console**: the log over Web Serial (pick the console's port),
+  filtered, followed, saved to a file.
 
 <p>
 <img src="docs/images/web-console-dashboard.jpg" alt="Web console Dashboard: Donkey Kong Country running, with performance, memory, device and SD card panels" width="32%"> <img src="docs/images/web-console-settings.jpg" alt="Web console Settings tab: volume, mute, brightness, video scaling and resume last save" width="32%"> <img src="docs/images/web-console-system.jpg" alt="Web console System tab: ESP32-P4 details, firmware update and restart" width="32%">
 </p>
 
-How it works: the composite USB device has a vendor (WebUSB) interface that
-carries the same link as `tools/emulink`, and its descriptor names the
+**How it works:** the composite USB device has a vendor (WebUSB) interface
+that carries the same link as `tools/emulink`, and its descriptor names the
 landing page, which is how the browser knows where to go. The page is plain
-HTML, CSS and ES modules in [`web/`](./web) (shared with esp-box-emu, no build
-step), published to GitHub Pages from `main`. One program owns the link at a
-time, so close `emulink` before opening the page and the other way round. To
-work on the page, `python3 -m http.server -d web 8000` and open
-http://localhost:8000 (WebUSB needs https or localhost); [`web/README.md`](./web/README.md)
-has the details.
+HTML, CSS and ES modules in [`web/`](./web) (shared with esp-box-emu, no
+build step), published to GitHub Pages from `main`. One program owns the
+link at a time, so close `emulink` before opening the page and the other way
+round. To work on the page, `python3 -m http.server -d web 8000` and open
+http://localhost:8000 (WebUSB needs https or localhost);
+[`web/README.md`](./web/README.md) has the details.
 
 ## Hardware
+
+No hardware to build: the [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5)
+runs the firmware as it comes.
 
 | | |
 |---|---|
@@ -169,34 +264,24 @@ has the details.
 | Audio | ES8388 codec + NS4150B amp, dual mics |
 | Storage | microSD (SDMMC 4-bit) |
 | Input | touch (virtual gamepad), BOOT button (pause menu), USB keyboard / mouse / gamepad on the USB-A port (hubs supported) |
-| USB-C | serial console, or the SD card as a USB drive (settings > "USB drive") |
+| USB-C | serial console, the USB link (web console, `emulink`), and the SD card as a USB drive |
 
-## Layout
+## Get started
 
-```
-main/               app_main, Cart base class, per-game carts
-components/
-  tab5-emu/         HAL (Tab5Emu): display / PPA video path, audio, SD, input
-  gui/              LVGL launcher (rom list + boxart + settings)
-  menu/             LVGL in-game pause menu (resume/reset/save/load/quit)
-  rom_info/         metadata.csv parsing
-  statistics/       frame timing
-  jk/               OpenJKDF2 port: engine submodule + ESP32 platform layer + glue
-  mgs/              Metal Gear Solid: mgs_reversing + psyz submodules + the Tab5 platform layer
-  tpm/              The Phantom Menace: tpm-decomp submodule (static recompiler + runtime) + glue
-  gba/ genesis/ snes/   the emulator cores and their glue
-  nes/ gbc/ sms/ msx/ doom/ darkforces/ pico8/
-                    the cores shared with esp-box-emu (submodules: core + port/ glue)
-  pool_allocator/   the allocator MSX, Doom and Dark Forces run in their 4 MB block
-docs/PLAN.md        the Jedi Knight plan and history
-```
+1. Build and flash the firmware ([Build](#build)). After the first flash,
+   updates can go over USB from the web console or `emulink ota`.
+2. Put your games, their boxart and a `metadata.csv` on a microSD card
+   ([SD card layout](#sd-card-layout)). The web console's **Library** tab can
+   add games one at a time over USB.
+3. Insert the card, power on and pick a game.
 
-## SD card layout
+### SD card layout
 
 ```
 /sdcard/
   metadata.csv                # rom_path, boxart_path, name
   boxart/*.jpg                # baseline JPEG, ~400x400
+  boxart/consoles/<key>.jpg   # optional per-console art for the launcher
   jk/                         # your Jedi Knight install (copy from CD / GOG)
     jk.cd                     # (any marker file; metadata points here)
     episode/JK1.gob JK1CTF.gob JK1MP.gob
@@ -210,27 +295,31 @@ docs/PLAN.md        the Jedi Knight plan and history
   mgs/                        # Metal Gear Solid, extracted from your own US disc
     STAGE.DIR RADIO.DAT FACE.DAT ZMOVIE.STR VOX.DAT DEMO.DAT BRF.DAT
                               # (components/mgs/mgs_reversing/port/extract_disc.py)
-  doom/                       # doom1.wad, doom.wad, doom2.wad, ... (the IWADs)
-  darkforces/                 # your Dark Forces install: DARK.GOB, SOUNDS.GOB, TEXTURES.GOB, SPRITES.GOB, LFDs
-  nes/ gbc/ sms/ gg/ msx/ ... # cartridge ROMs (any folder: metadata.csv has the paths)
   tpm/                        # The Phantom Menace, USA Rev 1: the .bin of a bin/cue rip
     Star Wars - Episode I - The Phantom Menace (USA) (Rev 1).bin
+  startrek/                   # Star Trek: 25th Anniversary data, plus a marker
+    startrek.scummvm          # file *.scummvm (ScummVM detects the game)
+  doom/                       # doom1.wad, doom.wad, doom2.wad, ... (the IWADs)
+  darkforces/                 # your Dark Forces install: DARK.GOB, SOUNDS.GOB, TEXTURES.GOB, SPRITES.GOB, LFDs
+  nes/ snes/ gbc/ gba/ sms/ gg/ genesis/ msx/ pico8/
+                              # cartridge ROMs (any folder: metadata.csv has the paths)
   saves/                      # save states and their screenshots; the PlayStation
                               # games' memory cards (tpm_card1.mcd, mgs_card1.mcd:
                               # raw 128 KB images, as PC emulators use)
 ```
 
-Example `metadata.csv` (one line per game: rom path, boxart, name; the
-platform comes from the path: `.md`/`.gen` Genesis, `.sfc`/`.smc` SNES,
-`.gba` Game Boy Advance, `.nes` NES, `.gb`/`.gbc` Game Boy / Color, `.sms`
-Master System, `.gg` Game Gear, `.rom` MSX, `.wad` Doom, `DARK.GOB` Dark
-Forces, `.p8`/`.p8.png` PICO-8, `jk.cd` Jedi Knight, `STAGE.DIR` Metal Gear
-Solid, `SLUS_008.84` The Phantom Menace):
+`metadata.csv` has one line per game: rom path, boxart, name. The platform
+comes from the path: `.nes` NES, `.sfc`/`.smc` SNES, `.gb`/`.gbc` Game Boy /
+Color, `.gba` Game Boy Advance, `.sms` Master System, `.gg` Game Gear,
+`.md`/`.gen` Genesis, `.rom` MSX, `.p8`/`.p8.png` PICO-8, `.wad` Doom,
+`DARK.GOB` Dark Forces, `*.scummvm` ScummVM, `jk.cd` Jedi Knight,
+`STAGE.DIR` Metal Gear Solid, `SLUS_008.84` The Phantom Menace.
 
-```
+```csv
 jk/jk.cd, boxart/jk.jpg, Star Wars: Jedi Knight - Dark Forces II
 mgs/STAGE.DIR, boxart/mgs.jpg, Metal Gear Solid
 tpm/SLUS_008.84, boxart/tpm.jpg, Star Wars Episode I: The Phantom Menace
+startrek/startrek.scummvm, boxart/startrek.jpg, Star Trek: 25th Anniversary
 genesis/sonic.md, boxart/sonic.jpg, Sonic the Hedgehog
 snes/smw.sfc, boxart/smw.jpg, Super Mario World
 gba/mk.gba, boxart/mk.jpg, Mario Kart: Super Circuit
@@ -239,17 +328,19 @@ gba/mk.gba, boxart/mk.jpg, Mario Kart: Super Circuit
 No game data is included. A real `gba_bios.bin` next to a GBA ROM is used
 when present; otherwise the open-source BIOS built into gpSP is used.
 
-## Build
+### Build
 
 Requires ESP-IDF v6.x.
 
-```
-git clone --recurse-submodules=components/jk/OpenJKDF2 \
-          --recurse-submodules=components/mgs/mgs_reversing \
-          --recurse-submodules=components/mgs/psyz \
-          --recurse-submodules=components/tpm/tpm-decomp \
-          https://github.com/esp-cpp/tab5-emu
+```sh
+git clone https://github.com/esp-cpp/tab5-emu
 cd tab5-emu
+git submodule update --init components/emulink \
+    components/jk/OpenJKDF2 components/mgs/mgs_reversing components/mgs/psyz \
+    components/tpm/tpm-decomp components/genesis/gwenesis components/pico8/femto8 \
+    components/nes/nofrendo components/gbc/gnuboy components/msx/fmsx \
+    components/sms/smsplus components/doom/prboom components/darkforces/TheForceEngine
+git submodule update --init --depth 1 components/scummvm/scummvm
 idf.py set-target esp32p4
 idf.py -C updater build   # once: the updater app, which goes in ota_1
 idf.py build flash monitor
@@ -257,10 +348,11 @@ idf.py build flash monitor
 
 The updater (`updater/`) is what over-USB updates (`tools/emulink`) reboot
 into, and what a bad update rolls back to; with it built first, `idf.py
-flash` writes it along with the emulator.
+flash` writes it along with the emulator. After that, updates can go over
+USB with `emulink ota` or the web console.
 
-(Do not recurse into the engine's own submodules; they are desktop-only
-dependencies.)
+Don't use `--recursive`: the engines' own submodules are desktop-only
+dependencies (this is the list CI checks out).
 
 The Phantom Menace is recompiled from your own disc at build time: set
 `CONFIG_TPM_DISC_PATH` to your USA Rev 1 disc image (the `.bin` of a bin/cue
@@ -271,62 +363,84 @@ the TPM cart only shows the game's load screens. See
 
 ## Controls
 
-Touch (virtual gamepad):
+**Touch** (virtual gamepad):
 
 - Left third: d-pad (relative to the zone center)
 - Right third: A (lower right), B (lower left), X (upper right), Y (upper left)
 - Bottom strip of the middle third: SELECT (left) / START (right)
 - Top-right corner, or the BOOT button: pause menu
 
-USB keyboard / mouse / gamepad on the USB-A port (directly or through a
-hub; the host runs at full speed so hubs work). Devices are decoded from
+**USB keyboard / mouse / gamepad** on the USB-A port, directly or through a
+hub (the host runs at full speed, so hubs work). Devices are decoded from
 their HID report descriptors (espp `hid-rp` report map), so any standard HID
-gamepad works: face buttons by position (A = east, B = south, X = north,
-Y = west), shoulders and triggers = L / R (the triggers are also reported on
-their own as L2 / R2), select / start (also the Consumer "back" / "menu"
-controls of mobile pads), d-pad / hat / left stick = d-pad, select+start or
-the home button = pause menu. Known layouts: Xbox-style and DirectInput /
-DualShock numbering, Backbone Pro quirks. Keyboards: arrows, Z/X/A/S, Enter,
-Shift/Backspace, Q/W (L/R) and E/R (L2/R2) map to the gamepad for the
-emulators.
+gamepad works:
 
-In the launcher, left / right on the game list go to the previous / next
-console's games. Tapping the console above the boxart (or X on a gamepad, F
-on a keyboard) opens the console picker, which shows only one console's
-games, or all of them again; an outline on the console means the list is
-filtered, and left / right then move the filter to the next console.
-`emulink filter <console>` (nes, snes, gb, gbc, gba, sms, gg, genesis, msx,
-playstation, pc, pico8 or all) does the same over USB.
+- Face buttons by position (A = east, B = south, X = north, Y = west).
+- Shoulders and triggers = L / R; the triggers are also reported on their
+  own as L2 / R2.
+- Select / start, and the Consumer "back" / "menu" controls of mobile pads.
+- D-pad, hat or left stick = d-pad.
+- Select+start or the home button = pause menu.
+- Known layouts: Xbox-style and DirectInput / DualShock numbering, Backbone
+  Pro quirks.
+- Keyboards: arrows, Z / X / A / S, Enter, Shift / Backspace, Q / W (L / R)
+  and E / R (L2 / R2).
 
-Jedi Knight gets the full keyboard and mouse look; on a gamepad the left
-stick strafes, the right stick looks, R = fire, L = secondary fire, A =
-activate, B = jump, X = crouch, Y = use item.
+<details>
+<summary><strong>Per-game controls</strong></summary>
 
-Metal Gear Solid uses the PlayStation layout by position: face buttons as
+**Jedi Knight** gets the full keyboard and mouse look. On a gamepad the left
+stick strafes, the right stick looks, R = fire, L = secondary fire,
+A = activate, B = jump, X = crouch, Y = use item.
+
+**Metal Gear Solid** uses the PlayStation layout by position: face buttons as
 Cross / Circle / Square / Triangle, L1 / R1 on the shoulders, L2 / R2 on the
 triggers for the item and weapon menus, so a pad with triggers (or the
 keyboard's E / R) is needed for those.
 
+**Star Trek: 25th Anniversary**: touch is the mouse (two fingers = right
+click), as are a USB mouse and the gamepad (A / B = left / right click).
+
 New controllers: the console prints each device's decoded buttons on change
 (debug level in `usb_hid.cpp`); a wrong mapping is a quirk-table entry in
 espp's `hid-rp-report-map.hpp`.
+</details>
 
-## Crashes
+## Development
 
-Core dumps go to flash (`coredump` partition) and are printed base64 on the
-console at the next boot, so a crash while the console is unavailable (the
-USB drive hand-over) can still be read. Decode with:
+### Layout
 
 ```
-base64 -d < dump.b64 > core.bin
-python -m esp_coredump --chip esp32p4 info_corefile -t raw -c core.bin build/tab5-emu.elf
+main/               app_main, Cart base class, per-game carts
+components/
+  tab5-emu/         HAL (Tab5Emu): display / PPA video path, audio, SD, input, USB
+  gui/              LVGL launcher (rom list + boxart + settings)
+  menu/             LVGL in-game pause menu (resume/reset/save/load/quit)
+  rom_info/         metadata.csv parsing, consoles
+  statistics/       frame timing
+  emulink/          the USB link (shared with esp-box-emu; tools/emulink is its CLI)
+  jk/               OpenJKDF2 port: engine submodule + ESP32 platform layer + glue
+  mgs/              Metal Gear Solid: mgs_reversing + psyz submodules + the Tab5 platform layer
+  tpm/              The Phantom Menace: tpm-decomp submodule (static recompiler + runtime) + glue
+  scummvm/          ScummVM (startrek engine) with its ESP32 backend
+  gba/ snes/        the Tab5-only emulator cores and their glue
+  nes/ gbc/ sms/ msx/ genesis/ doom/ darkforces/ pico8/
+                    the cores shared with esp-box-emu (submodules: core + port/ glue)
+  pool_allocator/   the allocator MSX, Doom and Dark Forces run in their 4 MB block
+web/                the web console (shared with esp-box-emu)
+updater/            the updater app (ota_1)
+docs/PLAN.md        the Jedi Knight plan and history
 ```
 
-Note that a terminal which opens the console port with DTR low and RTS high
-resets the chip (`rst:0x17 CHIP_USB_UART_RESET`); keep both asserted, or
-expect a reboot whenever the console re-enumerates (after the USB drive).
+### emulink
 
-## USB drive (file transfer)
+`tools/emulink` drives the Tab5 over the USB link from a script: `status`,
+`roms`, `launch`, `press`, `tap`, `screenshot`, `save` / `load`, `ls` /
+`push` / `pull`, `add-rom`, `settings`, `filter`, `drive on|off`, `ota`,
+`coredump`. It needs pyusb (in the ESP-IDF Python environment). The
+screenshots in this README were taken with it.
+
+### USB drive (file transfer)
 
 Settings > "USB drive" exposes the SD card as a USB mass storage device on
 the USB-C port, so ROMs, boxart and game data can be copied without pulling
@@ -337,8 +451,39 @@ not hand it back by itself: eject it there, then switch "USB drive" off to
 get the card and the updated ROM list back. `emulink drive on` / `emulink
 drive off` do the same from a script (drive off ejects it first on macOS).
 
+### Crashes
+
+Core dumps go to flash (`coredump` partition) and are printed base64 on the
+console at the next boot, so a crash while the console is unavailable (the
+USB drive hand-over) can still be read; `emulink coredump` fetches the last
+one over USB. Decode with:
+
+```sh
+base64 -d < dump.b64 > core.bin
+python -m esp_coredump --chip esp32p4 info_corefile -t raw -c core.bin build/tab5-emu.elf
+```
+
+A terminal which opens the console port with DTR low and RTS high resets
+the chip (`rst:0x17 CHIP_USB_UART_RESET`); keep both asserted, or expect a
+reboot whenever the console re-enumerates (after the USB drive).
+
+## The esp-cpp handhelds
+
+tab5-emu and [esp-box-emu](https://github.com/esp-cpp/esp-box-emu) are one
+project on two devices. Both are built on [ESPP](https://github.com/esp-cpp/espp)
+and share the emulator cores, the USB link, `emulink` and the web console.
+
+| | **tab5-emu** | **[esp-box-emu](https://github.com/esp-cpp/esp-box-emu)** |
+|---|---|---|
+| Device | [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5), off the shelf | [ESP32-S3-BOX / BOX-3](https://github.com/espressif/esp-box) in a 3D-printed Game Boy Color style shell with a custom PCB |
+| Chip | ESP32-P4, 2× RISC-V @ 360 MHz, 32 MB PSRAM | ESP32-S3, 2× Xtensa LX7 @ 240 MHz, PSRAM |
+| Screen | 5" 1280x720 touch | 2.4" 320x240 touch |
+| Controls | touch gamepad, USB gamepads / keyboards / mice | d-pad, A / B / X / Y, Start / Select, haptics |
+| Systems | everything on the right, plus SNES, GBA, ScummVM and native MGS, TPM and Jedi Knight | NES, Game Boy / Color, Master System / Game Gear, Genesis, MSX, PICO-8, Doom, Dark Forces |
+| Web console | [esp-cpp.github.io/tab5-emu](https://esp-cpp.github.io/tab5-emu/) | [esp-cpp.github.io/esp-box-emu](https://esp-cpp.github.io/esp-box-emu/) |
+
 ## License
 
-MIT (this project). OpenJKDF2, mgs_reversing and psyz are under their own
-licenses; the game data is not included and must come from your own copies
-of the games.
+MIT (this project). The cores, OpenJKDF2, mgs_reversing, psyz, tpm-decomp
+and ScummVM are under their own licenses. No game data is included; it must
+come from your own copies of the games.
