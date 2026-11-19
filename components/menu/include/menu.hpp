@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -65,9 +66,17 @@ protected:
 
   /// screenshots are at most the largest native game frame (JK's 640x480 menu / HUD)
   static constexpr size_t SCREENSHOT_MAX_BYTES = 640 * 480 * 2;
-  std::vector<uint8_t> pause_image_data_;
+  /// A screenshot's pixels, only while the menu is open: a game loading (JK's
+  /// level load) needs every MB of PSRAM it can get
+  struct ImageBuffer {
+    uint8_t *data{nullptr};
+    std::span<uint8_t> span() const { return data ? std::span<uint8_t>(data, SCREENSHOT_MAX_BYTES) : std::span<uint8_t>(); }
+    void allocate();
+    void release();
+  };
+  ImageBuffer pause_image_data_;
   lv_image_dsc_t pause_image_desc_{};
-  std::vector<uint8_t> slot_image_data_;
+  ImageBuffer slot_image_data_;
   lv_image_dsc_t slot_image_desc_{};
 
   std::atomic<int> selected_slot_{0};

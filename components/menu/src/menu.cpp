@@ -2,17 +2,26 @@
 
 #include <cmath>
 
+#include <esp_heap_caps.h>
+
+// The screenshot buffers (1.2 MB) are allocated when the menu opens and freed
+// when it closes, not held while the game runs: Jedi Knight's level load
+// needs that room. heap_caps_malloc does not throw: if a game leaves no
+// 600 KB block, the menu shows no screenshot.
+void Menu::ImageBuffer::allocate() {
+  if (!data) data = static_cast<uint8_t *>(heap_caps_malloc(SCREENSHOT_MAX_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+}
+
+void Menu::ImageBuffer::release() {
+  heap_caps_free(data);
+  data = nullptr;
+}
+
 Menu::Menu(const Config &config)
     : paused_image_path_(config.paused_image_path)
     , action_callback_(config.action_callback)
     , slot_image_callback_(config.slot_image_callback)
     , logger_({.tag = "Menu", .level = config.log_level}) {
-  // the screenshot buffers are made now, while the heap still has room: a
-  // running game (JK) can leave PSRAM without a 600 KB block, and a failed
-  // allocation on pause would throw std::bad_alloc (no way to recover there)
-  pause_image_data_.resize(SCREENSHOT_MAX_BYTES);
-  slot_image_data_.resize(SCREENSHOT_MAX_BYTES);
-
   using K = emu_ui::Row::Kind;
   auto &emu = Tab5Emu::get();
   std::vector<emu_ui::Row> settings;
@@ -57,6 +66,8 @@ Menu::~Menu() {
   task_.stop();
   std::lock_guard<std::recursive_mutex> lk(mutex_);
   view_.reset();
+  pause_image_data_.release();
+  slot_image_data_.release();
 }
 
 void Menu::select_slot(int slot) {
@@ -73,10 +84,21 @@ void Menu::pause() {
   task_.stop();
   // wait out a timer callback already in lv_timer_handler() (stop() does not)
   std::lock_guard<std::recursive_mutex> lk(mutex_);
+  // the game gets the screenshots' room back
+  view_->set_pause_image(nullptr);
+  view_->set_slot_image(nullptr);
+  pause_image_data_.release();
+  slot_image_data_.release();
 }
 
 void Menu::resume() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
+  pause_image_data_.allocate();
+  slot_image_data_.allocate();
+  if (!pause_image_data_.data || !slot_image_data_.data) {
+    logger_.warn("No room for the menu's screenshots (PSRAM largest block {} KB)",
+                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
+  }
   update_pause_image();
   update_slot_display();
   view_->set_fps(get_fps());
@@ -117,13 +139,13 @@ void Menu::on_volume(const std::vector<uint8_t> &) {
 }
 
 void Menu::update_pause_image() {
-  const bool ok = emu_ui::load_screenshot(paused_image_path_.c_str(), pause_image_data_, pause_image_desc_);
+  const bool ok = emu_ui::load_screenshot(paused_image_path_.c_str(), pause_image_data_.span(), pause_image_desc_);
   view_->set_pause_image(ok ? &pause_image_desc_ : nullptr);
 }
 
 void Menu::update_slot_display() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
   const auto path = slot_image_callback_ ? slot_image_callback_() : std::string{};
-  const bool ok = !path.empty() && emu_ui::load_screenshot(path.c_str(), slot_image_data_, slot_image_desc_);
+  const bool ok = !path.empty() && emu_ui::load_screenshot(path.c_str(), slot_image_data_.span(), slot_image_desc_);
   view_->set_slot_image(ok ? &slot_image_desc_ : nullptr);
 }
