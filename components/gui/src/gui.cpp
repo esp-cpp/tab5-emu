@@ -4,9 +4,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include <esp_app_desc.h>
 #include <esp_ota_ops.h>
+#include <esp_heap_caps.h>
+
+#include "driver/jpeg_decode.h"
 
 #include "lvgl_private.h" // (lv_image_decoder_dsc_t)
 
@@ -353,6 +359,11 @@ Gui::Snapshot Gui::snapshot() {
   return shot;
 }
 
+// emu-ui's launcher shows the cover in a 360 px square (LV_IMAGE_ALIGN_CONTAIN).
+// Scaled to fit it once, here, LVGL draws the cover as it is rather than
+// scaling it in software on every redraw.
+constexpr int kCoverBox = 360;
+
 // The selected game's boxart, decoded once per selection (the launcher has
 // already let go of the previous one).
 const void *Gui::cover(size_t index) {
@@ -361,7 +372,7 @@ const void *Gui::cover(size_t index) {
     boxart_buf_ = nullptr;
   }
   if (index < rom_infos_.size() && !rom_infos_[index].boxart_path.empty()) {
-    boxart_buf_ = decode_image(rom_infos_[index].boxart_path);
+    boxart_buf_ = decode_image(rom_infos_[index].boxart_path, kCoverBox);
   }
   return boxart_buf_;
 }
@@ -378,11 +389,205 @@ const void *Gui::console_art(const std::string &key) {
   return buf;
 }
 
-// LVGL's JPEG decoder (TJPGD) only yields the image block by block, and LVGL
-// cannot scale a block-decoded image, so decode it into a full RGB565 buffer
-// here and show that. The POSIX fs driver is registered as 'S:' and passes
-// the rest of the path through unchanged.
-lv_draw_buf_t *Gui::decode_image(const std::string &path) {
+namespace {
+
+// The P4's JPEG decoder (made on first use; nullptr if it cannot be)
+jpeg_decoder_handle_t jpeg_engine() {
+  static jpeg_decoder_handle_t engine = nullptr;
+  static bool tried = false;
+  if (!tried) {
+    tried = true;
+    jpeg_decode_engine_cfg_t cfg{};
+    cfg.timeout_ms = 500;
+    if (jpeg_new_decoder_engine(&cfg, &engine) != ESP_OK) engine = nullptr;
+  }
+  return engine;
+}
+
+// The frame header of a baseline JPEG in memory: the offset of its height
+// (then width) field and its MCU size; -1 if there is none (progressive...)
+int find_frame_header(const uint8_t *d, size_t n, int &mcu_w, int &mcu_h) {
+  size_t i = 2; // (after SOI)
+  while (i + 4 <= n) {
+    if (d[i] != 0xFF) return -1;
+    const uint8_t m = d[i + 1];
+    if (m == 0xFF) { // fill byte
+      i++;
+      continue;
+    }
+    if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+      i += 2;
+      continue;
+    }
+    const size_t len = (d[i + 2] << 8) | d[i + 3];
+    if (m == 0xC0 || m == 0xC1) {
+      // P Y(2) X(2) Nf, then per component: id, Hi:Vi, Tq; the decoder's MCU
+      // is the first component's sampling factors x 8
+      if (len < 11 || i + 2 + len > n) return -1;
+      const int h = d[i + 11] >> 4, v = d[i + 11] & 0x0f;
+      if (!h || !v) return -1;
+      mcu_w = 8 * h;
+      mcu_h = 8 * v;
+      return static_cast<int>(i + 5);
+    }
+    if (m == 0xDA || m == 0xD9 || (m >= 0xC2 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC)) {
+      return -1; // a scan first, or not baseline
+    }
+    i += 2 + len;
+  }
+  return -1;
+}
+
+struct FreeDeleter {
+  void operator()(void *p) const { free(p); }
+};
+
+} // namespace
+
+// A new RGB565 draw buffer of `src` (rows `stride` bytes apart), scaled
+// (bilinear) to fit a box x box square with its longer side box long, or as
+// it is (box 0)
+lv_draw_buf_t *Gui::fit_image(const uint8_t *src, int w, int h, int stride, int box) {
+  int dw = w, dh = h;
+  if (box > 0) {
+    if (w >= h) {
+      dw = box;
+      dh = std::max(1, (h * box + w / 2) / w);
+    } else {
+      dh = box;
+      dw = std::max(1, (w * box + h / 2) / h);
+    }
+  }
+  auto *out = lv_draw_buf_create(dw, dh, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+  if (!out) return nullptr;
+  if (dw == w && dh == h) {
+    for (int y = 0; y < h; y++) memcpy(out->data + y * out->header.stride, src + y * stride, w * 2);
+    return out;
+  }
+  // Separable bilinear: each source row is interpolated across once (into a
+  // two-row cache in internal RAM), then output rows blend two of those. The
+  // pixels spread as 0x07E0F81F (green, red, blue, with room above each) so
+  // one multiply weighs all three, with 5 bit weights.
+  const int32_t step_x = (w << 16) / dw, step_y = (h << 16) / dh;
+  auto src_pos = [](int i, int32_t step, int n) {
+    return std::clamp<int32_t>(i * step + step / 2 - 0x8000, 0, (n - 1) << 16);
+  };
+  constexpr uint32_t kMask = 0x07E0F81Fu;
+  auto spread = [](uint32_t c) { return (c | (c << 16)) & kMask; };
+  // per output column: the two source columns and the weight of the second
+  const size_t bytes = static_cast<size_t>(dw) * (2 * sizeof(uint32_t) + 2 * sizeof(uint16_t) + 1);
+  std::unique_ptr<uint8_t, FreeDeleter> scratch(
+      static_cast<uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+  if (!scratch) scratch.reset(static_cast<uint8_t *>(malloc(bytes)));
+  if (!scratch) {
+    lv_draw_buf_destroy(out);
+    return nullptr;
+  }
+  auto *row_a = reinterpret_cast<uint32_t *>(scratch.get());
+  auto *row_b = row_a + dw;
+  auto *xa = reinterpret_cast<uint16_t *>(row_b + dw);
+  auto *xb = xa + dw;
+  auto *wx = reinterpret_cast<uint8_t *>(xb + dw);
+  for (int x = 0; x < dw; x++) {
+    const int32_t sx = src_pos(x, step_x, w);
+    xa[x] = sx >> 16;
+    xb[x] = std::min(xa[x] + 1, w - 1);
+    wx[x] = (sx >> 11) & 31;
+  }
+  auto across = [&](int sy, uint32_t *dst) {
+    const auto *r = reinterpret_cast<const uint16_t *>(src + sy * stride);
+    for (int x = 0; x < dw; x++) {
+      const uint32_t f = wx[x];
+      dst[x] = ((spread(r[xa[x]]) * (32 - f) + spread(r[xb[x]]) * f) >> 5) & kMask;
+    }
+  };
+  int have_a = -1, have_b = -1; // the source rows in row_a / row_b
+  for (int y = 0; y < dh; y++) {
+    const int32_t sy = src_pos(y, step_y, h);
+    const int y0 = sy >> 16, y1 = std::min(y0 + 1, h - 1);
+    if (have_a != y0) {
+      if (have_b == y0) {
+        std::swap(row_a, row_b);
+        std::swap(have_a, have_b);
+      } else {
+        across(y0, row_a);
+        have_a = y0;
+      }
+    }
+    if (have_b != y1) {
+      across(y1, row_b);
+      have_b = y1;
+    }
+    const uint32_t f = (sy >> 11) & 31;
+    auto *row = reinterpret_cast<uint16_t *>(out->data + y * out->header.stride);
+    for (int x = 0; x < dw; x++) {
+      const uint32_t c = ((row_a[x] * (32 - f) + row_b[x] * f) >> 5) & kMask;
+      row[x] = static_cast<uint16_t>(c | (c >> 16));
+    }
+  }
+  return out;
+}
+
+// A baseline JPEG through the P4's JPEG decoder, straight to RGB565: a cover
+// decoded and scaled takes ~30 ms, where LVGL's software decoder took ~75 ms
+// for the decode alone. nullptr if it cannot (decode_image() then falls back
+// to LVGL's).
+lv_draw_buf_t *Gui::decode_jpeg_hw(const std::string &path, int box) {
+  auto *engine = jpeg_engine();
+  if (!engine) return nullptr;
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) return nullptr;
+  fseek(f, 0, SEEK_END);
+  const long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (size < 4) {
+    fclose(f);
+    return nullptr;
+  }
+  jpeg_decode_memory_alloc_cfg_t in_cfg{.buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER};
+  size_t in_capacity = 0;
+  std::unique_ptr<uint8_t, FreeDeleter> in(static_cast<uint8_t *>(jpeg_alloc_decoder_mem(size, &in_cfg, &in_capacity)));
+  const bool read = in && fread(in.get(), 1, size, f) == static_cast<size_t>(size);
+  fclose(f);
+  if (!read) return nullptr;
+  // The decoder refuses a picture whose width x height is not a multiple of
+  // 8 (two in five of the covers here), though it decodes whole MCUs anyway:
+  // give the frame header the MCU-rounded size (the same MCUs, so the same
+  // scan) and crop the result back.
+  int mcu_w = 8, mcu_h = 8;
+  const int sof = find_frame_header(in.get(), size, mcu_w, mcu_h);
+  if (sof < 0) return nullptr;
+  uint8_t *dims = in.get() + sof;
+  const int h = (dims[0] << 8) | dims[1], w = (dims[2] << 8) | dims[3];
+  if (!w || !h) return nullptr;
+  const int pw = (w + mcu_w - 1) / mcu_w * mcu_w, ph = (h + mcu_h - 1) / mcu_h * mcu_h;
+  dims[0] = ph >> 8;
+  dims[1] = ph & 0xff;
+  dims[2] = pw >> 8;
+  dims[3] = pw & 0xff;
+  jpeg_decode_memory_alloc_cfg_t out_cfg{.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
+  size_t out_capacity = 0;
+  std::unique_ptr<uint8_t, FreeDeleter> out(
+      static_cast<uint8_t *>(jpeg_alloc_decoder_mem(static_cast<size_t>(pw) * ph * 2, &out_cfg, &out_capacity)));
+  if (!out) return nullptr;
+  jpeg_decode_cfg_t cfg{};
+  cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
+  cfg.rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR; // (little-endian RGB565, as LVGL's)
+  cfg.conv_std = JPEG_YUV_RGB_CONV_STD_BT601;
+  uint32_t out_size = 0;
+  if (jpeg_decoder_process(engine, &cfg, in.get(), size, out.get(), out_capacity, &out_size) != ESP_OK ||
+      out_size != static_cast<uint32_t>(pw) * ph * 2) {
+    return nullptr;
+  }
+  return fit_image(out.get(), w, h, pw * 2, box);
+}
+
+// The P4's decoder first; else LVGL's JPEG decoder (TJPGD), which only yields
+// the image block by block (and LVGL cannot scale a block-decoded image), so
+// it is decoded into a full RGB565 buffer here. The POSIX fs driver is
+// registered as 'S:' and passes the rest of the path through unchanged.
+lv_draw_buf_t *Gui::decode_image(const std::string &path, int box) {
+  if (auto *hw = decode_jpeg_hw(path, box)) return hw;
   const std::string src = "S:" + path;
   lv_image_decoder_dsc_t dsc{};
   if (lv_image_decoder_open(&dsc, src.c_str(), nullptr) != LV_RESULT_OK) {
@@ -421,6 +626,11 @@ lv_draw_buf_t *Gui::decode_image(const std::string &path) {
     }
   }
   lv_image_decoder_close(&dsc);
-  logger_.info("image '{}': {}x{}", path, w, h);
+  logger_.info("image '{}': {}x{} (software decoder)", path, w, h);
+  if (box > 0) {
+    auto *fitted = fit_image(out->data, w, h, out->header.stride, box);
+    lv_draw_buf_destroy(out);
+    out = fitted;
+  }
   return out;
 }

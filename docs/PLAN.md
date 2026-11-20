@@ -176,6 +176,53 @@ the game's. `Tab5Emu::display_size()` picks original/fit/fill scaling.
   grows the data region, so this needs a custom placement plus disabling
   the PMP I/D split), or a RISC-V dynarec for gpSP (none exists).
 
+## Code placement: execute from flash, cores in a PSRAM overlay (2026-11-19)
+
+Until 2026-11 the firmware ran with `CONFIG_SPIRAM_XIP_FROM_PSRAM`: all of
+`.text` and `.rodata` (12.7 MB) copied into PSRAM at boot. After the emu-ui
+launcher and #23 that left too little PSRAM for Jedi Knight's first level
+("Could not load level!"). Now code executes from flash (80 MHz QIO, which
+needs chip rev v0.1+), and the game cores' code and tables, which need the
+speed, share one PSRAM overlay: every core is linked at the same address and
+the running game's core is copied there from flash when it launches.
+
+- `tools/bss_to_psram.py --overlay=<core> --overlay-rodata` renames a core
+  archive's `.text*` and `.rodata.<symbol>` to `.tab5_ovl.<core>*`, and its
+  `.init_array` to `.tab5_ovl_ctors.<core>`; `components/tab5-emu/overlay.ld`
+  links the members in one `OVERLAY` (NOCROSSREFS) after `.ext_ram.data`,
+  with a slot per core in `.flash.tab5_ovl_store` (in the image's rodata
+  segment, so the boot SHA covers it).
+- `tools/overlay_image.py` (post-link) copies each member's bytes into its
+  slot, marks the PSRAM sections NOBITS, and fails the build if code or data
+  outside a core reaches into the overlay (only the carts in main.cpp, the
+  loader and a core's own code may).
+- `tab5_overlay_load(core)` (components/tab5-emu/src/overlay.c) copies the
+  code in, syncs the caches (both cores' I-caches) and runs the core's
+  static constructors on its first load. `make_cart` calls it before the
+  cart's constructor; `app_main` loads ScummVM for `scummvm_prepare()`.
+- Stays in flash although it comes from a core archive: shared template code
+  (`std::`, `__gnu_cxx::`, `fmt::`, `espp::`: the linker keeps one copy of each
+  for the whole firmware and it may be a core's), Dark Forces' allocator
+  (`--wrap=free,realloc` makes it everyone's free()), `mgs::release_arena`
+  (called on every launch), merged strings and constants. TPM's 3.2 MB
+  bundle is not in the overlay (it loses 0-2% from flash).
+- LVGL, emu-ui, the GUI and the menu draw in software and redrew visibly
+  from flash, so their code and read-only data run from PSRAM too, for good:
+  `bss_to_psram.py --psram-code` (applied to those archives just before the
+  link, in the root CMakeLists.txt) renames them `.tab5_res*`, filled from
+  its flash slot at boot by the constructor that fills `.ext_ram.data`.
+- Cost: 1.1 MB of PSRAM (the largest member, MGS) plus 0.7 MB (`.tab5_res`)
+  instead of 12.7 MB; 18.1 MB free at the launcher instead of 7.3 MB. Measured (core fps / presented,
+  PSRAM XIP -> flash -> overlay): Genesis 99/59.7 -> 77/43.5 -> 91/59.6,
+  GBA 95 -> 82 -> 90 (59.7 presented), SNES 70 -> 58 -> 67,
+  Doom 99 -> 78 -> 94.5, MGS 9.3 -> 7.8 -> 8.7 presented,
+  JK level 1 12.5 -> 14.2 presented (it does not load with PSRAM XIP).
+  NES, GBC, PICO-8, DF, TPM and ScummVM are within a few percent either way.
+- Not handled: a core task that outlives its game would run the next core's
+  code (MGS's logger leaks its task if stdout blocks it for 200 ms at quit);
+  with every core at one address, a panic backtrace inside the overlay needs
+  the loaded core's name (`tab5_overlay_loaded()`) to be read.
+
 ## Internal RAM policy (2026-09-20)
 
 Internal RAM (~440 KB DIRAM, ~150 KB free after link) is the constraint,

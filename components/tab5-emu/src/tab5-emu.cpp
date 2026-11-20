@@ -1,5 +1,7 @@
 #include "tab5-emu.hpp"
 
+#include "esp_attr.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -761,6 +763,7 @@ void Tab5Emu::native_size(size_t width, size_t height, int pitch) {
   native_width_ = width;
   native_height_ = height;
   native_pitch_ = pitch > 0 ? pitch : width;
+  rotation_ = lv_display_get_rotation(lv_display_get_default());
   logger_.info("native size: {}x{} (pitch {})", native_width_, native_height_, native_pitch_);
 }
 
@@ -771,7 +774,7 @@ void Tab5Emu::overlay_size(size_t width, size_t height, int pitch) {
   logger_.info("overlay size: {}x{} (pitch {})", overlay_width_, overlay_height_, overlay_pitch_);
 }
 
-size_t Tab5Emu::staging_scale() const {
+IRAM_ATTR size_t Tab5Emu::staging_scale() const {
   // overlays are only supported on paletted frames
   if (!has_palette() || overlay_width_ == 0 || overlay_height_ == 0 || native_height_ == 0) {
     return 1;
@@ -808,7 +811,7 @@ void Tab5Emu::clear_screen() {
   esp_cache_msync(fb, dpi_fb_bytes_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
 
-void Tab5Emu::push_frame(const void *frame, const void *overlay, size_t overlay_row_begin,
+IRAM_ATTR void Tab5Emu::push_frame(const void *frame, const void *overlay, size_t overlay_row_begin,
                          size_t overlay_row_end) {
   if (!video_queue_) {
     return;
@@ -822,7 +825,7 @@ void Tab5Emu::push_frame(const void *frame, const void *overlay, size_t overlay_
   xQueueOverwrite(video_queue_, &vf);
 }
 
-bool Tab5Emu::frame_slot_free() const {
+IRAM_ATTR bool Tab5Emu::frame_slot_free() const {
   return video_queue_ == nullptr || uxQueueMessagesWaiting(video_queue_) == 0;
 }
 
@@ -834,7 +837,7 @@ Tab5Emu::VideoStats Tab5Emu::video_stats(bool reset) {
   return stats;
 }
 
-void Tab5Emu::wait_frame() {
+IRAM_ATTR void Tab5Emu::wait_frame() {
   if (frame_done_) {
     xSemaphoreTake(frame_done_, pdMS_TO_TICKS(100));
   }
@@ -859,11 +862,12 @@ bool Tab5Emu::ensure_tile_buffer() {
   return true;
 }
 
-Tab5Emu::Layout Tab5Emu::layout() const {
+IRAM_ATTR Tab5Emu::Layout Tab5Emu::layout() const {
   Layout lo{};
   // the LVGL rotation the GUI configured; the BSP's flush uses the identical
   // LVGL->PPA mapping, so the game frames come out the same way up as the GUI
-  auto rotation = lv_display_get_rotation(lv_display_get_default());
+  // (read when the game set its frame size: not LVGL code every frame)
+  const auto rotation = static_cast<lv_display_rotation_t>(rotation_);
   lo.angle = PPA_SRM_ROTATION_ANGLE_0;
   lo.swap = false;
   switch (rotation) {
@@ -899,7 +903,7 @@ Tab5Emu::Layout Tab5Emu::layout() const {
   return lo;
 }
 
-bool Tab5Emu::blit_tile(const Layout &lo, size_t x0, size_t y0, size_t tw, size_t th) {
+IRAM_ATTR bool Tab5Emu::blit_tile(const Layout &lo, size_t x0, size_t y0, size_t tw, size_t th) {
   auto fb = dpi_frame_buffer();
   if (!fb || !ppa_client_) {
     return false;
@@ -957,7 +961,7 @@ bool Tab5Emu::blit_tile(const Layout &lo, size_t x0, size_t y0, size_t tw, size_
   return true;
 }
 
-bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified) {
+IRAM_ATTR bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified) {
   VideoFrame vf{nullptr, nullptr, 0, 0};
   if (xQueueReceive(video_queue_, &vf, portMAX_DELAY) != pdTRUE) {
     return false;
@@ -1019,7 +1023,7 @@ bool Tab5Emu::video_task_callback(std::mutex &m, std::condition_variable &cv, bo
 // tw). The staging frame is the native frame upscaled by staging_scale()
 // (nearest neighbour) with the overlay drawn 1:1 on top, centered, palette
 // index 0 transparent.
-void Tab5Emu::convert_tile(const void *frame, const void *overlay, size_t ov_r0, size_t ov_r1, size_t x0, size_t y0,
+IRAM_ATTR void Tab5Emu::convert_tile(const void *frame, const void *overlay, size_t ov_r0, size_t ov_r1, size_t x0, size_t y0,
                            size_t tw, size_t th) {
   const size_t k = staging_scale();
   const size_t sw = staging_width();

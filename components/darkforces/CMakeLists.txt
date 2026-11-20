@@ -104,8 +104,15 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=free" "-Wl,--wrap=r
 # linker script has no ldgen placeholder for external RAM); no gp-relative
 # small data then
 target_compile_options(${COMPONENT_LIB} PRIVATE -msmall-data-limit=0)
+# executing from flash, the core's code is part of the PSRAM code overlay
+# (components/tab5-emu/overlay.ld)
+include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)
+tab5_overlay_args(darkforces overlay_args "^(__wrap_|df_|espbox_pool_|_ZN10TFE_Memory)" "^_ZN12_GLOBAL__N_1L[0-9]+(inBlock|liveHeader|poolAllocLocked|poolFreeLocked|noteOverflow|censusVisit|dfAlloc|dfFree|dfRealloc)E")
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
-          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --data
+          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> ${overlay_args}
+          # .data to PSRAM: via .rodata where XIP copies it into PSRAM (writable),
+          # else into .ext_ram.data (filled at boot from flash; see the script)
+          --data --data-into=$<IF:$<BOOL:${CONFIG_SPIRAM_XIP_FROM_PSRAM}>,rodata,ext_ram>
   COMMENT "Moving the darkforces core's .bss and .data to PSRAM"
   VERBATIM)

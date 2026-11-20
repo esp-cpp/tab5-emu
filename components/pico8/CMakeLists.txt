@@ -31,3 +31,15 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
   -msmall-data-limit=0
   -Wno-error
   -w)
+
+# executing from flash, the core's code is part of the PSRAM code overlay
+# (components/tab5-emu/overlay.ld); its statics are placed by linker.lf
+include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)
+tab5_overlay_args(pico8 overlay_args)
+if(overlay_args)
+  add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+    COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
+            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> --no-bss ${overlay_args}
+    COMMENT "Moving the PICO-8 core's code into the PSRAM code overlay"
+    VERBATIM)
+endif()

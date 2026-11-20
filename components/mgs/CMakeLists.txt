@@ -123,6 +123,24 @@ if(CONFIG_MGS_ENGINE)
   set_property(SOURCE ${SRC_PSYQ} APPEND PROPERTY COMPILE_OPTIONS
     "-include;${PSYZ}/include/common.h;-include;stdio.h")
 
+  # Executing from flash, the game's .data (and its SECTION(".mgs.sdata") /
+  # (".mgs.data") small data) cannot stay in .flash.rodata (read-only there):
+  # it goes to .ext_ram.data, tagged so components/tab5-emu/ext_ram_data.ld
+  # can bracket it with _mgs_data_* / _mgs_sdata_* (the .bss stays ldgen's)
+  if(NOT CONFIG_SPIRAM_XIP_FROM_PSRAM)
+    # executing from flash, the core's code is part of the PSRAM code overlay
+    # (components/tab5-emu/overlay.ld)
+    include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)
+    tab5_overlay_args(mgs overlay_args "^_ZN3mgs13release_arenaEv" "^Mgs_ArenaRelease$")
+    add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+      COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
+              ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> ${overlay_args}
+              --no-bss --data --data-into=ext_ram:mgs_data
+              --also-data=.mgs.data:mgs_sdata --also-data=.mgs.sdata:mgs_sdata
+      COMMENT "Moving the MGS game's .data to .ext_ram.data (PSRAM)"
+      VERBATIM)
+  endif()
+
   # Where the game's statics go (PSRAM for .bss, the PSRAM-XIP .rodata for
   # .data) and the symbols that bracket them are linker.lf's business;
   # -msmall-data-limit=0 above because nothing in PSRAM may be addressed

@@ -23,25 +23,38 @@ entries:
     .mgs.sdata+
     .mgs.data+
 
+#
+# Executing from flash (no CONFIG_SPIRAM_XIP_FROM_PSRAM) .flash.rodata is
+# flash, read-only: the .data is renamed into .ext_ram.data instead
+# (CMakeLists.txt, tools/bss_to_psram.py), and components/tab5-emu/
+# ext_ram_data.ld places it in PSRAM and defines _mgs_data_* / _mgs_sdata_*.
 [scheme:mgs_statics]
 entries:
     bss -> extern_ram
     common -> extern_ram
     extram_bss -> extern_ram
     mgs_sbss -> extern_ram
-    data -> flash_rodata
-    mgs_sdata -> flash_rodata
+    if SPIRAM_XIP_FROM_PSRAM = y:
+        data -> flash_rodata
+        mgs_sdata -> flash_rodata
 
 [mapping:mgs]
 archive: libmgs.a
 entries:
-    * (mgs_statics);
-        bss -> extern_ram SURROUND(mgs_bss),
-        common -> extern_ram SURROUND(mgs_common),
-        extram_bss -> extern_ram SURROUND(mgs_xbss),
-        mgs_sbss -> extern_ram SURROUND(mgs_sbss),
-        data -> flash_rodata SURROUND(mgs_data),
-        mgs_sdata -> flash_rodata SURROUND(mgs_sdata)
+    if SPIRAM_XIP_FROM_PSRAM = y:
+        * (mgs_statics);
+            bss -> extern_ram SURROUND(mgs_bss),
+            common -> extern_ram SURROUND(mgs_common),
+            extram_bss -> extern_ram SURROUND(mgs_xbss),
+            mgs_sbss -> extern_ram SURROUND(mgs_sbss),
+            data -> flash_rodata SURROUND(mgs_data),
+            mgs_sdata -> flash_rodata SURROUND(mgs_sdata)
+    else:
+        * (mgs_statics);
+            bss -> extern_ram SURROUND(mgs_bss),
+            common -> extern_ram SURROUND(mgs_common),
+            extram_bss -> extern_ram SURROUND(mgs_xbss),
+            mgs_sbss -> extern_ram SURROUND(mgs_sbss)
     # the cart-side glue owns the reset itself (the .data snapshot, the
     # lifecycle state) and must survive it: default placement
     mgs (default)

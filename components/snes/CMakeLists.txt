@@ -15,9 +15,13 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_BLARGG_APU LOAD_FROM_MEM
 # PSRAM section after the archive is built); no gp-relative small data then
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fno-strict-aliasing -fjump-tables -ftree-switch-conversion -msmall-data-limit=0
   -Wno-error -w -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers)
+# executing from flash, the core's code is part of the PSRAM code overlay
+# (components/tab5-emu/overlay.ld)
+include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)
+tab5_overlay_args(snes overlay_args)
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
-          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
+          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> ${overlay_args}
           --keep CPU,ICPU,PPU,IPPU,Settings
   COMMENT "Moving the SNES core's .bss to PSRAM (CPU / PPU state stays internal)"
   VERBATIM)

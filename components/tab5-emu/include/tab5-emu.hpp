@@ -381,6 +381,7 @@ protected:
     uint32_t off_x, off_y; ///< panel (native) offset of the centered picture
   };
   Layout layout() const;
+  int rotation_{0}; // the LVGL display rotation, read in native_size()
   /// Convert staging rect [x0,x0+tw)x[y0,y0+th) into the tile buffer
   void convert_tile(const void *frame, const void *overlay, size_t ov_r0, size_t ov_r1, size_t x0, size_t y0,
                     size_t tw, size_t th);

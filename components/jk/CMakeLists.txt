@@ -129,9 +129,13 @@ endif()
 if(CONFIG_JK_ENGINE)
   # The engine has ~1.4 MB of static state; move it out of internal SRAM into
   # PSRAM by renaming the archive's .bss sections (see ../../tools/bss_to_psram.py).
+  # executing from flash, the core's code is part of the PSRAM code overlay
+  # (components/tab5-emu/overlay.ld)
+  include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)
+  tab5_overlay_args(jk overlay_args)
   add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
     COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
-            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
+            ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> ${overlay_args}
     COMMENT "Moving the engine's .bss to PSRAM"
     VERBATIM)
 endif()
