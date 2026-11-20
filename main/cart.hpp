@@ -58,6 +58,8 @@ public:
         .paused_image_path = get_paused_image_path(),
         .action_callback = std::bind(&Cart::on_menu_action, this, std::placeholders::_1),
         .slot_image_callback = [this]() -> std::string { return get_screenshot_path(false); },
+        .game_title = info_.name,
+        .console_key = console_info(console_of(info_.platform)).key,
         .log_level = espp::Logger::Verbosity::WARN});
 
     std::error_code ec;
@@ -71,6 +73,9 @@ public:
     Tab5Emu::get().release_video_buffers();
     Tab5Emu::get().free_romdata();
   }
+
+  /// Where the save states are (the launcher counts them)
+  static std::string save_dir() { return FS_PREFIX + "/" + SAVE_DIR; }
 
   std::string get_rom_filename() const { return info_.rom_path; }
 

@@ -1,19 +1,61 @@
 #include "menu.hpp"
 
-#include <cstdio>
-#include <fstream>
+#include <cmath>
+
+#include <esp_heap_caps.h>
+
+// The screenshot buffers (1.2 MB) are allocated when the menu opens and freed
+// when it closes, not held while the game runs: Jedi Knight's level load
+// needs that room. heap_caps_malloc does not throw: if a game leaves no
+// 600 KB block, the menu shows no screenshot.
+void Menu::ImageBuffer::allocate() {
+  if (!data) data = static_cast<uint8_t *>(heap_caps_malloc(SCREENSHOT_MAX_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+}
+
+void Menu::ImageBuffer::release() {
+  heap_caps_free(data);
+  data = nullptr;
+}
 
 Menu::Menu(const Config &config)
     : paused_image_path_(config.paused_image_path)
     , action_callback_(config.action_callback)
     , slot_image_callback_(config.slot_image_callback)
     , logger_({.tag = "Menu", .level = config.log_level}) {
-  // the screenshot buffers are sized now, while the heap still has room: a
-  // running game (JK) can leave PSRAM without a 600 KB block, and a failed
-  // allocation on pause would throw std::bad_alloc (no way to recover there)
-  pause_image_data_.reserve(SCREENSHOT_MAX_BYTES);
-  slot_image_data_.reserve(SCREENSHOT_MAX_BYTES);
-  init_ui();
+  using K = emu_ui::Row::Kind;
+  auto &emu = Tab5Emu::get();
+  std::vector<emu_ui::Row> settings;
+  settings.push_back({.label = "Volume", .kind = K::SLIDER, .step = 5,
+                      .get = [&emu] { return (int)std::lround(emu.volume()); },
+                      .set = [&emu](int v) { emu.volume(v); },
+                      .symbol = LV_SYMBOL_VOLUME_MAX});
+  settings.push_back({.label = "Mute", .kind = K::TOGGLE, .get = [&emu] { return emu.is_muted() ? 1 : 0; },
+                      .set = [&emu](int v) { emu.mute(v != 0); },
+                      .symbol = LV_SYMBOL_MUTE});
+  settings.push_back({.label = "Brightness", .kind = K::SLIDER, .min = 5, .step = 5,
+                      .get = [&emu] { return (int)std::lround(emu.brightness()); },
+                      .set = [&emu](int v) { emu.brightness(v); },
+                      .symbol = LV_SYMBOL_EYE_OPEN});
+  settings.push_back({.label = "Video scaling", .kind = K::CHOICE, .choices = {"Original", "Fit", "Fill"},
+                      .get = [&emu] { return (int)emu.video_setting(); },
+                      .set = [&emu](int v) { emu.video_setting(static_cast<VideoSetting>(v)); },
+                      .symbol = LV_SYMBOL_IMAGE});
+  {
+    std::lock_guard<std::recursive_mutex> lk(mutex_);
+    view_ = std::make_unique<emu_ui::PauseMenu>(emu_ui::PauseMenu::Config{
+        .metrics = emu_ui::Metrics::large_1280x720(),
+        .keypad = emu.keypad_indev(),
+        .slots = static_cast<int>(MAX_SLOT) + 1,
+        .on_action = [this](emu_ui::PauseMenu::Action a) { on_action(a); },
+        .on_slot =
+            [this](int slot) {
+              selected_slot_ = slot;
+              update_slot_display();
+            },
+        .settings = std::move(settings),
+    });
+    view_->set_game(config.game_title, config.console_key);
+  }
   using namespace std::placeholders;
   espp::EventManager::get().add_subscriber(volume_changed_topic, "menu", std::bind(&Menu::on_volume, this, _1), 4 * 1024);
   logger_.info("Menu created");
@@ -22,15 +64,18 @@ Menu::Menu(const Config &config)
 Menu::~Menu() {
   espp::EventManager::get().remove_subscriber(volume_changed_topic, "menu");
   task_.stop();
-  deinit_ui();
+  std::lock_guard<std::recursive_mutex> lk(mutex_);
+  view_.reset();
+  pause_image_data_.release();
+  slot_image_data_.release();
 }
 
 void Menu::select_slot(int slot) {
-  if (slot < 0)
-    slot = MAX_SLOT;
-  if (slot > (int)MAX_SLOT)
-    slot = 0;
+  if (slot < 0) slot = MAX_SLOT;
+  if (slot > (int)MAX_SLOT) slot = 0;
   selected_slot_ = slot;
+  std::lock_guard<std::recursive_mutex> lk(mutex_);
+  view_->set_slot(slot); // (calls on_slot when it changes)
   update_slot_display();
 }
 
@@ -39,29 +84,45 @@ void Menu::pause() {
   task_.stop();
   // wait out a timer callback already in lv_timer_handler() (stop() does not)
   std::lock_guard<std::recursive_mutex> lk(mutex_);
+  // the game gets the screenshots' room back
+  view_->set_pause_image(nullptr);
+  view_->set_slot_image(nullptr);
+  pause_image_data_.release();
+  slot_image_data_.release();
 }
 
 void Menu::resume() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
-  update_shared_state();
+  pause_image_data_.allocate();
+  slot_image_data_.allocate();
+  if (!pause_image_data_.data || !slot_image_data_.data) {
+    logger_.warn("No room for the menu's screenshots (PSRAM largest block {} KB)",
+                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
+  }
   update_pause_image();
   update_slot_display();
-  lv_label_set_text_fmt(fps_label_, "%.1f FPS", get_fps());
-  lv_screen_load(screen_);
-  lv_obj_invalidate(screen_);
-  if (auto *keypad = Tab5Emu::get().keypad_indev(); keypad && group_) {
-    lv_indev_set_group(keypad, group_);
-    lv_group_focus_obj(btn_resume_);
-  }
+  view_->set_fps(get_fps());
+  const auto battery = Tab5Emu::get().battery_status();
+  view_->set_battery((int)std::lround(battery.charge_percent), battery.is_charging);
+  view_->show();
+  lv_obj_invalidate(view_->screen());
   task_.periodic(16 * 1000);
   paused_ = false;
 }
 
 void Menu::click(Action action) {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
-  lv_obj_t *const buttons[] = {btn_resume_, btn_reset_, btn_save_, btn_load_, btn_quit_};
-  if (auto *btn = buttons[static_cast<size_t>(action)]) {
-    lv_obj_send_event(btn, LV_EVENT_CLICKED, nullptr);
+  view_->click(static_cast<emu_ui::PauseMenu::Action>(action));
+}
+
+void Menu::on_action(emu_ui::PauseMenu::Action a) {
+  // (the same order: RESUME, RESET, SAVE, LOAD, QUIT)
+  const auto action = static_cast<Action>(a);
+  action_callback_(action);
+  if (action == Action::SAVE) {
+    update_slot_display(); // the new screenshot
+  } else if (action == Action::LOAD) {
+    update_pause_image(); // the loaded state
   }
 }
 
@@ -74,230 +135,17 @@ void Menu::update() {
 
 void Menu::on_volume(const std::vector<uint8_t> &) {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
-  update_shared_state();
-}
-
-void Menu::update_shared_state() {
-  auto &emu = Tab5Emu::get();
-  lv_slider_set_value(volume_slider_, (int)emu.volume(), LV_ANIM_OFF);
-  if (emu.is_muted())
-    lv_obj_add_state(mute_switch_, LV_STATE_CHECKED);
-  else
-    lv_obj_remove_state(mute_switch_, LV_STATE_CHECKED);
-  lv_slider_set_value(brightness_slider_, (int)emu.brightness(), LV_ANIM_OFF);
-  lv_dropdown_set_selected(video_dropdown_, (int)emu.video_setting());
-}
-
-bool Menu::load_screenshot(const std::string &path, lv_obj_t *image, std::vector<uint8_t> &storage,
-                           lv_image_dsc_t &desc) {
-  // stdio, not ifstream: a read error (EIO from the card) makes libstdc++'s
-  // filebuf throw, and exceptions are off, so that would abort
-  FILE *file = fopen(path.c_str(), "rb");
-  if (!file) {
-    lv_image_set_src(image, nullptr);
-    return false;
-  }
-  uint8_t header[4];
-  const bool header_ok = fread(header, 1, sizeof(header), file) == sizeof(header);
-  uint16_t w = (header[0] << 8) | header[1];
-  uint16_t h = (header[2] << 8) | header[3];
-  if (!header_ok || w == 0 || h == 0 || w > 2048 || h > 2048 || (size_t)w * h * 2 > storage.capacity()) {
-    fclose(file);
-    lv_image_set_src(image, nullptr);
-    return false;
-  }
-  storage.resize((size_t)w * h * 2); // within the reserved capacity: no allocation
-  const bool data_ok = fread(storage.data(), 1, storage.size(), file) == storage.size();
-  fclose(file);
-  if (!data_ok) {
-    lv_image_set_src(image, nullptr);
-    return false;
-  }
-  memset(&desc, 0, sizeof(desc));
-  desc.header.magic = LV_IMAGE_HEADER_MAGIC;
-  desc.header.cf = LV_COLOR_FORMAT_RGB565;
-  desc.header.w = w;
-  desc.header.h = h;
-  desc.header.stride = w * 2;
-  desc.data_size = storage.size();
-  desc.data = storage.data();
-  lv_image_set_src(image, &desc);
-  return true;
+  view_->refresh_settings();
 }
 
 void Menu::update_pause_image() {
-  load_screenshot(paused_image_path_, pause_image_, pause_image_data_, pause_image_desc_);
+  const bool ok = emu_ui::load_screenshot(paused_image_path_.c_str(), pause_image_data_.span(), pause_image_desc_);
+  view_->set_pause_image(ok ? &pause_image_desc_ : nullptr);
 }
 
 void Menu::update_slot_display() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);
-  lv_label_set_text_fmt(slot_label_, "Slot %d", (int)selected_slot_);
-  auto path = slot_image_callback_ ? slot_image_callback_() : "";
-  if (path.empty() || !load_screenshot(path, slot_image_, slot_image_data_, slot_image_desc_)) {
-    lv_image_set_src(slot_image_, nullptr);
-  }
-}
-
-void Menu::init_ui() {
-  std::lock_guard<std::recursive_mutex> lk(mutex_);
-  screen_ = lv_obj_create(nullptr);
-  lv_obj_set_style_bg_color(screen_, lv_color_hex(0x101418), 0);
-  lv_obj_remove_flag(screen_, LV_OBJ_FLAG_SCROLLABLE);
-  const int W = Tab5Emu::lcd_width(), H = Tab5Emu::lcd_height();
-
-  auto title = lv_label_create(screen_);
-  lv_label_set_text(title, "Paused");
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_32, 0);
-  lv_obj_set_style_text_color(title, lv_color_white(), 0);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 24, 16);
-
-  fps_label_ = lv_label_create(screen_);
-  lv_label_set_text(fps_label_, "");
-  lv_obj_set_style_text_font(fps_label_, &lv_font_montserrat_20, 0);
-  lv_obj_set_style_text_color(fps_label_, lv_color_white(), 0);
-  lv_obj_align(fps_label_, LV_ALIGN_TOP_RIGHT, -24, 22);
-
-  // paused game image (left)
-  pause_image_ = lv_image_create(screen_);
-  lv_obj_set_size(pause_image_, 480, 360);
-  lv_image_set_inner_align(pause_image_, LV_IMAGE_ALIGN_CONTAIN);
-  lv_obj_align(pause_image_, LV_ALIGN_TOP_LEFT, 24, 80);
-
-  // save slot (left, below)
-  btn_slot_prev_ = lv_button_create(screen_);
-  lv_obj_set_size(btn_slot_prev_, 64, 48);
-  lv_obj_align(btn_slot_prev_, LV_ALIGN_TOP_LEFT, 24, 460);
-  lv_label_set_text(lv_label_create(btn_slot_prev_), LV_SYMBOL_LEFT);
-  lv_obj_center(lv_obj_get_child(btn_slot_prev_, 0));
-  lv_obj_add_event_cb(btn_slot_prev_, event_callback, LV_EVENT_CLICKED, this);
-
-  slot_label_ = lv_label_create(screen_);
-  lv_label_set_text(slot_label_, "Slot 0");
-  lv_obj_set_style_text_font(slot_label_, &lv_font_montserrat_24, 0);
-  lv_obj_set_style_text_color(slot_label_, lv_color_white(), 0);
-  lv_obj_align(slot_label_, LV_ALIGN_TOP_LEFT, 110, 470);
-
-  btn_slot_next_ = lv_button_create(screen_);
-  lv_obj_set_size(btn_slot_next_, 64, 48);
-  lv_obj_align(btn_slot_next_, LV_ALIGN_TOP_LEFT, 220, 460);
-  lv_label_set_text(lv_label_create(btn_slot_next_), LV_SYMBOL_RIGHT);
-  lv_obj_center(lv_obj_get_child(btn_slot_next_, 0));
-  lv_obj_add_event_cb(btn_slot_next_, event_callback, LV_EVENT_CLICKED, this);
-
-  slot_image_ = lv_image_create(screen_);
-  lv_obj_set_size(slot_image_, 240, 180);
-  lv_image_set_inner_align(slot_image_, LV_IMAGE_ALIGN_CONTAIN);
-  lv_obj_align(slot_image_, LV_ALIGN_TOP_LEFT, 300, 460);
-
-  // actions (center)
-  auto actions = lv_obj_create(screen_);
-  lv_obj_set_size(actions, 300, H - 100);
-  lv_obj_align(actions, LV_ALIGN_TOP_MID, 100, 76);
-  lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_row(actions, 16, 0);
-  auto make_button = [&](const char *text) {
-    auto b = lv_button_create(actions);
-    lv_obj_set_size(b, lv_pct(100), 64);
-    auto l = lv_label_create(b);
-    lv_label_set_text(l, text);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
-    lv_obj_center(l);
-    lv_obj_add_event_cb(b, event_callback, LV_EVENT_CLICKED, this);
-    return b;
-  };
-  btn_resume_ = make_button(LV_SYMBOL_PLAY "  Resume");
-  btn_save_ = make_button(LV_SYMBOL_SAVE "  Save");
-  btn_load_ = make_button(LV_SYMBOL_UPLOAD "  Load");
-  btn_reset_ = make_button(LV_SYMBOL_REFRESH "  Reset");
-  btn_quit_ = make_button(LV_SYMBOL_CLOSE "  Quit");
-
-  // settings (right)
-  auto settings = lv_obj_create(screen_);
-  lv_obj_set_size(settings, W / 4, H - 100);
-  lv_obj_align(settings, LV_ALIGN_TOP_RIGHT, -24, 76);
-  lv_obj_set_flex_flow(settings, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_row(settings, 18, 0);
-  auto make_label = [&](const char *text) {
-    auto l = lv_label_create(settings);
-    lv_label_set_text(l, text);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
-    return l;
-  };
-  make_label(LV_SYMBOL_VOLUME_MAX "  Volume");
-  volume_slider_ = lv_slider_create(settings);
-  lv_obj_set_width(volume_slider_, lv_pct(90));
-  lv_slider_set_range(volume_slider_, 0, 100);
-  lv_obj_add_event_cb(volume_slider_, event_callback, LV_EVENT_VALUE_CHANGED, this);
-  make_label(LV_SYMBOL_MUTE "  Mute");
-  mute_switch_ = lv_switch_create(settings);
-  lv_obj_add_event_cb(mute_switch_, event_callback, LV_EVENT_VALUE_CHANGED, this);
-  make_label(LV_SYMBOL_EYE_OPEN "  Brightness");
-  brightness_slider_ = lv_slider_create(settings);
-  lv_obj_set_width(brightness_slider_, lv_pct(90));
-  lv_slider_set_range(brightness_slider_, 5, 100);
-  lv_obj_add_event_cb(brightness_slider_, event_callback, LV_EVENT_VALUE_CHANGED, this);
-  make_label(LV_SYMBOL_IMAGE "  Video scaling");
-  video_dropdown_ = lv_dropdown_create(settings);
-  lv_dropdown_set_options(video_dropdown_, "Original\nFit\nFill");
-  lv_obj_set_width(video_dropdown_, lv_pct(90));
-  lv_obj_add_event_cb(video_dropdown_, event_callback, LV_EVENT_VALUE_CHANGED, this);
-
-  // gamepad / keyboard focus order (see Tab5Emu::keypad_indev())
-  group_ = lv_group_create();
-  for (auto *o : {btn_resume_, btn_save_, btn_load_, btn_reset_, btn_quit_, btn_slot_prev_, btn_slot_next_, volume_slider_,
-                  mute_switch_, brightness_slider_, video_dropdown_}) {
-    lv_group_add_obj(group_, o);
-  }
-  lv_group_set_wrap(group_, true);
-}
-
-void Menu::deinit_ui() {
-  std::lock_guard<std::recursive_mutex> lk(mutex_);
-  if (group_) {
-    if (auto *keypad = Tab5Emu::get().keypad_indev(); keypad && lv_indev_get_group(keypad) == group_) {
-      lv_indev_set_group(keypad, nullptr);
-    }
-    lv_group_delete(group_);
-    group_ = nullptr;
-  }
-  if (screen_) {
-    lv_obj_delete(screen_);
-    screen_ = nullptr;
-  }
-}
-
-void Menu::event_callback(lv_event_t *e) {
-  auto menu = static_cast<Menu *>(lv_event_get_user_data(e));
-  if (!menu) {
-    return;
-  }
-  auto target = static_cast<lv_obj_t *>(lv_event_get_target(e));
-  auto code = lv_event_get_code(e);
-  auto &emu = Tab5Emu::get();
-  if (code == LV_EVENT_CLICKED) {
-    if (target == menu->btn_resume_)
-      menu->action_callback_(Action::RESUME);
-    else if (target == menu->btn_reset_)
-      menu->action_callback_(Action::RESET);
-    else if (target == menu->btn_save_) {
-      menu->action_callback_(Action::SAVE);
-      menu->update_slot_display();
-    } else if (target == menu->btn_load_)
-      menu->action_callback_(Action::LOAD);
-    else if (target == menu->btn_quit_)
-      menu->action_callback_(Action::QUIT);
-    else if (target == menu->btn_slot_prev_)
-      menu->select_slot(menu->selected_slot_ - 1);
-    else if (target == menu->btn_slot_next_)
-      menu->select_slot(menu->selected_slot_ + 1);
-  } else if (code == LV_EVENT_VALUE_CHANGED) {
-    if (target == menu->volume_slider_)
-      emu.volume(lv_slider_get_value(menu->volume_slider_));
-    else if (target == menu->mute_switch_)
-      emu.mute(lv_obj_has_state(menu->mute_switch_, LV_STATE_CHECKED));
-    else if (target == menu->brightness_slider_)
-      emu.brightness(lv_slider_get_value(menu->brightness_slider_));
-    else if (target == menu->video_dropdown_)
-      emu.video_setting(static_cast<VideoSetting>(lv_dropdown_get_selected(menu->video_dropdown_)));
-  }
+  const auto path = slot_image_callback_ ? slot_image_callback_() : std::string{};
+  const bool ok = !path.empty() && emu_ui::load_screenshot(path.c_str(), slot_image_data_.span(), slot_image_desc_);
+  view_->set_slot_image(ok ? &slot_image_desc_ : nullptr);
 }

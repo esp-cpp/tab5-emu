@@ -23,7 +23,7 @@ jobs:
 
     - name: Checkout the game submodules (without their desktop-only nested submodules)
       run: |
-        git submodule update --init components/jk/OpenJKDF2 components/mgs/mgs_reversing components/mgs/psyz components/tpm/tpm-decomp components/genesis/gwenesis components/pico8/femto8 components/nes/nofrendo components/gbc/gnuboy components/msx/fmsx components/sms/smsplus components/doom/prboom components/darkforces/TheForceEngine components/emulink
+        git submodule update --init components/jk/OpenJKDF2 components/mgs/mgs_reversing components/mgs/psyz components/tpm/tpm-decomp components/genesis/gwenesis components/pico8/femto8 components/nes/nofrendo components/gbc/gnuboy components/msx/fmsx components/sms/smsplus components/doom/prboom components/darkforces/TheForceEngine components/emulink components/emu-ui
         # ScummVM's history is large: only the pinned commit
         git submodule update --init --depth 1 components/scummvm/scummvm
 

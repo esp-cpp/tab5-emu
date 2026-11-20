@@ -406,6 +406,10 @@ keyboard's E / R) is needed for those.
 **Star Trek: 25th Anniversary**: touch is the mouse (two fingers = right
 click), as are a USB mouse and the gamepad (A / B = left / right click).
 
+**MSX**: A / B are the joystick's two fire buttons, start is the MSX's F1 key
+(pause in Konami's games), select shows the on-screen keyboard and Y opens
+fMSX's own menu.
+
 New controllers: the console prints each device's decoded buttons on change
 (debug level in `usb_hid.cpp`); a wrong mapping is a quirk-table entry in
 espp's `hid-rp-report-map.hpp`.
@@ -421,7 +425,7 @@ components/
   tab5-emu/         HAL (Tab5Emu): display / PPA video path, audio, SD, input, USB
   emu-ui/           the launcher and pause menu screens (shared with esp-box-emu)
   gui/              the launcher's Tab5 side: games, boxart, settings
-  menu/             LVGL in-game pause menu (resume/reset/save/load/quit)
+  menu/             the in-game pause menu (resume/reset/save/load/quit) on emu-ui
   rom_info/         metadata.csv parsing, consoles
   statistics/       frame timing
   emulink/          the USB link (shared with esp-box-emu; tools/emulink is its CLI)
