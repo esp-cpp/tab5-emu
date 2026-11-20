@@ -165,7 +165,7 @@ extern "C" void app_main(void) {
   logger.info("initializing gui...");
 
   // initialize the gui
-  Gui gui({.log_level = espp::Logger::Verbosity::WARN});
+  Gui gui({.save_dir = Cart::save_dir(), .log_level = espp::Logger::Verbosity::WARN});
   internal_free_log("gui");
 
   // the USB link's services (core dump, system, monitor) and the test control

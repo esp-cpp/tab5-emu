@@ -29,20 +29,16 @@ enum class Console : uint8_t {
   UNKNOWN
 };
 
-/// The shape the firmware draws for a console that has no art on the SD card.
-enum class ConsoleShape : uint8_t { GAMEPAD, HANDHELD_TALL, HANDHELD_WIDE, DISC, COMPUTER, FANTASY };
-
 struct ConsoleInfo {
   const char *name;       ///< shown in the list header and the badge
   const char *short_name; ///< for a small screen's badge
-  const char *key;        ///< art on the SD card: boxart/consoles/<key>.jpg
-  uint32_t color;     ///< badge / header accent (0xRRGGBB)
-  ConsoleShape shape;
+  const char *key;        ///< art on the SD card (boxart/consoles/<key>.jpg) and
+                          ///< the launcher's look (emu_ui::console_style)
 };
 
 /// The console `platform` games are grouped under.
 Console console_of(Emulator platform);
-/// Name, art key and colors of `console`.
+/// Name and key of `console`.
 const ConsoleInfo &console_info(Console console);
 
 /// Parse the metadata csv (rom_path, boxart_path, name) relative to the SD

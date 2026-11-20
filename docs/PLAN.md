@@ -183,10 +183,13 @@ not PSRAM. Rules that keep everything booting:
 
 - Emulator cores keep no static state in internal RAM (`bss_to_psram.py`
   for .bss; big initialized tables are `const` so they live in flash).
-- Plain `malloc` of >256 bytes goes to PSRAM
-  (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256`); anything that needs internal
-  or DMA memory asks for it explicitly. JK's level load otherwise drained
-  the DMA heap and SD reads failed.
+- Plain `malloc` / `new` of any size goes to PSRAM first
+  (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0`, as on the box); anything that
+  needs internal or DMA memory asks for it explicitly. JK's level load
+  otherwise drained the DMA heap and SD reads failed. (It was 256 until
+  2026-11: every allocation of 256 bytes or less went to internal RAM first,
+  and the emu-ui launcher's game list alone then left Metal Gear Solid with
+  ~500 bytes of DMA memory and a black screen.)
 - The 64 KB video tile is allocated at boot and kept; allocating it at the
   first frame fell back to PSRAM once the GUI had fragmented the heap (JK
   dropped from 38 to 21 fps).

@@ -177,8 +177,9 @@ has the details.
 main/               app_main, Cart base class, per-game carts
 components/
   tab5-emu/         HAL (Tab5Emu): display / PPA video path, audio, SD, input
-  gui/              LVGL launcher (rom list + boxart + settings)
-  menu/             LVGL in-game pause menu (resume/reset/save/load/quit)
+  emu-ui/           the launcher's and the pause menu's screens (shared with esp-box-emu)
+  gui/              the launcher: the games, boxart and settings for emu-ui
+  menu/             the in-game pause menu (resume/reset/save/load/quit) on emu-ui
   rom_info/         metadata.csv parsing
   statistics/       frame timing
   jk/               OpenJKDF2 port: engine submodule + ESP32 platform layer + glue
