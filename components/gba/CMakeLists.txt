@@ -29,9 +29,13 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE __LIBRETRO__ ROM_BUFFER_SIZE
 target_compile_options(${COMPONENT_LIB} PRIVATE -O3 -fno-strict-aliasing -fjump-tables -ftree-switch-conversion -msmall-data-limit=0 -include ${CMAKE_CURRENT_LIST_DIR}/gpsp/retro_inline.h
   -Wno-error -w -Wno-error=incompatible-pointer-types -Wno-error=int-conversion
   -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers)
+# executing from flash, the core's code is part of the PSRAM code overlay
+# (components/tab5-emu/overlay.ld)
+include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)
+tab5_overlay_args(gba overlay_args)
 add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${PYTHON} ${CMAKE_CURRENT_LIST_DIR}/../../tools/bss_to_psram.py
-          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}>
+          ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${COMPONENT_LIB}> ${overlay_args}
           --keep reg,reg_mode,spsr,cpu_ticks,io_registers,oam_ram,palette_ram,palette_ram_converted,oam_update_count
   COMMENT "Moving the GBA core's .bss to PSRAM"
   VERBATIM)

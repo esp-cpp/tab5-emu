@@ -25,6 +25,7 @@
 #include "devlink.hpp"
 #include "gui.hpp"
 #include "heap_utils.hpp"
+#include "overlay.h"
 #include "remote_control.hpp"
 #include "rom_info.hpp"
 #include "settings.hpp"
@@ -113,6 +114,8 @@ extern "C" void app_main(void) {
 #if defined(ENABLE_SCUMMVM)
   // now, while the PSRAM heap is empty: its long-lived allocations sit at
   // the start instead of between the big blocks the games want
+  // (its code is part of the cores' overlay: load it for this)
+  tab5_overlay_load("scummvm");
   scummvm_prepare();
 #endif
 

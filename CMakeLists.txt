@@ -123,6 +123,22 @@ project(tab5-emu)
 
 set(CMAKE_CXX_STANDARD 23)
 
+# Executing from flash, .ext_ram.data (components/tab5-emu/ext_ram_data.ld)
+# is PSRAM, which the image cannot hold: after linking, its bytes go into the
+# flash array tab5_ext_ram_data_image and the section becomes NOBITS, before
+# the .bin is made from the ELF
+if(NOT CONFIG_SPIRAM_XIP_FROM_PSRAM)
+  idf_build_get_property(python PYTHON)
+  add_custom_command(TARGET ${CMAKE_PROJECT_NAME}.elf POST_BUILD
+    COMMAND ${python} ${CMAKE_CURRENT_LIST_DIR}/tools/ext_ram_data_image.py $<TARGET_FILE:${CMAKE_PROJECT_NAME}.elf>
+    # likewise the game cores' code overlay (components/tab5-emu/overlay.ld),
+    # and check that only the carts reach into it
+    COMMAND ${python} ${CMAKE_CURRENT_LIST_DIR}/tools/overlay_image.py $<TARGET_FILE:${CMAKE_PROJECT_NAME}.elf>
+            ${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.map
+    COMMENT "Storing .ext_ram.data and the core code overlay in flash"
+    VERBATIM)
+endif()
+
 # The updater app (updater/) belongs in ota_1 (see partitions.csv): build it
 # first (idf.py -C updater build) and `idf.py flash`, flash_args and
 # flasher_args.json (the release package) put it there with the emulator.

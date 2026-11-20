@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "overlay.h"
+
 #include "darkforces_cart.hpp"
 #include "doom_cart.hpp"
 #include "gba_cart.hpp"
@@ -16,6 +18,44 @@
 #include "sms_cart.hpp"
 #include "snes_cart.hpp"
 #include "tpm_cart.hpp"
+
+// The member of the game cores' code overlay a platform's cart runs (see
+// overlay.h; nullptr: its code is always there)
+inline const char *overlay_core(Emulator platform) {
+  switch (platform) {
+  case Emulator::JEDI_KNIGHT:
+    return "jk";
+  case Emulator::MGS:
+    return "mgs";
+  case Emulator::GBA:
+    return "gba";
+  case Emulator::SNES:
+    return "snes";
+  case Emulator::SEGA_GENESIS:
+  case Emulator::SEGA_MEGA_DRIVE:
+    return "genesis";
+  case Emulator::PICO8:
+    return "pico8";
+  case Emulator::NES:
+    return "nes";
+  case Emulator::GAMEBOY:
+  case Emulator::GAMEBOY_COLOR:
+    return "gbc";
+  case Emulator::SEGA_MASTER_SYSTEM:
+  case Emulator::SEGA_GAME_GEAR:
+    return "sms";
+  case Emulator::MSX:
+    return "msx";
+  case Emulator::DOOM:
+    return "doom";
+  case Emulator::DARK_FORCES:
+    return "darkforces";
+  case Emulator::SCUMMVM:
+    return "scummvm";
+  default:
+    return nullptr;
+  }
+}
 
 inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
 #if defined(ENABLE_MGS)
@@ -34,6 +74,10 @@ inline std::unique_ptr<Cart> make_cart(const RomInfo &info) {
              heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 #endif
+  // its core's code, before the cart's constructor runs any of it
+  if (const char *core = overlay_core(info.platform); core && !tab5_overlay_load(core)) {
+    return nullptr;
+  }
   switch (info.platform) {
   case Emulator::JEDI_KNIGHT:
     return std::make_unique<JkCart>(Cart::Config{
