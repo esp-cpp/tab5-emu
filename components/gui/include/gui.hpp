@@ -106,8 +106,11 @@ protected:
   void on_volume(const std::vector<uint8_t> &data);
   void on_battery(const std::vector<uint8_t> &data);
 
-  /// Decode a JPEG on the SD card into a new RGB565 draw buffer (nullptr if it cannot)
-  lv_draw_buf_t *decode_image(const std::string &path);
+  /// Decode a JPEG on the SD card into a new RGB565 draw buffer (nullptr if
+  /// it cannot), scaled to fit a box x box square (box > 0)
+  lv_draw_buf_t *decode_image(const std::string &path, int box = 0);
+  lv_draw_buf_t *decode_jpeg_hw(const std::string &path, int box);
+  static lv_draw_buf_t *fit_image(const uint8_t *src, int w, int h, int stride, int box);
   const void *cover(size_t index);
   const void *console_art(const std::string &key);
 
