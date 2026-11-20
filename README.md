@@ -308,6 +308,10 @@ Cross / Circle / Square / Triangle, L1 / R1 on the shoulders, L2 / R2 on the
 triggers for the item and weapon menus, so a pad with triggers (or the
 keyboard's E / R) is needed for those.
 
+MSX: A / B are the joystick's two fire buttons, start is the MSX's F1 key
+(pause in Konami's games), select shows the on-screen keyboard and Y opens
+fMSX's own menu.
+
 New controllers: the console prints each device's decoded buttons on change
 (debug level in `usb_hid.cpp`); a wrong mapping is a quirk-table entry in
 espp's `hid-rp-report-map.hpp`.
