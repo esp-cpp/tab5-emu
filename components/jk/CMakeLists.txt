@@ -87,11 +87,15 @@ if(CONFIG_JK_ENGINE)
     OPENJKDF2_RELEASE_COMMIT_U=u"esp32"
     OPENJKDF2_RELEASE_COMMIT_SHORT_U=u"esp32"
     # table sizes (Kconfig "Engine table sizes"); the engine allocates these
-    # per session (PLATFORM_SESSION_ARRAYS, Platform/ESP32/jk_esp_arrays.c)
+    # per session (PLATFORM_SESSION_ARRAYS, Platform/ESP32/jk_esp_arrays.c).
+    # The active-edge rasterizer's pools (RDACTIVE_MAX_FACES/SPANS) keep
+    # rdActive.h's sizes: with RDRASTER_SW_ZBUFFER they are never allocated.
     SITHAI_MAX_ACTORS=${CONFIG_JK_SITHAI_MAX_ACTORS}
     JK_ESP_FS_DIRCACHE=${CONFIG_JK_FS_DIR_CACHE_ENTRIES}
-    RDACTIVE_MAX_FACES=${CONFIG_JK_RDACTIVE_MAX_FACES}
-    RDACTIVE_MAX_SPANS=${CONFIG_JK_RDACTIVE_MAX_SPANS}
+    # material (texture) cache eviction (Kconfig "Material (texture) cache",
+    # Platform/ESP32/Window_ESP32.c)
+    JK_ESP_MATERIAL_PURGE_FREE_KB=${CONFIG_JK_MATERIAL_PURGE_FREE_KB}
+    JK_ESP_MATERIAL_PURGE_AGE=${CONFIG_JK_MATERIAL_PURGE_AGE_FRAMES}
   )
   # Engine-only flags (the C++ glue in src/ keeps the project defaults)
   set(ENGINE_COMMON_FLAGS
@@ -133,8 +137,9 @@ if(CONFIG_JK_ENGINE AND CONFIG_JK_ESP_DEBUG)
 endif()
 
 if(CONFIG_JK_ENGINE)
-  # The engine has ~1.4 MB of static state; move it out of internal SRAM into
-  # PSRAM by renaming the archive's .bss sections (see ../../tools/bss_to_psram.py).
+  # The engine has ~320 KB of static state (its largest arrays are allocated
+  # per launch, see above); move it out of internal SRAM into PSRAM by renaming
+  # the archive's .bss sections (see ../../tools/bss_to_psram.py).
   # executing from flash, the core's code is part of the PSRAM code overlay
   # (components/tab5-emu/overlay.ld)
   include(${CMAKE_CURRENT_LIST_DIR}/../../tools/overlay.cmake)

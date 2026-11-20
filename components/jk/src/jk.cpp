@@ -529,6 +529,11 @@ void jk_esp_alloc_dump(int top) {
   }
   std::sort(sites.begin(), sites.end(), [](const Site &a, const Site &b) { return a.bytes > b.bytes; });
   logger.info("alloc: {} live allocations, {} bytes, {} sites ({} untracked)", live, live_bytes, sites.size(), dropped);
+  // one of them is the engine's session arrays block until deinit() frees it
+  // (jk_esp_arrays_alloc() in init()): not a leak
+  if (const size_t arrays = jk_esp_arrays_bytes()) {
+    logger.info("alloc: (includes the session arrays, {} bytes in 1 allocation, freed at deinit)", arrays);
+  }
   for (size_t i = 0; i < sites.size() && i < static_cast<size_t>(top); i++) {
     logger.info("alloc: site 0x{:08x} {} bytes in {} allocations", sites[i].site, sites[i].bytes, sites[i].count);
   }
