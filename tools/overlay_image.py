@@ -315,6 +315,11 @@ for i, s in enumerate(secs):
         if img and img[0] <= addr < img[0] + img[1]:
             addr = ext_start + addr - img[0]
         file, sec = attribute(addr)
+        # merged strings (.str1.N) hold no addresses: four of their characters
+        # that happen to spell an overlay function's address (" 60H" =
+        # 0x48303620) are not a reference
+        if re.search(r"\.str\d*\.\d+$", sec or ""):
+            continue
         if core_of(file) and not report:
             allowed.append(None)  # (named only when printed: naming is slow)
             continue
