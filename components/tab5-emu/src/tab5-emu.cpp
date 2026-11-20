@@ -1039,6 +1039,11 @@ IRAM_ATTR void Tab5Emu::convert_tile(const void *frame, const void *overlay, siz
   }
   const uint8_t *src = static_cast<const uint8_t *>(frame);
   const uint16_t *pal = palette_;
+  // Each index is masked to the palette's size (a power of two), as on the
+  // box: a core may keep flags in the upper bits. smsplus marks sprite and
+  // priority pixels with 0x40 / 0x20 in its 32-color palette, so unmasked its
+  // sprites took their colors from whatever followed the palette in memory.
+  const uint8_t m = static_cast<uint8_t>(palette_size_ - 1 < 256 ? palette_size_ - 1 : 0xFF);
   for (size_t r = 0; r < th; r++) {
     const size_t Y = y0 + r;
     uint16_t *dst = tile + r * tw;
@@ -1052,13 +1057,13 @@ IRAM_ATTR void Tab5Emu::convert_tile(const void *frame, const void *overlay, siz
       const uint8_t *s = row + x0;
       size_t x = 0;
       for (; x + 4 <= tw; x += 4) {
-        dst[x + 0] = pal[s[x + 0]];
-        dst[x + 1] = pal[s[x + 1]];
-        dst[x + 2] = pal[s[x + 2]];
-        dst[x + 3] = pal[s[x + 3]];
+        dst[x + 0] = pal[s[x + 0] & m];
+        dst[x + 1] = pal[s[x + 1] & m];
+        dst[x + 2] = pal[s[x + 2] & m];
+        dst[x + 3] = pal[s[x + 3] & m];
       }
       for (; x < tw; x++) {
-        dst[x] = pal[s[x]];
+        dst[x] = pal[s[x] & m];
       }
     } else if (k == 2 && (x0 % 2) == 0 && (tw % 2) == 0) {
       // write pixel pairs as 32-bit words
@@ -1066,12 +1071,12 @@ IRAM_ATTR void Tab5Emu::convert_tile(const void *frame, const void *overlay, siz
       uint32_t *d32 = reinterpret_cast<uint32_t *>(dst);
       const size_t n = tw / 2;
       for (size_t i = 0; i < n; i++) {
-        const uint32_t p = pal[s[i]];
+        const uint32_t p = pal[s[i] & m];
         d32[i] = p | (p << 16);
       }
     } else {
       for (size_t x = 0; x < tw; x++) {
-        dst[x] = pal[row[(x0 + x) / k]];
+        dst[x] = pal[row[(x0 + x) / k] & m];
       }
     }
   }
@@ -1109,13 +1114,13 @@ IRAM_ATTR void Tab5Emu::convert_tile(const void *frame, const void *overlay, siz
       if (word == 0) {
         continue;
       }
-      if (row[c + 0]) dst[c + 0] = pal[row[c + 0]];
-      if (row[c + 1]) dst[c + 1] = pal[row[c + 1]];
-      if (row[c + 2]) dst[c + 2] = pal[row[c + 2]];
-      if (row[c + 3]) dst[c + 3] = pal[row[c + 3]];
+      if (row[c + 0]) dst[c + 0] = pal[row[c + 0] & m];
+      if (row[c + 1]) dst[c + 1] = pal[row[c + 1] & m];
+      if (row[c + 2]) dst[c + 2] = pal[row[c + 2] & m];
+      if (row[c + 3]) dst[c + 3] = pal[row[c + 3] & m];
     }
     for (; c < c1; c++) {
-      if (row[c]) dst[c] = pal[row[c]];
+      if (row[c]) dst[c] = pal[row[c] & m];
     }
   }
 }
