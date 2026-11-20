@@ -139,6 +139,24 @@ if(NOT CONFIG_SPIRAM_XIP_FROM_PSRAM)
     VERBATIM)
 endif()
 
+# Executing from flash, LVGL and the GUI (they draw in software: from flash
+# the launcher redraws visibly) run from PSRAM instead: their code and
+# read-only data go to .tab5_res (tools/bss_to_psram.py --psram-code,
+# components/tab5-emu/overlay.ld), filled from flash at boot. Done on the
+# archives just before the link (a POST_BUILD step can only be added in the
+# component's own directory, and LVGL is a managed component); renaming an
+# archive whose sections are renamed already does nothing.
+if(NOT CONFIG_SPIRAM_XIP_FROM_PSRAM)
+  foreach(component lvgl__lvgl emu-ui gui menu)
+    idf_component_get_property(lib ${component} COMPONENT_LIB)
+    add_custom_command(TARGET ${CMAKE_PROJECT_NAME}.elf PRE_LINK
+      COMMAND ${python} ${CMAKE_CURRENT_LIST_DIR}/tools/bss_to_psram.py
+              ${CMAKE_OBJDUMP} ${CMAKE_OBJCOPY} $<TARGET_FILE:${lib}> --no-bss --psram-code
+      COMMENT "Moving ${component}'s code to PSRAM"
+      VERBATIM)
+  endforeach()
+endif()
+
 # The updater app (updater/) belongs in ota_1 (see partitions.csv): build it
 # first (idf.py -C updater build) and `idf.py flash`, flash_args and
 # flasher_args.json (the release package) put it there with the emulator.

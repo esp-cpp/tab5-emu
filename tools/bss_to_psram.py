@@ -9,6 +9,7 @@ usage: bss_to_psram.py <objdump> <objcopy> <archive> [--keep name,name,...]
                        [--data [--data-into=rodata|ext_ram[:TAG]]]
                        [--also-data=PREFIX:TAG ...] [--no-bss]
                        [--overlay=NAME [--overlay-rodata] [--overlay-keep=REGEX ...]]
+                       [--psram-code]
   --keep: symbols (section suffixes) that stay in internal RAM, e.g. a
           core's hottest state
   --data: also move the initialized data (.data/.data.*/.sdata*) to PSRAM:
@@ -40,6 +41,11 @@ usage: bss_to_psram.py <objdump> <objcopy> <archive> [--keep name,name,...]
   --overlay-rodata: the core's named read-only data (.rodata.<symbol>: its
           tables) goes into the overlay too (merged strings and constants stay
           in flash, and so does shared template data, as with the code)
+  --psram-code: all of the archive's code and read-only data (.text*,
+          .rodata*) goes to .tab5_res, PSRAM that is filled from flash at
+          boot and stays (components/tab5-emu/overlay.ld): for code that
+          runs outside the games and needs the speed (the GUI, LVGL). Not
+          for code that runs before the C++ constructors.
   --overlay-keep=REGEX: more code that stays in flash (resident), matched
           against the section name after ".text." (and after "unlikely." /
           "hot." / "startup."); repeatable
@@ -58,6 +64,7 @@ also = []  # (prefix, tag)
 do_bss = True
 overlay = ""
 overlay_rodata = False
+psram_code = False
 overlay_keep = [re.compile(r"^_Z(NK?)?(St|Sa|Ss|9__gnu_cxx|3fmt|4espp)")]
 rest = sys.argv[4:]
 while rest:
@@ -81,6 +88,8 @@ while rest:
         overlay = arg.split("=", 1)[1]
     elif arg == "--overlay-rodata":
         overlay_rodata = True
+    elif arg == "--psram-code":
+        psram_code = True
     elif arg.startswith("--overlay-keep="):
         overlay_keep.append(re.compile(arg.split("=", 1)[1]))
     else:
@@ -119,12 +128,15 @@ def resident(name):
     return any(k.search(fn) for k in overlay_keep)
 
 
+MERGED = re.compile(r"\.(str\d+\.\d+|cst\d+)$")  # .rodata[.<fn>].str1.4 / .cst8
+
+
 def is_named_rodata(name):
     """.rodata.<symbol>, not merged strings / constants (.rodata.str1.1,
-    .rodata.cst8, ...), which shared code in the archive may point into"""
-    if not name.startswith(".rodata.") or name.startswith((".rodata.str", ".rodata.cst")):
-        return False
-    return True
+    .rodata.cst8, and with -ffunction-sections the per-function pools
+    .rodata.<fn>.str1.4 / .rodata.<fn>.cst8), which shared code in the
+    archive may point into"""
+    return name.startswith(".rodata.") and not MERGED.search(name)
 
 
 def tagged(tag):
@@ -143,6 +155,8 @@ for line in out.splitlines():
         if suffix in keep:
             continue
         renames[name] = ".ext_ram.bss" + (f".{suffix}" if suffix else "")
+    elif psram_code and (is_text(name) or name == ".rodata" or name.startswith(".rodata.")):
+        renames[name] = f".tab5_res{name}"
     elif overlay and is_text(name):
         if not resident(name):
             renames[name] = f".tab5_ovl.{overlay}{name}"
@@ -174,9 +188,11 @@ finally:
 moved_bss = sum(1 for n in renames.values() if n.startswith(".ext_ram.bss"))
 moved_text = sum(1 for n in renames.values() if n.startswith(".tab5_ovl."))
 moved_ctors = sum(1 for n in renames.values() if n.startswith(".tab5_ovl_ctors."))
-moved_data = len(renames) - moved_bss - moved_text - moved_ctors
+moved_res = sum(1 for n in renames.values() if n.startswith(".tab5_res"))
+moved_data = len(renames) - moved_bss - moved_text - moved_ctors - moved_res
 where = ".rodata (PSRAM-XIP)" if data_into == "rodata" else ".ext_ram.data"
 print(f"bss_to_psram: moved {moved_bss} bss sections of {archive} to .ext_ram.bss"
       + (f", {moved_data} data sections to {where}" if moved_data else "")
       + (f", {moved_text} code sections to the {overlay} overlay ({moved_ctors} constructor tables)"
-         if overlay else ""))
+         if overlay else "")
+      + (f", {moved_res} code / read-only data sections to PSRAM (.tab5_res)" if moved_res else ""))

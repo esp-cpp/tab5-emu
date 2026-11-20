@@ -206,8 +206,13 @@ the running game's core is copied there from flash when it launches.
   (`--wrap=free,realloc` makes it everyone's free()), `mgs::release_arena`
   (called on every launch), merged strings and constants. TPM's 3.2 MB
   bundle is not in the overlay (it loses 0-2% from flash).
-- Cost: 1.1 MB of PSRAM (the largest member, MGS) instead of 12.7 MB; 18.6 MB
-  free at the launcher instead of 7.3 MB. Measured (core fps / presented,
+- LVGL, emu-ui, the GUI and the menu draw in software and redrew visibly
+  from flash, so their code and read-only data run from PSRAM too, for good:
+  `bss_to_psram.py --psram-code` (applied to those archives just before the
+  link, in the root CMakeLists.txt) renames them `.tab5_res*`, filled from
+  its flash slot at boot by the constructor that fills `.ext_ram.data`.
+- Cost: 1.1 MB of PSRAM (the largest member, MGS) plus 0.7 MB (`.tab5_res`)
+  instead of 12.7 MB; 18.1 MB free at the launcher instead of 7.3 MB. Measured (core fps / presented,
   PSRAM XIP -> flash -> overlay): Genesis 99/59.7 -> 77/43.5 -> 91/59.6,
   GBA 95 -> 82 -> 90 (59.7 presented), SNES 70 -> 58 -> 67,
   Doom 99 -> 78 -> 94.5, MGS 9.3 -> 7.8 -> 8.7 presented,

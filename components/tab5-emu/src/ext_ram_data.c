@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#include "esp_cache.h"
 
 #if !CONFIG_SPIRAM_XIP_FROM_PSRAM
 
@@ -17,6 +18,8 @@
 __attribute__((aligned(16), used)) const uint8_t tab5_ext_ram_data_image[EXT_RAM_DATA_IMAGE_BYTES] = {0xa5};
 
 extern uint8_t _ext_ram_data_start[], _ext_ram_data_end[];
+extern uint8_t _tab5_res_start[], _tab5_res_end[];
+extern const uint8_t _tab5_res_lma[];
 
 // 101: the first priority applications may use, so before every default
 // constructor (.init_array is sorted by priority, sections.ld); PSRAM is
@@ -27,6 +30,16 @@ __attribute__((constructor(101), used)) void tab5_ext_ram_data_init(void) {
   // are written into the image after compiling
   __asm__ volatile("" : "+r"(src));
   memcpy(_ext_ram_data_start, src, (size_t)(_ext_ram_data_end - _ext_ram_data_start));
+  // and the code that runs from PSRAM for good (.tab5_res: LVGL, the GUI;
+  // components/tab5-emu/overlay.ld), from its slot in the overlay store. It
+  // was written through the data cache: write it back and drop every cached
+  // line of it, so instruction fetches (either core) see it.
+  const size_t res = (size_t)(_tab5_res_end - _tab5_res_start);
+  if (res) {
+    memcpy(_tab5_res_start, _tab5_res_lma, res);
+    esp_cache_msync(_tab5_res_start, res, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    __asm__ volatile("fence.i" ::: "memory");
+  }
 }
 
 #endif

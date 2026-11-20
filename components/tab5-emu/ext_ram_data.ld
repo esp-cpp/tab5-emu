@@ -23,12 +23,17 @@ SECTIONS
   {
     _ext_ram_data_start = ABSOLUTE(.);
     /* Metal Gear Solid resets its statics between launches from a snapshot
-     * (components/mgs/src/mgs.cpp); its glue is outside the brackets */
+     * (components/mgs/src/mgs.cpp) and saves them in save states; its glue
+     * (mgs.cpp, mgs_platform.cpp: the config, the SD root) is outside the
+     * brackets. Inside a section list EXCLUDE_FILE covers only the pattern
+     * right after it, hence twice. */
     _mgs_data_start = ABSOLUTE(.);
-    *libmgs.a:(EXCLUDE_FILE(*libmgs.a:mgs.* *libmgs.a:mgs_platform.*) .ext_ram.data.mgs_data .ext_ram.data.mgs_data.*)
+    *libmgs.a:(EXCLUDE_FILE(*libmgs.a:mgs.* *libmgs.a:mgs_platform.*) .ext_ram.data.mgs_data
+               EXCLUDE_FILE(*libmgs.a:mgs.* *libmgs.a:mgs_platform.*) .ext_ram.data.mgs_data.*)
     _mgs_data_end = ABSOLUTE(.);
     _mgs_sdata_start = ABSOLUTE(.);
-    *libmgs.a:(EXCLUDE_FILE(*libmgs.a:mgs.* *libmgs.a:mgs_platform.*) .ext_ram.data.mgs_sdata .ext_ram.data.mgs_sdata.*)
+    *libmgs.a:(EXCLUDE_FILE(*libmgs.a:mgs.* *libmgs.a:mgs_platform.*) .ext_ram.data.mgs_sdata
+               EXCLUDE_FILE(*libmgs.a:mgs.* *libmgs.a:mgs_platform.*) .ext_ram.data.mgs_sdata.*)
     _mgs_sdata_end = ABSOLUTE(.);
     *(.ext_ram.data .ext_ram.data.*)
     . = ALIGN(16);

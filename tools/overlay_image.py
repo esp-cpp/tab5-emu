@@ -7,7 +7,8 @@ usage: overlay_image.py <app.elf> <app.map> [--report]
 1. Each overlay member .tab5_ovl.<core> (linked at the shared PSRAM address)
    is copied into its slot in .flash.tab5_ovl_store (symbol
    _tab5_ovl_<core>_lma) and changed to NOBITS, so elf2image leaves the PSRAM
-   sections out of the image. Running it again is harmless.
+   sections out of the image; likewise .tab5_res (resident PSRAM code,
+   _tab5_res_lma). Running it again is harmless.
 2. Checks, which fail the build: code that is not in the overlay must not
    reach into it, because only one core's code is there at a time (or none):
    - no boot-time constructor (.flash.init_array) points into the overlay;
@@ -35,7 +36,7 @@ import sys
 from array import array
 
 SHT_PROGBITS, SHT_NOBITS = 1, 8
-SHF_ALLOC, SHF_EXECINSTR = 0x2, 0x4
+SHF_WRITE, SHF_ALLOC, SHF_EXECINSTR = 0x1, 0x2, 0x4
 CORES = ("gba", "snes", "genesis", "doom", "nes", "gbc", "sms", "msx", "pico8", "jk", "darkforces", "mgs", "scummvm")
 CART_FILES = ("libmain.a(main.cpp.obj)",)
 
@@ -86,15 +87,19 @@ def holder(addr):
 ovl_start, ovl_end = sym("_tab5_ovl_start"), sym("_tab5_ovl_end")
 ovl_objects = [v for v in objects if ovl_start <= v < ovl_end]
 
-# 1. store
+# 1. store (the overlay members, and .tab5_res: PSRAM code filled at boot)
+def slot_of(name):
+    return "_tab5_res_lma" if name == ".tab5_res" else f"_tab5_ovl_{name[len('.tab5_ovl.'):]}_lma"
+
+
 stored = 0
 for i, name in enumerate(names):
-    if not name.startswith(".tab5_ovl.") or secs[i][1] != SHT_PROGBITS:
+    if not (name.startswith(".tab5_ovl.") or name == ".tab5_res") or secs[i][1] != SHT_PROGBITS:
         continue
-    core = name[len(".tab5_ovl.") :]
+    core = name[len(".tab5_ovl.") :] if name != ".tab5_res" else "resident PSRAM code"
     size = secs[i][5]
     if size:
-        lma = sym(f"_tab5_ovl_{core}_lma")
+        lma = sym(slot_of(name))
         hi, foff = holder(lma)
         if hi is None or names[hi] != ".flash.tab5_ovl_store" or lma + size > secs[hi][3] + secs[hi][5]:
             sys.exit(f"overlay_image: the {core} slot at {lma:#x} is not inside .flash.tab5_ovl_store")
@@ -102,6 +107,21 @@ for i, name in enumerate(names):
         stored += size
     struct.pack_into("<I", elf, shoff + i * shentsize + 4, SHT_NOBITS)
     secs[i][1] = SHT_NOBITS
+res_i = names.index(".tab5_res") if ".tab5_res" in names else None
+
+
+def section_bytes(i):
+    """a section's contents: from the file, or for .tab5_res (NOBITS once
+    stored) from its slot in the store"""
+    sec = secs[i]
+    if sec[1] == SHT_PROGBITS:
+        return bytes(elf[sec[4] : sec[4] + sec[5]])
+    if i == res_i and sec[5]:
+        _, foff = holder(sym("_tab5_res_lma"))
+        return bytes(elf[foff : foff + sec[5]])
+    return None
+
+
 if stored:
     open(elf_path, "wb").write(elf)
     print(f"overlay_image: {stored // 1024} KB of core code stored in flash; overlay {ovl_start:#x}-{ovl_end:#x} "
@@ -207,13 +227,17 @@ if ia is not None:
         if in_ovl(w):
             problems.append(f"boot constructor {w:#x} ({', '.join(overlay_names(w))}) is in the overlay")
 
-# 2b. resident code: auipc / lui, then jalr / addi on that register within 4 instructions
+# 2b. resident code: auipc / lui, then jalr / addi / a load or store on that
+# register (within 256 bytes: the compiler hoists the lui of an address)
 hits = []  # (instruction address, target)
 for i, s in enumerate(secs):
-    if s[1] != SHT_PROGBITS or not (s[2] & SHF_EXECINSTR) or not (s[2] & SHF_ALLOC) or in_ovl(s[3]):
+    if not (s[2] & SHF_EXECINSTR) or not (s[2] & SHF_ALLOC) or in_ovl(s[3]):
+        continue
+    data = section_bytes(i)
+    if not data:
         continue
     hw = array("H")
-    hw.frombytes(bytes(elf[s[4] : s[4] + (s[5] & ~1)]))
+    hw.frombytes(data[: len(data) & ~1])
     base, n, k = s[3], len(hw), 0
     recent = {}
     while k < n - 1:
@@ -233,7 +257,7 @@ for i, s in enumerate(secs):
                 addr = base + 2 * k
                 imm = ins >> 20
                 target = (r[0] + (imm - 4096 if imm & 2048 else imm)) & 0xFFFFFFFF
-                if addr - r[1] <= 16 and ovl_start <= target < ovl_end:
+                if addr - r[1] <= 256 and ovl_start <= target < ovl_end:
                     hits.append((r[1], target))
         elif op == 0x23 or op == 0x27:  # stores: imm split
             r = recent.get((ins >> 15) & 31)
@@ -241,7 +265,7 @@ for i, s in enumerate(secs):
                 addr = base + 2 * k
                 imm = ((ins >> 25) << 5) | ((ins >> 7) & 31)
                 target = (r[0] + (imm - 4096 if imm & 2048 else imm)) & 0xFFFFFFFF
-                if addr - r[1] <= 16 and ovl_start <= target < ovl_end:
+                if addr - r[1] <= 256 and ovl_start <= target < ovl_end:
                     hits.append((r[1], target))
         k += 2
 
@@ -256,7 +280,8 @@ for f, targets in callers.items():
     name = f[2] if f else f"{at:#x}"
     what = (f"code: {name} [{file} {sec}] -> {target:#x} ({' / '.join(overlay_names(target))})"
             + (f" and {len(targets) - 1} more" if len(targets) > 1 else ""))
-    if file.endswith(CART_FILES) or file.endswith("(overlay.c.obj)"):
+    # (ext_ram_data.c: .tab5_res's end, which is where the overlay starts)
+    if file.endswith(CART_FILES) or file.endswith(("(overlay.c.obj)", "(ext_ram_data.c.obj)")):
         ok = True
     elif core is None:
         ok = False
@@ -276,11 +301,14 @@ for f, targets in callers.items():
 img = symbols.get("tab5_ext_ram_data_image")
 ext_start = symbols.get("_ext_ram_data_start", (0,))[0]
 for i, s in enumerate(secs):
-    if (s[1] == SHT_NOBITS or s[1] == 0 or s[2] & SHF_EXECINSTR or not (s[2] & SHF_ALLOC) or in_ovl(s[3])
-            or names[i] == ".flash.tab5_ovl_store"):
+    if (s[1] == 0 or not (s[2] & SHF_ALLOC) or in_ovl(s[3]) or names[i] == ".flash.tab5_ovl_store"
+            or (s[2] & SHF_EXECINSTR and not s[2] & SHF_WRITE and i != res_i)):
+        continue
+    data = section_bytes(i) if s[1] != SHT_NOBITS or i == res_i else None
+    if not data:
         continue
     words = array("I")
-    words.frombytes(bytes(elf[s[4] : s[4] + (s[5] & ~3)]))
+    words.frombytes(data[: len(data) & ~3])
     for o in [o for o, w in enumerate(words) if w in ovl_func_starts]:
         w = words[o]
         addr = s[3] + 4 * o

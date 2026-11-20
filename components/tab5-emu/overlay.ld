@@ -12,8 +12,9 @@
  * boot. Shared template code stays in flash (see the script).
  *
  * Linked bytes: the bootloader can only load an image's flash and internal
- * RAM segments, so tools/ext_ram_data_image.py copies each overlay member's
- * linked, relocated bytes into its slot of .flash.tab5_ovl_store (below,
+ * RAM segments, so tools/overlay_image.py (after linking) copies each
+ * overlay member's (and .tab5_res's) linked, relocated bytes into its slot of
+ * .flash.tab5_ovl_store (below,
  * part of the image's rodata segment, so the boot-time SHA-256 covers it) and
  * marks the member NOBITS, and checks that nothing outside a core calls into
  * the overlay.
@@ -23,6 +24,19 @@
  * section after it would get its load address moved past the members). */
 SECTIONS
 {
+  /* Code that is not a game core's but needs PSRAM's speed (LVGL and the
+   * GUI, which draw in software: from flash the launcher redraws visibly).
+   * bss_to_psram.py --psram-code renames it .tab5_res*; it is filled from its
+   * flash slot at boot (src/ext_ram_data.c, before the other constructors)
+   * and stays. */
+  .tab5_res ALIGN(128) :
+  {
+    _tab5_res_start = ABSOLUTE(.);
+    *(.tab5_res .tab5_res.*)
+    . = ALIGN(128);
+    _tab5_res_end = ABSOLUTE(.);
+  } > ext_ram_seg
+
   OVERLAY ALIGN(128) : NOCROSSREFS
   {
     .tab5_ovl.gba        { *(.tab5_ovl.gba.*)        . = ALIGN(128); }
@@ -52,6 +66,7 @@ SECTIONS
   {
     _tab5_ovl_store_start = ABSOLUTE(.);
     BYTE(0x4f)
+    . = ALIGN(16); _tab5_res_lma = ABSOLUTE(.); . += SIZEOF(.tab5_res);
     . = ALIGN(4); _tab5_ovl_ctors_gba_start = ABSOLUTE(.);
     KEEP(*(.tab5_ovl_ctors.gba .tab5_ovl_ctors.gba.*)) _tab5_ovl_ctors_gba_end = ABSOLUTE(.);
     . = ALIGN(4); _tab5_ovl_ctors_snes_start = ABSOLUTE(.);
@@ -115,4 +130,5 @@ _rodata_reserved_end = _tab5_ovl_store_end;
 /* keep [PSRAM bss start, overlay end) out of the PSRAM heap (esp_psram.c; a
  * later assignment wins, see ext_ram_data.ld) */
 _ext_ram_noinit_end = _tab5_ovl_end;
-ASSERT(_tab5_ovl_start >= _ext_ram_data_end, "the code overlay must follow .ext_ram.data in PSRAM")
+ASSERT(_tab5_res_start >= _ext_ram_data_end, ".tab5_res must follow .ext_ram.data in PSRAM")
+ASSERT(_tab5_ovl_start >= _tab5_res_end, "the code overlay must follow .tab5_res in PSRAM")
