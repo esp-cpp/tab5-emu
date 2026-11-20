@@ -99,6 +99,14 @@ void *jk_esp_malloc_site(size_t size, const void *site);
 void *jk_esp_realloc_site(void *ptr, size_t size, const void *site);
 void jk_esp_alloc_dump(int top);
 void jk_esp_alloc_release(void); ///< free the tracker table (engine shut down)
+/// The engine's largest arrays (AI actors, player infos, ...; see
+/// OpenJKDF2/src/Platform/ESP32/jk_esp_arrays.c), allocated zeroed for one
+/// engine session instead of being static: alloc before the engine starts
+/// (returns 0, with nothing allocated, when there is no memory), free once
+/// the engine and the audio task have stopped (no-op when not allocated).
+int jk_esp_arrays_alloc(void);
+void jk_esp_arrays_free(void);
+size_t jk_esp_arrays_bytes(void); ///< size of the allocated block (0: none)
 /// Log line
 void jk_esp_log(const char *fmt, ...);
 /// Set to 1 by the glue when the engine should quit at the next opportunity.

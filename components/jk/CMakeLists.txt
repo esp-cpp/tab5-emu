@@ -86,6 +86,12 @@ if(CONFIG_JK_ENGINE)
     OPENJKDF2_RELEASE_COMMIT_SHORT="esp32"
     OPENJKDF2_RELEASE_COMMIT_U=u"esp32"
     OPENJKDF2_RELEASE_COMMIT_SHORT_U=u"esp32"
+    # table sizes (Kconfig "Engine table sizes"); the engine allocates these
+    # per session (PLATFORM_SESSION_ARRAYS, Platform/ESP32/jk_esp_arrays.c)
+    SITHAI_MAX_ACTORS=${CONFIG_JK_SITHAI_MAX_ACTORS}
+    JK_ESP_FS_DIRCACHE=${CONFIG_JK_FS_DIR_CACHE_ENTRIES}
+    RDACTIVE_MAX_FACES=${CONFIG_JK_RDACTIVE_MAX_FACES}
+    RDACTIVE_MAX_SPANS=${CONFIG_JK_RDACTIVE_MAX_SPANS}
   )
   # Engine-only flags (the C++ glue in src/ keeps the project defaults)
   set(ENGINE_COMMON_FLAGS

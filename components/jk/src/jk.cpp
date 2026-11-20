@@ -955,6 +955,19 @@ bool init(const Config &config) {
   logger.info("init: game_dir='{}' internal {}x{}", config.game_dir, g_native_w, g_native_h);
 #if CONFIG_JK_ENGINE
   arena_create();
+  // The engine's largest arrays (AI actors, player infos, the port's
+  // directory cache ...) are allocated for this launch instead of being static
+  // (they would be reserved in every other game): taken first, so they sit at
+  // the start of the fresh engine heap and do not cut up what the level loads
+  // into. Freed in deinit(), once nothing runs the engine any more. Without
+  // them the launch fails: run_frame() reports the engine stopped and the
+  // cart quits (deinit() cleans up).
+  if (!jk_esp_arrays_alloc()) {
+    logger.error("not enough memory for the engine's arrays; psram free {} (largest {}), arena free {}",
+                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM), heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                 arena_free_size());
+    return false;
+  }
 #if defined(JK_ESP_FS_DEBUG)
   // bring-up benchmark: SD read throughput and float parsing speed
   {
@@ -1131,6 +1144,8 @@ void deinit() {
   }
   g_engine_task = nullptr;
   g_audio_task.reset();
+  // the engine task and the mixer are gone: nothing uses the arrays now
+  jk_esp_arrays_free();
 #endif
   Tab5Emu::get().wait_frame();
   // the presentation buffers belong to this engine run (~1.8 MB). Swapped

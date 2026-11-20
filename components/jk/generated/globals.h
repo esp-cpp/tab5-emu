@@ -1148,7 +1148,11 @@ extern int sith_bOpen MAYBE_UNUSED;
 extern int sithSurface_numAvail MAYBE_UNUSED;
 extern int sithSurface_aAvail[256+1] MAYBE_UNUSED;
 extern int sithSurface_numSurfaces MAYBE_UNUSED;
+#ifdef PLATFORM_SESSION_ARRAYS
+extern rdSurface* sithSurface_aSurfaces MAYBE_UNUSED;
+#else
 extern rdSurface sithSurface_aSurfaces[256] MAYBE_UNUSED;
+#endif
 extern int sithSurface_bOpened MAYBE_UNUSED;
 extern uint32_t  sithSurface_byte_8EE668 MAYBE_UNUSED;
 extern int sithSurface_numUnsyncedSurfaces MAYBE_UNUSED;
@@ -1531,11 +1535,19 @@ extern flex32_t sithWeapon_8BD060 MAYBE_UNUSED;
 extern int sithWeapon_8BD008[6] MAYBE_UNUSED;
 extern int sithWeapon_8BD024 MAYBE_UNUSED;
 extern int sithWeapon_senderIndex MAYBE_UNUSED;
+#ifdef PLATFORM_SESSION_ARRAYS
+extern SithPlayer* jkPlayer_playerInfos MAYBE_UNUSED;
+#else
 extern SithPlayer jkPlayer_playerInfos[JKPLAYER_NUM_INFOS] MAYBE_UNUSED;
+#endif
 extern char16_t jkPlayer_playerShortName[32] MAYBE_UNUSED;
 extern int jkPlayer_numOtherThings MAYBE_UNUSED;
 extern int jkPlayer_numThings MAYBE_UNUSED;
+#ifdef PLATFORM_SESSION_ARRAYS
+extern jkPlayerInfo* jkPlayer_otherThings MAYBE_UNUSED;
+#else
 extern jkPlayerInfo jkPlayer_otherThings[NUM_JKPLAYER_THINGS] MAYBE_UNUSED;
+#endif
 extern int  jkPlayer_bLoadingSomething MAYBE_UNUSED;
 extern int playerThingIdx MAYBE_UNUSED;
 extern uint32_t jkPlayer_maxPlayers MAYBE_UNUSED;
@@ -1567,7 +1579,11 @@ extern char jkPlayer_tipMat[32] MAYBE_UNUSED;
 extern int sithCollision_aNumSearchedSectors[4] MAYBE_UNUSED;
 extern SithCollideResult sithCollision_collisionHandlers[144] MAYBE_UNUSED;
 extern sithCollisionHitHandler_t sithCollision_aThingSurfaceCollideResults[12] MAYBE_UNUSED;
+#ifdef PLATFORM_SESSION_ARRAYS
+extern sithCollisionSearchResult* sithCollision_aCollisions MAYBE_UNUSED;
+#else
 extern sithCollisionSearchResult sithCollision_aCollisions[4] MAYBE_UNUSED;
+#endif
 extern int sithCollision_aNumStackCollisions[4] MAYBE_UNUSED;
 extern int  sithCollision_searchStackIdx MAYBE_UNUSED;
 extern sithCollisionSectorEntry sithCollision_apSearchedSectors[4] MAYBE_UNUSED;
@@ -1661,7 +1677,11 @@ extern uint16_t stdPalEffects_aPalette[256] MAYBE_UNUSED;
 extern char aFilenameStack[2560] MAYBE_UNUSED;
 extern char* apBufferStack[20] MAYBE_UNUSED;
 extern int linenumStack[20] MAYBE_UNUSED;
+#ifdef PLATFORM_SESSION_ARRAYS
+extern char* aEntryStack MAYBE_UNUSED;
+#else
 extern char aEntryStack[0x14*(STDCONF_LINEBUFFER_LEN+4)] MAYBE_UNUSED;
+#endif
 extern stdFile_t openFileStack[20] MAYBE_UNUSED;
 extern char printfBuffer[STDCONF_LINEBUFFER_LEN] MAYBE_UNUSED;
 extern int stdConffile_linenum MAYBE_UNUSED;

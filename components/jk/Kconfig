@@ -50,4 +50,48 @@ menu "Jedi Knight (OpenJKDF2)"
         int "Audio mixer sample rate"
         default 22050
 
+    menu "Engine table sizes"
+        depends on JK_ENGINE
+        comment "Allocated when Jedi Knight starts and freed when it quits"
+
+        config JK_SITHAI_MAX_ACTORS
+            int "AI actors per level (SITHAI_MAX_ACTORS)"
+            range 32 1024
+            default 128
+            help
+                Entries in the engine's AI actor table, 672 bytes each (128 =
+                84 KB). A level with more AI-driven things than this loads the
+                rest without AI (they stand still). The PC engine uses 256.
+
+        config JK_FS_DIR_CACHE_ENTRIES
+            int "Directory cache entries (JK_ESP_FS_DIRCACHE)"
+            range 16 4096
+            default 512
+            help
+                The port remembers whether each directory it probed on the SD
+                card exists, so the engine's many file lookups do not repeat
+                FatFs directory scans: 129 bytes per entry (512 = 64.5 KB).
+                When it is full, new directories are asked of the card each
+                time (slower level loads, nothing else).
+
+        config JK_RDACTIVE_MAX_FACES
+            int "Active-edge rasterizer faces (RDACTIVE_MAX_FACES)"
+            range 256 8192
+            default 1024
+            help
+                Face pool of the engine's active-edge (painter's) software
+                rasterizer, 512 bytes per face. This port draws the world with
+                the z-buffered rasterizer (RDRASTER_SW_ZBUFFER), so the pool is
+                not allocated at all; the size only matters for an engine built
+                without RDRASTER_SW_ZBUFFER.
+
+        config JK_RDACTIVE_MAX_SPANS
+            int "Active-edge rasterizer spans (RDACTIVE_MAX_SPANS)"
+            range 256 16384
+            default 2048
+            help
+                Span pool of the same rasterizer, 52 bytes per span (not
+                allocated with RDRASTER_SW_ZBUFFER, see above).
+    endmenu
+
 endmenu
