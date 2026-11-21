@@ -50,4 +50,58 @@ menu "Jedi Knight (OpenJKDF2)"
         int "Audio mixer sample rate"
         default 22050
 
+    menu "Engine table sizes"
+        depends on JK_ENGINE
+        comment "Allocated when Jedi Knight starts and freed when it quits"
+
+        config JK_SITHAI_MAX_ACTORS
+            int "AI actors per level (SITHAI_MAX_ACTORS)"
+            range 32 1024
+            default 128
+            help
+                Entries in the engine's AI actor table, 672 bytes each (128 =
+                84 KB). A level with more AI-driven things than this loads the
+                rest without AI (they stand still). The PC engine uses 256.
+
+        config JK_FS_DIR_CACHE_ENTRIES
+            int "Directory cache entries (JK_ESP_FS_DIRCACHE)"
+            range 16 4096
+            default 512
+            help
+                The port remembers whether each directory it probed on the SD
+                card exists, so the engine's many file lookups do not repeat
+                FatFs directory scans: 129 bytes per entry (512 = 64.5 KB).
+                When it is full, new directories are asked of the card each
+                time (slower level loads, nothing else).
+    endmenu
+
+    menu "Material (texture) cache"
+        depends on JK_ENGINE
+        comment "No fixed size: it grows into free memory and evicts on failure"
+
+        config JK_MATERIAL_PURGE_FREE_KB
+            int "Evict unused materials below this much free memory (KB)"
+            range 0 16384
+            default 2560
+            help
+                The engine keeps every material (texture) it has loaded until
+                an allocation fails, and then evicts down to textures used a
+                moment ago. While less than this much is free (PSRAM heap plus
+                the engine's arena), the port instead evicts, once per frame,
+                the materials unused for longer than the age below. Higher
+                keeps more memory free for the rest of the level at the cost of
+                reloading textures from the card more often; 0 turns this off
+                (eviction only on allocation failure).
+
+        config JK_MATERIAL_PURGE_AGE_FRAMES
+            int "Evict materials unused for this many frames"
+            range 1 100000
+            default 900
+            help
+                Age, in rendered frames, past which an unused material may be
+                evicted while memory is below the threshold above (900 frames
+                is a minute at 15 fps). Lower frees memory sooner but reloads
+                textures that come back into view more often.
+    endmenu
+
 endmenu

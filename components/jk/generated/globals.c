@@ -284,7 +284,11 @@ int sith_bOpen MAYBE_UNUSED = 0;
 int sithSurface_numAvail MAYBE_UNUSED = 0;
 int sithSurface_aAvail[256+1] MAYBE_UNUSED = {0};
 int sithSurface_numSurfaces MAYBE_UNUSED = 0;
+#ifdef PLATFORM_SESSION_ARRAYS // Added: allocated for each engine session
+rdSurface* sithSurface_aSurfaces MAYBE_UNUSED = NULL;
+#else
 rdSurface sithSurface_aSurfaces[256] MAYBE_UNUSED = {0};
+#endif
 int sithSurface_bOpened MAYBE_UNUSED = 0;
 uint32_t  sithSurface_byte_8EE668 MAYBE_UNUSED =  0;
 int sithSurface_numUnsyncedSurfaces MAYBE_UNUSED = 0;
@@ -669,11 +673,19 @@ flex32_t sithWeapon_8BD060 MAYBE_UNUSED = 0.0f;
 int sithWeapon_8BD008[6] MAYBE_UNUSED = {0};
 int sithWeapon_8BD024 MAYBE_UNUSED = 0;
 int sithWeapon_senderIndex MAYBE_UNUSED = 0;
+#ifdef PLATFORM_SESSION_ARRAYS // Added: allocated for each engine session
+SithPlayer* jkPlayer_playerInfos MAYBE_UNUSED = NULL;
+#else
 SithPlayer jkPlayer_playerInfos[JKPLAYER_NUM_INFOS] MAYBE_UNUSED = {0};
+#endif
 char16_t jkPlayer_playerShortName[32] MAYBE_UNUSED = {0};
 int jkPlayer_numOtherThings MAYBE_UNUSED = 0;
 int jkPlayer_numThings MAYBE_UNUSED = 0;
+#ifdef PLATFORM_SESSION_ARRAYS // Added: allocated for each engine session
+jkPlayerInfo* jkPlayer_otherThings MAYBE_UNUSED = NULL;
+#else
 jkPlayerInfo jkPlayer_otherThings[NUM_JKPLAYER_THINGS] MAYBE_UNUSED = {0};
+#endif
 int  jkPlayer_bLoadingSomething MAYBE_UNUSED =  1;
 int playerThingIdx MAYBE_UNUSED = 0;
 uint32_t jkPlayer_maxPlayers MAYBE_UNUSED = {0};
@@ -705,7 +717,11 @@ char jkPlayer_tipMat[32] MAYBE_UNUSED = {0};
 int sithCollision_aNumSearchedSectors[4] MAYBE_UNUSED = {0};
 SithCollideResult sithCollision_collisionHandlers[144] MAYBE_UNUSED = {0};
 sithCollisionHitHandler_t sithCollision_aThingSurfaceCollideResults[12] MAYBE_UNUSED = {0};
+#ifdef PLATFORM_SESSION_ARRAYS // Added: allocated for each engine session
+sithCollisionSearchResult* sithCollision_aCollisions MAYBE_UNUSED = NULL;
+#else
 sithCollisionSearchResult sithCollision_aCollisions[4] MAYBE_UNUSED = {0};
+#endif
 int sithCollision_aNumStackCollisions[4] MAYBE_UNUSED = {0};
 int  sithCollision_searchStackIdx MAYBE_UNUSED =  -1;
 sithCollisionSectorEntry sithCollision_apSearchedSectors[4] MAYBE_UNUSED = {0};
@@ -799,7 +815,11 @@ uint16_t stdPalEffects_aPalette[256] MAYBE_UNUSED = {0};
 char aFilenameStack[2560] MAYBE_UNUSED = {0};
 char* apBufferStack[20] MAYBE_UNUSED = {0};
 int linenumStack[20] MAYBE_UNUSED = {0};
+#ifdef PLATFORM_SESSION_ARRAYS // Added: allocated for each engine session
+char* aEntryStack MAYBE_UNUSED = NULL;
+#else
 char aEntryStack[0x14*(STDCONF_LINEBUFFER_LEN+4)] MAYBE_UNUSED = {0};
+#endif
 stdFile_t openFileStack[20] MAYBE_UNUSED = {0};
 char printfBuffer[STDCONF_LINEBUFFER_LEN] MAYBE_UNUSED = {0};
 int stdConffile_linenum MAYBE_UNUSED = 0;
@@ -1153,7 +1173,11 @@ sith_bOpen = 0;
 sithSurface_numAvail = 0;
 _memset_inline(&sithSurface_aAvail, 0, sizeof(sithSurface_aAvail));
 sithSurface_numSurfaces = 0;
+#ifdef PLATFORM_SESSION_ARRAYS
+if (sithSurface_aSurfaces) _memset_inline(sithSurface_aSurfaces, 0, sizeof(*sithSurface_aSurfaces) * (256));
+#else
 _memset_inline(&sithSurface_aSurfaces, 0, sizeof(sithSurface_aSurfaces));
+#endif
 sithSurface_bOpened = 0;
 uint32_t  __sithSurface_byte_8EE668_origValue =  0;
 _memcpy(&sithSurface_byte_8EE668, &__sithSurface_byte_8EE668_origValue, sizeof(sithSurface_byte_8EE668));
@@ -1565,11 +1589,19 @@ sithWeapon_8BD060 = 0.0f;
 _memset_inline(&sithWeapon_8BD008, 0, sizeof(sithWeapon_8BD008));
 sithWeapon_8BD024 = 0;
 sithWeapon_senderIndex = 0;
+#ifdef PLATFORM_SESSION_ARRAYS
+if (jkPlayer_playerInfos) _memset_inline(jkPlayer_playerInfos, 0, sizeof(*jkPlayer_playerInfos) * (JKPLAYER_NUM_INFOS));
+#else
 _memset_inline(&jkPlayer_playerInfos, 0, sizeof(jkPlayer_playerInfos));
+#endif
 _memset_inline(&jkPlayer_playerShortName, 0, sizeof(jkPlayer_playerShortName));
 jkPlayer_numOtherThings = 0;
 jkPlayer_numThings = 0;
+#ifdef PLATFORM_SESSION_ARRAYS
+if (jkPlayer_otherThings) _memset_inline(jkPlayer_otherThings, 0, sizeof(*jkPlayer_otherThings) * (NUM_JKPLAYER_THINGS));
+#else
 _memset_inline(&jkPlayer_otherThings, 0, sizeof(jkPlayer_otherThings));
+#endif
 int  __jkPlayer_bLoadingSomething_origValue =  1;
 _memcpy(&jkPlayer_bLoadingSomething, &__jkPlayer_bLoadingSomething_origValue, sizeof(jkPlayer_bLoadingSomething));
 playerThingIdx = 0;
@@ -1602,7 +1634,11 @@ _memset_inline(&jkPlayer_tipMat, 0, sizeof(jkPlayer_tipMat));
 _memset_inline(&sithCollision_aNumSearchedSectors, 0, sizeof(sithCollision_aNumSearchedSectors));
 _memset_inline(&sithCollision_collisionHandlers, 0, sizeof(sithCollision_collisionHandlers));
 _memset_inline(&sithCollision_aThingSurfaceCollideResults, 0, sizeof(sithCollision_aThingSurfaceCollideResults));
+#ifdef PLATFORM_SESSION_ARRAYS
+if (sithCollision_aCollisions) _memset_inline(sithCollision_aCollisions, 0, sizeof(*sithCollision_aCollisions) * (4));
+#else
 _memset_inline(&sithCollision_aCollisions, 0, sizeof(sithCollision_aCollisions));
+#endif
 _memset_inline(&sithCollision_aNumStackCollisions, 0, sizeof(sithCollision_aNumStackCollisions));
 int  __sithCollision_searchStackIdx_origValue =  -1;
 _memcpy(&sithCollision_searchStackIdx, &__sithCollision_searchStackIdx_origValue, sizeof(sithCollision_searchStackIdx));
@@ -1707,7 +1743,11 @@ _memset_inline(&stdPalEffects_aPalette, 0, sizeof(stdPalEffects_aPalette));
 _memset_inline(&aFilenameStack, 0, sizeof(aFilenameStack));
 _memset_inline(&apBufferStack, 0, sizeof(apBufferStack));
 _memset_inline(&linenumStack, 0, sizeof(linenumStack));
+#ifdef PLATFORM_SESSION_ARRAYS
+if (aEntryStack) _memset_inline(aEntryStack, 0, sizeof(*aEntryStack) * (0x14*(STDCONF_LINEBUFFER_LEN+4)));
+#else
 _memset_inline(&aEntryStack, 0, sizeof(aEntryStack));
+#endif
 _memset_inline(&openFileStack, 0, sizeof(openFileStack));
 _memset_inline(&printfBuffer, 0, sizeof(printfBuffer));
 stdConffile_linenum = 0;
