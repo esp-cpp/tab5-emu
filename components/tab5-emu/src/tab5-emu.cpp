@@ -46,8 +46,12 @@ bool Tab5Emu::initialize_tab5() {
     logger_.error("Failed to initialize LCD");
     return false;
   }
-  // one tenth of the screen per LVGL draw buffer (double buffered)
-  static constexpr size_t pixel_buffer_size = Bsp::display_width() * Bsp::display_height() / 10;
+  // a twentieth of the screen per LVGL draw buffer (double buffered): they stay
+  // allocated while a game runs, for the pause menu. With the launcher's
+  // backdrop in 64 px tiles (emu-ui Metrics::pattern_px) a scroll redraws in
+  // ~41 ms with these against ~37 ms with tenths, and every game keeps the
+  // other 184 KB of PSRAM.
+  static constexpr size_t pixel_buffer_size = Bsp::display_width() * Bsp::display_height() / 20;
   if (!bsp.initialize_display(pixel_buffer_size)) {
     logger_.error("Failed to initialize display");
     return false;
