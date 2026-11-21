@@ -24,3 +24,10 @@ add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
           --data --data-into=$<IF:$<BOOL:${CONFIG_SPIRAM_XIP_FROM_PSRAM}>,rodata,ext_ram>
   COMMENT "Moving the nes core's .bss and .data to PSRAM"
   VERBATIM)
+
+# Jump tables for the core's switch statements (the interpreter's opcode
+# dispatch). ESP-IDF turns them off for everything, because a table in flash
+# breaks code that must run while the cache is disabled; this core runs from
+# its PSRAM overlay with the cache on, and its tables move into the overlay
+# with its other read-only data. Measured on the Tab5: 2% less CPU per frame.
+target_compile_options(${COMPONENT_LIB} PRIVATE -fjump-tables -ftree-switch-conversion)

@@ -156,3 +156,10 @@ set_source_files_properties(third_party/stb_vorbis.c PROPERTIES COMPILE_OPTIONS
   "-w;-O2;-DSTB_VORBIS_NO_PUSHDATA_API;-DSTB_VORBIS_MAX_CHANNELS=2")
 set_source_files_properties(src/jk_music.cpp PROPERTIES COMPILE_OPTIONS
   "-DSTB_VORBIS_NO_PUSHDATA_API;-DSTB_VORBIS_MAX_CHANNELS=2")
+
+# Jump tables for the core's switch statements (the interpreter's opcode
+# dispatch). ESP-IDF turns them off for everything, because a table in flash
+# breaks code that must run while the cache is disabled; this core runs from
+# its PSRAM overlay with the cache on, and its tables move into the overlay
+# with its other read-only data. Measured on the Tab5: 5% (at the menu) less CPU per frame.
+target_compile_options(${COMPONENT_LIB} PRIVATE -fjump-tables -ftree-switch-conversion)

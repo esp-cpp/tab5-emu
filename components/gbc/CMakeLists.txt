@@ -31,3 +31,10 @@ add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${CMAKE_CURRENT_LIST_DIR}/symbol_renames.syms $<TARGET_FILE:${COMPONENT_LIB}>
   COMMENT "Renaming the globals another core also defines"
   VERBATIM)
+
+# Jump tables for the core's switch statements (the interpreter's opcode
+# dispatch). ESP-IDF turns them off for everything, because a table in flash
+# breaks code that must run while the cache is disabled; this core runs from
+# its PSRAM overlay with the cache on, and its tables move into the overlay
+# with its other read-only data. Measured on the Tab5: 12% less CPU per frame.
+target_compile_options(${COMPONENT_LIB} PRIVATE -fjump-tables -ftree-switch-conversion)

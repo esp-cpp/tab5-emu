@@ -356,6 +356,11 @@ into, and what a bad update rolls back to; with it built first, `idf.py
 flash` writes it along with the emulator. After that, updates can go over
 USB with `emulink ota` or the web console.
 
+The flash runs at 120 MHz, which needs this project's bootloader: over-USB
+updates only replace the app, so a board whose bootloader came from an older
+build (80 MHz) is flashed once with `idf.py flash`. Without a BOOT button press,
+`emulink reboot --bootloader` puts the Tab5 in its download mode for that.
+
 Don't use `--recursive`: the engines' own submodules are desktop-only
 dependencies (this is the list CI checks out).
 
