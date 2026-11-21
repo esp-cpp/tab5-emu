@@ -1151,6 +1151,9 @@ void deinit() {
   g_audio_task.reset();
   // the engine task and the mixer are gone: nothing uses the arrays now
   jk_esp_arrays_free();
+  // and the buffers it made once per process (see jk_esp.h)
+  sithCogParse_ESP32_ReleaseLexer();
+  stdSound_ESP32_Release();
 #endif
   Tab5Emu::get().wait_frame();
   // the presentation buffers belong to this engine run (~1.8 MB). Swapped
