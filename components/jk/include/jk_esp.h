@@ -107,6 +107,13 @@ void jk_esp_alloc_release(void); ///< free the tracker table (engine shut down)
 int jk_esp_arrays_alloc(void);
 void jk_esp_arrays_free(void);
 size_t jk_esp_arrays_bytes(void); ///< size of the allocated block (0: none)
+/// Buffers the engine makes once per process, freed once the engine and the
+/// audio task have stopped (the next engine run makes new ones): the COG
+/// lexer's input buffer (made by the first level load) and the mixer's chunk
+/// buffer. Kept, they stayed in the middle of the PSRAM heap after the game
+/// and split its largest free block.
+void sithCogParse_ESP32_ReleaseLexer(void);
+void stdSound_ESP32_Release(void);
 /// Log line
 void jk_esp_log(const char *fmt, ...);
 /// Set to 1 by the glue when the engine should quit at the next opportunity.
