@@ -3,10 +3,21 @@ CONFIG_IDF_TARGET="esp32p4"
 # Tab5 ships an older ESP32-P4 silicon revision (< v3); ESP-IDF >= 6.0 needs
 # this to accept it.
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-# v0.1 or later (the Tab5's is v1.3): v0.0 cannot run the flash at 80 MHz,
-# and the firmware executes from flash (see the PSRAM section below)
+# v0.1 or later (the Tab5's is v1.3): v0.0 cannot run the flash above
+# 40 MHz, and the firmware executes from flash (see the PSRAM section below)
 CONFIG_ESP32P4_REV_MIN_1=y
-CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+# Flash at 120 MHz (experimental in ESP-IDF, hence IDF_EXPERIMENTAL_FEATURES):
+# code outside the cores' PSRAM overlay runs from flash, so a cache miss there
+# costs a third less. Measured against 80 MHz with the same code: Jedi Knight
+# -17% CPU per frame, MSX / Doom / NES -4%, Genesis -3%, GBA -2%, MGS +3% fps.
+# The Tab5's flash (XMC, ID 0x464018) enters its high-performance mode by
+# changing the read dummy cycles, which needs HPM on and a bootloader that
+# knows about it (BOOTLOADER_FLASH_DC_AWARE). Over-USB updates only replace
+# the app, so this bootloader has to be flashed once over serial (idf.py
+# flash); an app built for 120 MHz on an older bootloader may not boot.
+CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPI_FLASH_HPM_ENA=y
+CONFIG_BOOTLOADER_FLASH_DC_AWARE=y
 
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
