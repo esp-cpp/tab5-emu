@@ -320,14 +320,25 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   // (W = R, S = Y ...) would reach the engine's joystick binds on top of the
   // keys themselves
   const uint16_t touch_buttons = emu.touch_gamepad_state().buttons;
-  const uint16_t usb_buttons = emu.usb_gamepad_state().buttons;
-  out->buttons = static_cast<uint16_t>(touch_buttons | usb_buttons);
+  const GamepadState usb = emu.usb_gamepad_state();
+  const GamepadDetail pad = emu.gamepad_detail();
+  out->buttons = static_cast<uint16_t>(touch_buttons | usb.buttons);
   // In play the USB gamepad's A/B/X/Y arrive as keys (below), so the engine's
   // joystick binds get them from the touch pad only. Both at once doubled each
   // action: B jumped and (B2 = duck) crouched, so its jump was lower; A also
   // fired, X also activated, Y also jumped. JK's menus still read all of them
   // (B = back), see stdControl_ReadControls.
-  out->joy_buttons = static_cast<uint16_t>(touch_buttons | (usb_buttons & ~0x000Fu));
+  // Its shoulders go to the joystick binds on their own, as bits 10 / 11 (L1 /
+  // R1: previous / next weapon), once the pad has shown it has triggers to fire
+  // with; until then they fire, as on a pad without triggers.
+  const bool cycle = pad.has_triggers;
+  out->joy_buttons = static_cast<uint16_t>(touch_buttons | (usb.buttons & ~0x3C0Fu) |
+                                           (cycle && pad.l1 ? 1u << 10 : 0u) | (cycle && pad.r1 ? 1u << 11 : 0u));
+  // its d-pad alone (the pad has a hat switch) is the joystick hat: Force powers
+  if (pad.dpad_known) {
+    out->dpad = static_cast<uint8_t>((pad.dpad_up ? 1 : 0) | (pad.dpad_down ? 2 : 0) | (pad.dpad_left ? 4 : 0) |
+                                     (pad.dpad_right ? 8 : 0));
+  }
   auto touch = emu.touchpad_data();
   out->touch_down = touch.num_touch_points > 0;
   out->touch_x = out->touch_down ? touch.x : -1;
@@ -340,19 +351,32 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   const auto kb = emu.keyboard_state();
   static_assert(sizeof(kb.keys) == sizeof(out->keys));
   memcpy(out->keys, kb.keys, sizeof(out->keys));
-  // gamepad as keyboard (the engine's default binds): left stick / d-pad =
-  // W A S D (forward, strafe, back), R = fire (ctrl), L = secondary fire (z),
-  // A = activate (space), B = jump (x), X = crouch (c), Y = use item (enter)
-  // from the USB gamepad only: the merged state also carries the keyboard's
-  // own keys (W = R shoulder, A = X ...) which would come back as extra keys
-  const GamepadState gp = emu.usb_gamepad_state();
+  // gamepad as keyboard (the engine's default binds): left stick = W A S D
+  // (forward, strafe, back; the d-pad too on a pad without a hat switch),
+  // R2 = fire (ctrl) and L2 = secondary fire (z) -- R / L on a pad without
+  // triggers --, A = activate (space), B = jump (x), X = crouch (c), Y = use
+  // item (enter). From the USB gamepad only: the merged state also carries the
+  // keyboard's own keys (W = R shoulder, A = X ...) which would come back as
+  // extra keys
+  const GamepadState &gp = usb;
   auto press = [&](int usage) { out->keys[usage >> 3] |= 1 << (usage & 7); };
-  if (gp.up) press(26);     // w
-  if (gp.down) press(22);   // s
-  if (gp.left) press(4);    // a
-  if (gp.right) press(7);   // d
-  if (gp.r) press(0xE0);    // left ctrl: fire
-  if (gp.l) press(29);      // z: secondary fire
+  if (pad.dpad_known) {
+    // the d-pad is the hat above; move with the left stick alone (with the
+    // decoder's 40% dead zone)
+    constexpr int DEAD = 32767 * 2 / 5;
+    const auto ax = emu.gamepad_axes();
+    if (ax.ly < -DEAD) press(26); // w
+    if (ax.ly > DEAD) press(22);  // s
+    if (ax.lx < -DEAD) press(4);  // a
+    if (ax.lx > DEAD) press(7);   // d
+  } else {
+    if (gp.up) press(26);    // w
+    if (gp.down) press(22);  // s
+    if (gp.left) press(4);   // a
+    if (gp.right) press(7);  // d
+  }
+  if (cycle ? gp.r2 : gp.r) press(0xE0); // left ctrl: fire
+  if (cycle ? gp.l2 : gp.l) press(29);   // z: secondary fire
   if (gp.a) press(44);      // space: activate
   if (gp.b) press(27);      // x: jump
   if (gp.x) press(6);       // c: crouch

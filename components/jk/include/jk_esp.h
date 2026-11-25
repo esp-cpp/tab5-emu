@@ -15,6 +15,9 @@ typedef struct {
   // the same for the engine's joystick binds in play: without the USB gamepad's
   // a/b/x/y, which arrive as keys (see jk_esp_read_input)
   uint16_t joy_buttons;
+  // the USB gamepad's d-pad alone, when the pad has a hat switch (bit 0 up,
+  // 1 down, 2 left, 3 right): the engine's joystick hat in play (Force powers)
+  uint8_t dpad;
   int16_t touch_x;    // logical (landscape) touch position, -1 if none
   int16_t touch_y;
   uint8_t touch_down;

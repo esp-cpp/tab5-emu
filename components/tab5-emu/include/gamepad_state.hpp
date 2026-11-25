@@ -78,3 +78,21 @@ struct GamepadAxes {
   int16_t rx{0};
   int16_t ry{0};
 };
+
+/// What GamepadState folds together, kept apart for carts that tell them
+/// apart (USB gamepads only).
+struct GamepadDetail {
+  /// The shoulder buttons alone (GamepadState::l / r are shoulder or trigger).
+  bool l1{false};
+  bool r1{false};
+  /// L2 / R2 were pressed since the pad was connected, so it has triggers
+  /// (some pads without them still declare the buttons).
+  bool has_triggers{false};
+  /// The pad has a hat switch, so dpad_* below are the d-pad alone
+  /// (GamepadState::up / down / left / right also carry the left stick).
+  bool dpad_known{false};
+  bool dpad_up{false};
+  bool dpad_down{false};
+  bool dpad_left{false};
+  bool dpad_right{false};
+};

@@ -640,13 +640,20 @@ GamepadAxes Tab5Emu::gamepad_axes() const {
   return usb_gamepad_axes_;
 }
 
-void Tab5Emu::on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes) {
+GamepadDetail Tab5Emu::gamepad_detail() const {
+  std::lock_guard<std::mutex> lk(hid_mutex_);
+  return usb_gamepad_detail_;
+}
+
+void Tab5Emu::on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes,
+                                   const GamepadDetail &detail) {
   {
     std::lock_guard<std::mutex> lk(hid_mutex_);
     press_latch_.fetch_or(static_cast<uint16_t>(state.buttons & ~usb_gamepad_.buttons),
                           std::memory_order_relaxed);
     usb_gamepad_ = state;
     usb_gamepad_axes_ = axes;
+    usb_gamepad_detail_ = detail;
   }
   if (menu) {
     menu_requested_ = true;
