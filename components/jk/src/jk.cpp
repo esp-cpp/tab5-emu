@@ -319,7 +319,15 @@ void jk_esp_read_input(jk_esp_input_t *out) {
   // touch + USB gamepad; not gamepad_state(), whose keyboard-as-gamepad keys
   // (W = R, S = Y ...) would reach the engine's joystick binds on top of the
   // keys themselves
-  out->buttons = static_cast<uint16_t>(emu.touch_gamepad_state().buttons | emu.usb_gamepad_state().buttons);
+  const uint16_t touch_buttons = emu.touch_gamepad_state().buttons;
+  const uint16_t usb_buttons = emu.usb_gamepad_state().buttons;
+  out->buttons = static_cast<uint16_t>(touch_buttons | usb_buttons);
+  // In play the USB gamepad's A/B/X/Y arrive as keys (below), so the engine's
+  // joystick binds get them from the touch pad only. Both at once doubled each
+  // action: B jumped and (B2 = duck) crouched, so its jump was lower; A also
+  // fired, X also activated, Y also jumped. JK's menus still read all of them
+  // (B = back), see stdControl_ReadControls.
+  out->joy_buttons = static_cast<uint16_t>(touch_buttons | (usb_buttons & ~0x000Fu));
   auto touch = emu.touchpad_data();
   out->touch_down = touch.num_touch_points > 0;
   out->touch_x = out->touch_down ? touch.x : -1;
