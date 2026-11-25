@@ -12,6 +12,9 @@ extern "C" {
 
 typedef struct {
   uint16_t buttons;   // GamepadState::buttons bit layout (a,b,x,y,select,start,up,down,left,right)
+  // the same for the engine's joystick binds in play: without the USB gamepad's
+  // a/b/x/y, which arrive as keys (see jk_esp_read_input)
+  uint16_t joy_buttons;
   int16_t touch_x;    // logical (landscape) touch position, -1 if none
   int16_t touch_y;
   uint8_t touch_down;
