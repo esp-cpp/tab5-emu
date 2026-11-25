@@ -223,6 +223,8 @@ public:
   bool usb_gamepad_present() const { return usb_gamepads_ > 0; }
   /// The gamepad's sticks (zeros without a gamepad)
   GamepadAxes gamepad_axes() const;
+  /// The USB gamepad's shoulder buttons and d-pad on their own (see GamepadDetail)
+  GamepadDetail gamepad_detail() const;
   /// The USB gamepad's buttons alone (gamepad_state() also merges the touch
   /// pad and the keyboard-as-gamepad keys)
   GamepadState usb_gamepad_state() const;
@@ -461,12 +463,14 @@ protected:
   std::atomic<uint16_t> press_latch_{0};
   std::atomic<uint16_t> remote_buttons_{0}; // buttons pressed since gamepad_state_latched()
   GamepadAxes usb_gamepad_axes_{};
+  GamepadDetail usb_gamepad_detail_{};
   lv_indev_t *keypad_indev_{nullptr};
   uint32_t keypad_last_key_{0};
   static void keypad_read(lv_indev_t *indev, lv_indev_data_t *data);
   void on_hid_keyboard(const espp::hid_rp::KeyboardReport &report);
   void on_hid_mouse(const espp::hid_rp::MouseReport &report);
-  void on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes = {});
+  void on_hid_gamepad_state(const GamepadState &state, bool menu, const GamepadAxes &axes = {},
+                            const GamepadDetail &detail = {});
 
   // video
   std::atomic<VideoSetting> video_setting_{VideoSetting::FIT};

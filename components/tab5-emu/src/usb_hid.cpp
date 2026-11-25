@@ -28,6 +28,16 @@ struct Tab5Emu::UsbHid {
   // its own last report and the HAL sees the union
   std::map<const espp::UsbHost::HidDevice *, espp::hid_rp::KeyboardReport> keyboard_states;
   espp::hid_rp::GamepadReport last_gamepad{}; // for the mapping log
+  // per gamepad: the fields of its d-pad (a hat switch and / or the d-pad
+  // usages; the decoder folds them and the left stick into one d-pad, and
+  // GamepadDetail keeps the d-pad apart) and whether its triggers have been
+  // pressed
+  struct PadInfo {
+    std::vector<espp::hid_rp::ReportField> dpad_fields;
+    bool dpad_updown_swapped{false};
+    bool triggers_seen{false};
+  };
+  std::map<const espp::UsbHost::HidDevice *, PadInfo> pad_infos;
   espp::hid_rp::KeyboardReport last_keyboard{};
 
   void publish_keyboard() {
@@ -75,6 +85,25 @@ struct Tab5Emu::UsbHid {
     } else if (espp::hid_rp::GamepadDecoder::looks_like_gamepad(*map)) {
       espp::hid_rp::GamepadDecoder pad(std::move(*map));
       pad.apply_quirks(info.vid, info.pid);
+      PadInfo pad_info;
+      pad_info.dpad_updown_swapped = pad.quirks().dpad_updown_swapped;
+      size_t hats = 0;
+      for (const auto &f : pad.map().fields()) {
+        if (f.usage_page != espp::hid_rp::usage::PAGE_GENERIC_DESKTOP || f.array) continue;
+        if (f.usage == espp::hid_rp::usage::GD_HAT) {
+          pad_info.dpad_fields.push_back(f);
+          hats++;
+        } else if (f.usage >= espp::hid_rp::usage::GD_DPAD_UP && f.usage <= espp::hid_rp::usage::GD_DPAD_LEFT) {
+          pad_info.dpad_fields.push_back(f);
+        }
+      }
+      logger.info("HID gamepad d-pad: {} hat switch(es), {} d-pad usage field(s){}", hats,
+                  pad_info.dpad_fields.size() - hats,
+                  pad_info.dpad_fields.empty() ? " (only as the merged direction with the left stick)" : "");
+      {
+        std::lock_guard<std::mutex> lk(mutex);
+        pad_infos[device.get()] = pad_info;
+      }
       logger.info("HID gamepad {:04x}:{:04x} '{}': {} fields, report ids {}, {} layout", info.vid, info.pid,
                   info.product, pad.map().fields().size(), pad.map().uses_report_ids() ? "yes" : "no",
                   pad.quirks().layout == espp::hid_rp::GamepadDecoder::Layout::Xbox ? "xbox-style" : "directinput");
@@ -108,6 +137,7 @@ struct Tab5Emu::UsbHid {
       }
       decoder = std::move(it->second);
       decoders.erase(it);
+      pad_infos.erase(device.get());
     }
     const char *kind = "device";
     if (std::holds_alternative<espp::hid_rp::KeyboardDecoder>(decoder)) {
@@ -198,7 +228,38 @@ struct Tab5Emu::UsbHid {
         state.left = report.left;
         state.right = report.right;
         const bool menu = report.home || (report.select && report.start);
-        emu->on_hid_gamepad_state(state, menu, GamepadAxes{report.lx, report.ly, report.rx, report.ry});
+        GamepadDetail detail{};
+        detail.l1 = report.l1;
+        detail.r1 = report.r1;
+        auto &pad_info = pad_infos[dev];
+        pad_info.triggers_seen |= report.l2 || report.r2;
+        detail.has_triggers = pad_info.triggers_seen;
+        if (!pad_info.dpad_fields.empty()) {
+          // the d-pad alone, read from its own fields as the decoder reads them
+          detail.dpad_known = true;
+          const auto split = pad->map().split(data);
+          for (const auto &f : pad_info.dpad_fields) {
+            const auto v = espp::hid_rp::ReportMap::extract(f, split.report_id, split.payload);
+            if (!v) continue;
+            if (f.usage == espp::hid_rp::usage::GD_HAT) {
+              const int32_t dir = *v - f.logical_min; // 0 = up, clockwise; out of range = centered
+              if (*v >= f.logical_min && *v <= f.logical_max && dir >= 0 && dir < 8) {
+                detail.dpad_up |= dir == 7 || dir == 0 || dir == 1;
+                detail.dpad_right |= dir >= 1 && dir <= 3;
+                detail.dpad_down |= dir >= 3 && dir <= 5;
+                detail.dpad_left |= dir >= 5;
+              }
+            } else {
+              const bool pressed = *v != 0;
+              const bool swapped = pad_info.dpad_updown_swapped;
+              if (f.usage == espp::hid_rp::usage::GD_DPAD_UP) (swapped ? detail.dpad_down : detail.dpad_up) |= pressed;
+              if (f.usage == espp::hid_rp::usage::GD_DPAD_DOWN) (swapped ? detail.dpad_up : detail.dpad_down) |= pressed;
+              if (f.usage == espp::hid_rp::usage::GD_DPAD_RIGHT) detail.dpad_right |= pressed;
+              if (f.usage == espp::hid_rp::usage::GD_DPAD_LEFT) detail.dpad_left |= pressed;
+            }
+          }
+        }
+        emu->on_hid_gamepad_state(state, menu, GamepadAxes{report.lx, report.ly, report.rx, report.ry}, detail);
       }
     }
   }
@@ -256,6 +317,7 @@ void Tab5Emu::deinitialize_usb_host() {
     mouse_.buttons = 0;
     usb_gamepad_ = GamepadState{};
     usb_gamepad_axes_ = GamepadAxes{};
+    usb_gamepad_detail_ = GamepadDetail{};
   }
   logger_.info("USB host stopped");
 }
