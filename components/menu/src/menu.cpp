@@ -103,7 +103,9 @@ void Menu::resume() {
   update_slot_display();
   view_->set_fps(get_fps());
   const auto battery = Tab5Emu::get().battery_status();
-  view_->set_battery((int)std::lround(battery.charge_percent), battery.is_charging);
+  // no battery in the bay (running from USB): "--%", not an empty battery
+  view_->set_battery(battery.is_present ? (int)std::lround(battery.charge_percent) : -1,
+                     battery.is_present && battery.is_charging);
   view_->show();
   lv_obj_invalidate(view_->screen());
   task_.periodic(16 * 1000);

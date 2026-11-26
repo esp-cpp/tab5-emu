@@ -293,7 +293,11 @@ public:
   // Battery
   /////////////////////////////////////////////////////////////////////////////
 
+  /// Battery monitoring (INA226) and charging, plus the battery task: every 2 s
+  /// it reads the battery and publishes battery_topic when what the UI shows
+  /// (the percent, charging, whether a battery is in the bay) changes.
   bool initialize_battery();
+  /// The battery's last reading, taken by the battery task (at most ~2 s old)
   Bsp::BatteryStatus battery_status() const { return Bsp::get().get_battery_status(); }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -374,6 +378,7 @@ protected:
 
   bool has_palette() const { return palette_ != nullptr; }
   bool video_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
+  bool battery_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
   bool ensure_tile_buffer();
   struct Layout {
     ppa_srm_rotation_angle_t angle;
@@ -475,6 +480,11 @@ protected:
   // video
   std::atomic<VideoSetting> video_setting_{VideoSetting::FIT};
   std::unique_ptr<espp::Task> video_task_;
+  // battery: what battery_topic last told the UI (percent -1 = no battery in
+  // the bay, -2 = nothing published yet)
+  std::unique_ptr<espp::Task> battery_task_;
+  int battery_shown_percent_{-2};
+  bool battery_shown_charging_{false};
   QueueHandle_t video_queue_{nullptr};
   SemaphoreHandle_t frame_done_{nullptr};
   ppa_client_handle_t ppa_client_{nullptr};
