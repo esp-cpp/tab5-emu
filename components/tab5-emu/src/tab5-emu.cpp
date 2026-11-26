@@ -319,7 +319,43 @@ bool Tab5Emu::initialize_battery() {
     return false;
   }
   bsp.set_charging_enabled(true);
+  // The BSP reads the INA226 only in read_battery_status(); battery_status()
+  // returns its cache. Keep that fresh and tell the launcher's status bar
+  // (battery_topic, see Gui::on_battery) when what it shows changes. A small
+  // task with its stack in PSRAM: it only does I2C reads and a publish.
+  if (!battery_task_) {
+    using namespace std::placeholders;
+    battery_task_ = espp::Task::make_unique({
+        .callback = std::bind(&Tab5Emu::battery_task_callback, this, _1, _2, _3),
+        .task_config = {.name = "battery",
+                        .stack_size_bytes = 4 * 1024,
+                        .priority = 1,
+                        .stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT},
+    });
+    battery_task_->start();
+  }
   return true;
+}
+
+bool Tab5Emu::battery_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified) {
+  const auto status = Bsp::get().read_battery_status();
+  const int percent = status.is_present ? static_cast<int>(std::lround(status.charge_percent)) : -1;
+  const bool charging = status.is_present && status.is_charging;
+  if (percent != battery_shown_percent_ || charging != battery_shown_charging_) {
+    battery_shown_percent_ = percent;
+    battery_shown_charging_ = charging;
+    if (status.is_present) {
+      logger_.info("battery: {}%{} ({:.2f} V, {:.0f} mA)", percent, charging ? ", charging" : "", status.voltage_v,
+                   status.current_ma);
+    } else {
+      logger_.info("battery: none in the bay ({:.2f} V)", status.voltage_v);
+    }
+    espp::EventManager::get().publish(battery_topic, {});
+  }
+  std::unique_lock<std::mutex> lk(m);
+  cv.wait_for(lk, std::chrono::seconds(2), [&task_notified] { return task_notified; });
+  task_notified = false;
+  return false; // keep running
 }
 
 /////////////////////////////////////////////////////////////////////////////

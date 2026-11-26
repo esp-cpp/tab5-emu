@@ -119,6 +119,12 @@ void Gui::update() {
     launcher_->refresh_settings();
     if (!drive_on) reload_rom_list();
   }
+  if (battery_dirty_.exchange(false)) {
+    const auto status = Tab5Emu::get().battery_status();
+    // no battery in the bay (running from USB): "--%", not an empty battery
+    launcher_->set_battery(status.is_present ? (int)std::lround(status.charge_percent) : -1,
+                           status.is_present && status.is_charging);
+  }
   lv_timer_handler();
 }
 
@@ -196,11 +202,7 @@ void Gui::on_volume(const std::vector<uint8_t> &) {
   launcher_->refresh_settings();
 }
 
-void Gui::on_battery(const std::vector<uint8_t> &) {
-  std::lock_guard<std::recursive_mutex> lk(mutex_);
-  const auto status = Tab5Emu::get().battery_status();
-  launcher_->set_battery((int)std::lround(status.charge_percent), status.is_charging);
-}
+void Gui::on_battery(const std::vector<uint8_t> &) { battery_dirty_ = true; }
 
 void Gui::update_rom_list() {
   std::lock_guard<std::recursive_mutex> lk(mutex_);

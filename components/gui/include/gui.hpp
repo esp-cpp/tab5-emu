@@ -122,6 +122,11 @@ protected:
   std::map<std::string, lv_draw_buf_t *> console_art_;
   std::string usb_note_;
   bool usb_drive_shown_{false};
+  // set by on_battery (the event task), applied by update() on the GUI's task:
+  // LVGL is only touched there (the pause menu runs LVGL on its own task).
+  // Starts set, so the first update() shows the battery task's last reading
+  // even if its first publish came before this Gui subscribed.
+  std::atomic<bool> battery_dirty_{true};
 
   std::string metadata_filename_;
   std::string save_dir_;
