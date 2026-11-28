@@ -854,7 +854,14 @@ void jk_esp_print_heap(void) {
 int jk_esp_internal_width(void) { return g_native_w; }
 int jk_esp_internal_height(void) { return g_native_h; }
 const char *jk_esp_game_dir(void) { return g_config.game_dir.c_str(); }
-const char *jk_esp_engine_args(void) { return CONFIG_JK_ENGINE_ARGS; }
+// The engine's command line: the build's (CONFIG_JK_ENGINE_ARGS), plus
+// -motsCompat for a Mysteries of the Sith install
+const char *jk_esp_engine_args(void) {
+  static std::string args;
+  args = CONFIG_JK_ENGINE_ARGS;
+  if (g_config.mots) args += args.empty() ? "-motsCompat" : " -motsCompat";
+  return args.c_str();
+}
 
 } // extern "C"
 
@@ -981,6 +988,12 @@ static void trace_dump_big() {}
 
 void ensure_pool() { jk_esp_pool_create(); }
 
+bool is_mots_marker(const std::string &rom_path) {
+  std::string lp = rom_path;
+  std::transform(lp.begin(), lp.end(), lp.begin(), [](unsigned char c) { return std::tolower(c); });
+  return lp.ends_with(".jkm") || lp.ends_with("jkmots.cd");
+}
+
 bool init(const Config &config) {
   trace_start();
   g_config = config;
@@ -989,7 +1002,8 @@ bool init(const Config &config) {
   g_last_w = g_last_h = 0;
   g_native_w = CONFIG_JK_INTERNAL_WIDTH;
   g_native_h = CONFIG_JK_INTERNAL_HEIGHT;
-  logger.info("init: game_dir='{}' internal {}x{}", config.game_dir, g_native_w, g_native_h);
+  logger.info("init: game_dir='{}'{} internal {}x{}", config.game_dir, config.mots ? " (Mysteries of the Sith)" : "",
+              g_native_w, g_native_h);
 #if CONFIG_JK_ENGINE
   arena_create();
   // The engine's largest arrays (AI actors, player infos, the port's

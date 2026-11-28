@@ -70,6 +70,7 @@
 | Metal Gear Solid (PlayStation) | [mgs_reversing](https://github.com/FoxdieTeam/mgs_reversing) + [psyz](https://github.com/Xeeynamo/psyz), native | ~28 fps against the game's 30 fps cap |
 | Star Wars Episode I: The Phantom Menace (PlayStation) | [tpm-decomp](https://github.com/esp-cpp/tpm-decomp), statically recompiled | ~27 fps in game, movies at their full 15 fps |
 | Star Wars: Jedi Knight – Dark Forces II (PC) | [OpenJKDF2](https://github.com/shinyquagsire23/OpenJKDF2), native | playable with sound, music and cutscenes |
+| Star Wars: Jedi Knight – Mysteries of the Sith (PC) | OpenJKDF2 (its MotS mode), native | every level loads and plays, with sound, music and cutscenes |
 | Super Nintendo | snes9x2005 | full speed |
 | Game Boy Advance | gpSP | close to full speed; heavy scenes drop a few frames |
 | Genesis / Mega Drive | gwenesis ¹ | full speed |
@@ -166,6 +167,11 @@ with the HUD composited at full resolution. Playable on hardware with
 sound, music, the full-motion cutscenes (Smacker video and audio at the
 movies' full 15 fps; Start skips), saves, and a USB keyboard and mouse or a
 gamepad. The port plan and its history are in [docs/PLAN.md](docs/PLAN.md).
+
+Its 1998 expansion, Mysteries of the Sith, runs on the same port: a
+metadata entry that points at a `jkmots.cd` marker starts the engine in
+OpenJKDF2's MotS mode (`-motsCompat`), with the expansion's SMUSH (`.SAN`)
+cutscenes. Install it in its own directory (below), not in Jedi Knight's.
 
 ## Gallery
 
@@ -297,6 +303,15 @@ runs the firmware as it comes.
                               # MUSIC folder (IMA ADPCM; the .ogg originals also
                               # play, but Vorbis decoding costs ~75% of a core)
     player/                   # saves / settings (created)
+  jkmots/                     # Mysteries of the Sith, copied from its CD's GAMEDATA/
+    jkmots.cd                 # (marker file: the engine runs in its MotS mode)
+    episode/JKM.goo JKM_KFY.goo JKM_MP.goo JKM_SABER.goo
+    resource/JKMRES.goo JK_.CD
+    resource/JKMSNDLO.goo     # from the CD's GAMEDATA/MININSTALL/
+    resource/video/*.SAN      # optional, cutscenes
+    MUSIC/1/Track2.ogg ...    # optional, the CD's audio tracks 2-14; then
+                              # tools/convert_music.py jkmots makes the .wav
+    player/                   # saves / settings (created)
   mgs/                        # Metal Gear Solid, extracted from your own US disc
     STAGE.DIR RADIO.DAT FACE.DAT ZMOVIE.STR VOX.DAT DEMO.DAT BRF.DAT
                               # (components/mgs/mgs_reversing/port/extract_disc.py)
@@ -318,10 +333,12 @@ comes from the path: `.nes` NES, `.sfc`/`.smc` SNES, `.gb`/`.gbc` Game Boy /
 Color, `.gba` Game Boy Advance, `.sms` Master System, `.gg` Game Gear,
 `.md`/`.gen` Genesis, `.rom` MSX, `.p8`/`.p8.png` PICO-8, `.wad` Doom,
 `DARK.GOB` Dark Forces, `*.scummvm` ScummVM, `jk.cd` Jedi Knight,
-`STAGE.DIR` Metal Gear Solid, `SLUS_008.84` The Phantom Menace.
+`jkmots.cd` Mysteries of the Sith, `STAGE.DIR` Metal Gear Solid,
+`SLUS_008.84` The Phantom Menace.
 
 ```csv
 jk/jk.cd, boxart/jk.jpg, Star Wars: Jedi Knight - Dark Forces II
+jkmots/jkmots.cd, boxart/jkmots.jpg, Star Wars: Jedi Knight - Mysteries of the Sith
 mgs/STAGE.DIR, boxart/mgs.jpg, Metal Gear Solid
 tpm/SLUS_008.84, boxart/tpm.jpg, Star Wars Episode I: The Phantom Menace
 startrek/startrek.scummvm, boxart/startrek.jpg, Star Trek: 25th Anniversary

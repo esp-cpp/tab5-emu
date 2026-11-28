@@ -11,7 +11,12 @@ namespace jk {
 struct Config {
   std::string game_dir; ///< directory holding episode/, resource/, player/
   std::string save_dir; ///< tab5-emu save directory (slot screenshots)
+  bool mots{false};     ///< a Mysteries of the Sith install: the engine starts with -motsCompat
 };
+
+/// Whether the metadata entry `rom_path` (the marker file in an install
+/// directory) is a Mysteries of the Sith install: "*.jkm" or "jkmots.cd".
+bool is_mots_marker(const std::string &rom_path);
 
 /// Start the engine (or the test pattern when CONFIG_JK_ENGINE is off).
 /// Allocate the engine's permanent small-object pool (2 MB of PSRAM). Called

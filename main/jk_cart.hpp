@@ -5,12 +5,14 @@
 #include "jk.hpp"
 #endif
 
-/// Cart for Star Wars: Jedi Knight - Dark Forces II, running on OpenJKDF2.
+/// Cart for Star Wars: Jedi Knight - Dark Forces II and its expansion
+/// Mysteries of the Sith, running on OpenJKDF2.
 ///
 /// The "rom" for this cart is the game's install directory on the SD card
 /// (see README): the metadata entry points at `<install>/jk.cd` (or any
 /// marker file inside the install dir); the directory containing it is used
-/// as the engine's working directory.
+/// as the engine's working directory. A `jkmots.cd` (or `*.jkm`) marker is a
+/// Mysteries of the Sith install: the engine starts in its MotS mode.
 class JkCart : public Cart {
 public:
   explicit JkCart(const Cart::Config &config)
@@ -56,7 +58,7 @@ public:
   void init() {
 #if defined(ENABLE_JK)
     auto game_dir = std::filesystem::path(get_rom_filename()).parent_path().string();
-    jk::init({.game_dir = game_dir, .save_dir = savedir_});
+    jk::init({.game_dir = game_dir, .save_dir = savedir_, .mots = jk::is_mots_marker(get_rom_filename())});
 #endif
   }
 

@@ -57,11 +57,13 @@ menu "Jedi Knight (OpenJKDF2)"
         config JK_SITHAI_MAX_ACTORS
             int "AI actors per level (SITHAI_MAX_ACTORS)"
             range 32 1024
-            default 128
+            default 256
             help
-                Entries in the engine's AI actor table, 672 bytes each (128 =
-                84 KB). A level with more AI-driven things than this loads the
-                rest without AI (they stand still). The PC engine uses 256.
+                Entries in the engine's AI actor table, 672 bytes each (256 =
+                168 KB). A level with more AI-driven things than this loads the
+                rest without AI (they stand still). The PC engine uses 256;
+                Mysteries of the Sith's Hutt palace (s2l1_palace) needs more
+                than 128.
 
         config JK_FS_DIR_CACHE_ENTRIES
             int "Directory cache entries (JK_ESP_FS_DIRCACHE)"
