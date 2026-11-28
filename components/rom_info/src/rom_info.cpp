@@ -47,7 +47,8 @@ std::vector<RomInfo> parse_metadata(const std::string &metadata_path) {
 
     Emulator platform = Emulator::UNKNOWN;
     auto lp = lower(rom_path);
-    if (endsWith(lp, ".jk") || endsWith(lp, "jk.cd") || endsWith(lp, "jk1.gob")) {
+    if (endsWith(lp, ".jk") || endsWith(lp, "jk.cd") || endsWith(lp, "jk1.gob") || endsWith(lp, ".jkm") ||
+        endsWith(lp, "jkmots.cd")) { // Jedi Knight, or (.jkm, jkmots.cd) Mysteries of the Sith
 #if defined(ENABLE_JK)
       platform = Emulator::JEDI_KNIGHT;
 #endif

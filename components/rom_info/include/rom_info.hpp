@@ -46,6 +46,9 @@ const ConsoleInfo &console_info(Console console);
 /// file name:
 ///   - "*.jk"  / "jk.cd"  / "JK1.gob" : Jedi Knight (the directory containing
 ///                                      the file is the game install dir)
+///   - "*.jkm" / "jkmots.cd"          : Jedi Knight: Mysteries of the Sith
+///                                      (likewise; the engine runs it with
+///                                      -motsCompat)
 ///   - "dark.gob" / "*.df"            : Dark Forces (the directory containing
 ///                                      the file holds the game's GOBs)
 ///   - "*.wad"                        : Doom (likewise, for the IWAD)
